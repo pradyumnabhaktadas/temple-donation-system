@@ -1,0 +1,78 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Campaigns{% endblock %}
+{% block content %}
+<h3 class="mb-3">🎯 Campaigns / Collection Categories</h3>
+
+<div class="row">
+  {% if current_user.role == 'admin' %}
+  <div class="col-md-5">
+    <div class="card card-body shadow-sm mb-3 p-4">
+      <h6 class="mb-3">New Campaign</h6>
+      <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-2">
+          <label class="form-label">Name</label>
+          <input type="text" class="form-control" name="name" required>
+        </div>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" name="is_80g" id="is80g" checked>
+          <label class="form-check-label" for="is80g">80G Eligible</label>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Target Amount (optional)</label>
+          <input type="number" class="form-control" name="target_amount">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Description</label>
+          <textarea class="form-control" name="description" rows="2"></textarea>
+        </div>
+        <button class="btn btn-gold btn-sm">Create</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+  <div class="{% if current_user.role == 'admin' %}col-md-7{% else %}col-12{% endif %}">
+    {% for c in campaigns %}
+    <div class="card card-body shadow-sm mb-3 p-3">
+      <div class="d-flex justify-content-between align-items-start">
+        <div>
+          <div class="fw-bold">{{ c.name }}</div>
+          <div class="text-muted small">{{ '80G Eligible' if c.is_80g else 'Non-80G' }}
+            {% if c.is_active %}<span class="badge bg-success ms-1">Active</span>{% else %}<span class="badge bg-secondary ms-1">Inactive</span>{% endif %}
+          </div>
+        </div>
+        <div class="text-end">
+          <div class="fw-bold">Rs. {{ c.total_collected | inr }}</div>
+          {% if c.target_amount %}<div class="text-muted small">of Rs. {{ c.target_amount | inr }} goal</div>{% endif %}
+        </div>
+      </div>
+
+      {% if c.target_amount %}
+      {% set pct = (c.total_collected / c.target_amount * 100) if c.target_amount else 0 %}
+      <div class="progress mt-2" style="height: 8px;" role="progressbar" aria-valuenow="{{ pct | round(0) }}" aria-valuemin="0" aria-valuemax="100">
+        <div class="progress-bar" style="width: {{ [pct, 100] | min }}%; background-color: var(--saffron-dark);"></div>
+      </div>
+      <div class="text-muted small mt-1">{{ pct | round(1) }}% of target</div>
+      {% endif %}
+
+      {% if current_user.role == 'admin' %}
+      <div class="d-flex gap-2 mt-3">
+        <form method="post" action="{{ url_for('admin.toggle_campaign', campaign_id=c.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-sm btn-outline-secondary">{{ 'Deactivate' if c.is_active else 'Activate' }}</button>
+        </form>
+        <a href="{{ url_for('admin.campaign_edit', campaign_id=c.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+        <form method="post" action="{{ url_for('admin.campaign_delete', campaign_id=c.id) }}"
+              onsubmit="return confirm('Delete campaign \'{{ c.name }}\'? Only possible if it has no donations recorded.');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-sm btn-outline-danger">Delete</button>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+    {% else %}
+    <p class="text-muted">No campaigns yet.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

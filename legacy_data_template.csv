@@ -1,0 +1,7 @@
+full_name,phone,email,pan,address,city,state,pincode,campaign_name,amount,payment_mode,donation_date,receipt_number
+Radha Devi,9876543210,radha.devi@example.com,ABCDE1234F,12 Temple Street,Pune,Maharashtra,411001,Annadan,5000,online,2025-08-15,
+Govind Das,9123456780,,,45 MG Road,Mumbai,Maharashtra,400001,Temple Construction,25000,bank_transfer,2025-09-02,OLD/2025-26/00042
+Krishna Prasad,,krishna.prasad@example.com,AAAPL1234C,,Nagpur,Maharashtra,440001,Deity Worship,1100,cash,2025-10-10,
+Lakshmi Iyer,9988776655,lakshmi.iyer@example.com,,7 Gandhi Nagar,Pune,Maharashtra,411002,General Donations,2500,cheque,2025-11-20,
+Ramesh Kumar,9012345678,,,,Thane,Maharashtra,400601,BACE Rent,3000,cash,2025-08-01,
+Anita Sharma,9765432109,anita.sharma@example.com,BBBPS5678D,88 Park Avenue,Pune,Maharashtra,411004,Youth Camp Registration Fees,1500,online,2025-12-05,

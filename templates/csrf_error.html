@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Session Expired{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-6">
+    <div class="card card-body shadow-sm text-center p-4">
+      <span style="font-size:2.2rem;">🔄</span>
+      <h3 class="mt-2">Please try again</h3>
+      <p class="text-muted">Your session security check failed ({{ reason }}). This usually happens if a page was left open a long time. Please go back and resubmit.</p>
+      <a class="btn btn-primary" href="javascript:history.back()">Go Back</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

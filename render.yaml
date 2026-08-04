@@ -1,0 +1,62 @@
+# Render Blueprint -- lets Render set up the web service + Postgres database
+# together from this one file, instead of clicking through the dashboard by
+# hand. In the Render dashboard: New -> Blueprint -> point it at this repo.
+#
+# Secrets and org-specific values (RAZORPAY_*, ORG_*, SMTP_*, SENTRY_DSN,
+# etc.) are deliberately left out of this file (sync: false below) so
+# nothing sensitive ends up committed to git -- fill those in once under the
+# service's Environment tab after the first deploy. See README "Deploying
+# to Render" for the full list and what each one does.
+
+services:
+  - type: web
+    name: temple-donation-system
+    runtime: python
+    plan: starter   # Free tier has no persistent disk (see disk: below) and
+                     # spins down when idle -- fine for testing, not for
+                     # real donation traffic issuing legal 80G receipts.
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -c gunicorn_config.py app:app
+    disk:
+      name: temple-data
+      # Covers both the SQLite file (if you don't switch to the Postgres
+      # database below) and generated receipt PDFs -- both live under
+      # instance/ relative to the app root.
+      mountPath: /opt/render/project/src/instance
+      sizeGB: 1
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: temple-donation-db
+          property: connectionString
+      - key: FLASK_ENV
+        value: production
+      # --- Fill these in manually in the Render dashboard (Environment tab) ---
+      - key: ORG_NAME
+        sync: false
+      - key: ORG_PAN
+        sync: false
+      - key: ORG_80G_REG_NO
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+
+databases:
+  - name: temple-donation-db
+    plan: starter
+    databaseName: temple_donations
+    user: temple_admin

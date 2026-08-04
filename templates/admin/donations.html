@@ -1,0 +1,42 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Donations{% endblock %}
+{% block content %}
+<h3 class="mb-3">🧾 Donations Log</h3>
+<form class="row g-2 mb-3">
+  <div class="col-auto">
+    <select name="campaign_id" class="form-select" onchange="this.form.submit()">
+      <option value="">All Campaigns</option>
+      {% for c in campaigns %}
+      <option value="{{ c.id }}" {% if campaign_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <select name="mode" class="form-select" onchange="this.form.submit()">
+      <option value="">All Modes</option>
+      {% for m in ['online','cash','cheque','bank_transfer'] %}
+      <option value="{{ m }}" {% if mode == m %}selected{% endif %}>{{ m.replace('_',' ').title() }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</form>
+
+<table class="table table-sm bg-white shadow-sm">
+  <thead><tr><th>Date</th><th>Donor</th><th>Campaign</th><th>Amount</th><th>Mode</th><th>Receipt</th></tr></thead>
+  <tbody>
+    {% for d in donations %}
+    <tr>
+      <td>{{ d.donation_date.strftime('%d-%b-%Y') }}</td>
+      <td><a href="{{ url_for('admin.donor_detail', donor_id=d.donor.id) }}">{{ d.donor.full_name }}</a></td>
+      <td>{{ d.campaign.name }}</td>
+      <td>Rs. {{ d.amount | inr }}</td>
+      <td>{{ d.payment_mode.replace('_',' ').title() }}</td>
+      <td><a href="{{ url_for('public.download_receipt', donation_id=d.id) }}">{{ d.receipt_number }}</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="text-muted">No donations found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% include "admin/_pagination.html" %}
+{% endblock %}

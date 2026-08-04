@@ -1,0 +1,106 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h3 class="mb-4">Collection Dashboard <small class="text-muted fs-6 fw-normal">FY {{ fy }}</small></h3>
+
+{% if form_10bd_reminder %}
+<div class="alert {{ 'alert-warning' if not form_10bd_reminder.overdue else 'alert-danger' }} d-flex justify-content-between align-items-center flex-wrap gap-2">
+  <div>
+    📋 <strong>Form 10BD reminder:</strong>
+    {% if form_10bd_reminder.overdue %}
+      The Form 10BD filing deadline for FY {{ form_10bd_reminder.filing_fy }} (31 May) has passed.
+    {% else %}
+      {{ form_10bd_reminder.days_left }} day(s) left to file Form 10BD for FY {{ form_10bd_reminder.filing_fy }} (due 31 May).
+    {% endif %}
+  </div>
+  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.export_10bd', fy=form_10bd_reminder.filing_fy) }}">Download Form 10BD data (CSV)</a>
+</div>
+{% endif %}
+
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="stat-card text-center">
+      <div class="stat-label">🪔 Today</div>
+      <div class="stat-value">Rs. {{ today_total | inr }}</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="stat-card text-center">
+      <div class="stat-label">📅 This Month</div>
+      <div class="stat-value">Rs. {{ month_total | inr }}</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="stat-card text-center">
+      <div class="stat-label">🗓️ This Financial Year</div>
+      <div class="stat-value">Rs. {{ year_total | inr }}</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="stat-card text-center">
+      <div class="stat-label">🙏 Donors / Donations</div>
+      <div class="stat-value">{{ donor_count }} / {{ donation_count }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="card card-body shadow-sm">
+      <h6 class="mb-3">📈 Monthly Trend (last 6 months)</h6>
+      <canvas id="monthlyChart" height="180"></canvas>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card card-body shadow-sm">
+      <h6 class="mb-3">🥧 Campaign-wise Collection</h6>
+      <canvas id="campaignChart" height="180"></canvas>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card card-body shadow-sm">
+      <h6 class="mb-3">💳 Payment Mode Breakdown</h6>
+      <table class="table table-sm">
+        <thead><tr><th>Mode</th><th class="text-end">Amount</th></tr></thead>
+        <tbody>
+          {% for mode, total in mode_totals %}
+          <tr><td>{{ mode.replace('_',' ').title() }}</td><td class="text-end">Rs. {{ total | inr }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card card-body shadow-sm">
+      <h6 class="mb-3">📤 Exports</h6>
+      <a class="btn btn-outline-secondary btn-sm mb-2" href="{{ url_for('admin.export_10bd') }}">Download Form 10BD data (CSV)</a><br>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin.export_collections') }}">Download all collections (CSV)</a>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script>
+const chartPalette = ['#7a1730', '#e2a33d', '#c8862a', '#a83a52', '#4c7a45', '#55101f', '#f4d9a6', '#3a0c18'];
+
+new Chart(document.getElementById('monthlyChart'), {
+  type: 'bar',
+  data: {
+    labels: {{ monthly | map(attribute='label') | list | tojson }},
+    datasets: [{ label: 'Collection (Rs.)', data: {{ monthly | map(attribute='total') | list | tojson }}, backgroundColor: '#7a1730', borderRadius: 4 }]
+  },
+  options: { plugins: { legend: { display: false } } }
+});
+
+new Chart(document.getElementById('campaignChart'), {
+  type: 'pie',
+  data: {
+    labels: {{ campaign_totals | map(attribute=0) | list | tojson }},
+    datasets: [{ data: {{ campaign_totals | map(attribute=1) | list | tojson }}, backgroundColor: chartPalette }]
+  }
+});
+</script>
+{% endblock %}

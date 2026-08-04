@@ -1,0 +1,156 @@
+import os
+from datetime import timedelta
+
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+
+
+class Config:
+    SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+    SQLALCHEMY_DATABASE_URI = os.environ.get(
+        "DATABASE_URL", f"sqlite:///{os.path.join(BASE_DIR, 'instance', 'temple.db')}"
+    )
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    # --- Razorpay ---
+    # Leave these blank to run the app in DEMO MODE: the donation form will show
+    # a "Simulate Payment Success" button instead of the real Razorpay checkout,
+    # so you can test the entire flow (donor dedup, receipts, dashboard) without
+    # a live payment. Fill these in with your real Razorpay keys to go live.
+    RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
+    RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
+    # Separate secret for the Razorpay webhook (Dashboard -> Settings ->
+    # Webhooks), NOT the same as RAZORPAY_KEY_SECRET above. This lets
+    # Razorpay call the app directly to confirm a payment succeeded, which
+    # is more reliable than only trusting the browser to call back after
+    # checkout closes (donor could close the tab, lose connectivity, etc.
+    # right after paying). API keys above are still required to create
+    # orders and launch checkout -- the webhook is an additional, reliable
+    # confirmation channel, not a replacement for them. Leave blank to run
+    # without it (the existing client-side verify-payment call is still
+    # the primary confirmation path).
+    RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
+    # NOTE: computed as a plain boolean in app.py (create_app), not as a
+    # @property here -- Flask's config.from_object() reads class attributes
+    # via getattr(Config, key), which would return the property descriptor
+    # itself (always truthy) rather than evaluating it.
+
+    # --- Temple / Org details (used on receipts & 80G text) ---
+    # Values below match the temple's actual issued receipt (ISKCON Dwarka
+    # Extension Centre, New Delhi).
+    ORG_NAME = os.environ.get("ORG_NAME", "Sri Sri Rukmini Dwarkadhish Temple")
+    # The umbrella organisation line shown as the main receipt heading.
+    ORG_PARENT_NAME = os.environ.get(
+        "ORG_PARENT_NAME", "International Society for Krishna Consciousness (ISKCON)"
+    )
+    ORG_FOUNDER_LINE = os.environ.get(
+        "ORG_FOUNDER_LINE", "Founder-Acharya: His Divine Grace A. C. Bhaktivedanta Swami Prabhupada"
+    )
+    # Short branch identifier shown next to the logo (e.g. "Dwarka Colony, New Delhi").
+    # Baked into the logo image itself now, kept here only as a fallback for
+    # the vector placeholder used when ORG_LOGO_PATH isn't found.
+    ORG_BRANCH_SHORT_NAME = os.environ.get("ORG_BRANCH_SHORT_NAME", "Dwarka Colony, New Delhi")
+    # What kind of branch this is, prefixing the address box on the receipt
+    # (e.g. "Extension Centre: ISKCON Land").
+    ORG_BRANCH_TYPE = os.environ.get("ORG_BRANCH_TYPE", "Extension Centre")
+    # Local branch address, one line per line-break -- matches the exact line
+    # breaks used in the address box on the temple's actual receipt template.
+    # The first line is appended to ORG_BRANCH_TYPE on one line; the rest are
+    # shown on their own lines below it.
+    ORG_ADDRESS = os.environ.get(
+        "ORG_ADDRESS",
+        "ISKCON Land\nSector 13, Behind Redisson Blue Hotel\nDwarka, New Delhi - 110075",
+    )
+    ORG_PAN = os.environ.get("ORG_PAN", "AAATI0017P")
+    ORG_80G_REG_NO = os.environ.get("ORG_80G_REG_NO", "AAATI0017PF20219")
+    ORG_LOGO_TEXT = os.environ.get("ORG_LOGO_TEXT", "🕉")
+    # Path (relative to the project root) to the temple's logo image, used on
+    # the receipt PDF. Leave blank to fall back to a plain vector placeholder.
+    ORG_LOGO_PATH = os.environ.get(
+        "ORG_LOGO_PATH", os.path.join(BASE_DIR, "static", "branding", "iskcon_logo_v2.png")
+    )
+    # Branch-level contact (shown in the address box on the receipt).
+    ORG_PHONE = os.environ.get("ORG_PHONE", "8527405353")
+    ORG_EMAIL = os.environ.get("ORG_EMAIL", "acct.iskcondwarka@gmail.com")
+    # Head office / registered office details -- shown only in the small-print
+    # footer, separate from the branch contact above (the real receipt uses a
+    # different phone/email for the registered office vs. the local branch).
+    ORG_HO_ADDRESS = os.environ.get("ORG_HO_ADDRESS", "Hare Krishna Land, Juhu, Mumbai - 400 049")
+    ORG_HO_PHONE = os.environ.get("ORG_HO_PHONE", "72088 46210")
+    ORG_HO_EMAIL = os.environ.get("ORG_HO_EMAIL", "info@iskconindia.org")
+    # Single line shown in the small print on receipts, e.g. "Registered under
+    # the Indian Trusts Act, 1882 | Regn. No. XXXX". Leave blank to omit.
+    ORG_REG_INFO = os.environ.get(
+        "ORG_REG_INFO", "Registered under Maharashtra Public Trust Act 1950, vide Regn. No.: F-2179 (Bom)"
+    )
+    # Closing lines on the Terms & Conditions page, matching the temple's
+    # actual receipt backside verbatim. Split on " / " for separate lines.
+    ORG_CLOSING_MESSAGE = os.environ.get(
+        "ORG_CLOSING_MESSAGE",
+        "Please chant / "
+        "HARE KRISHNA HARE KRISHNA KRISHNA KRISHNA HARE HARE / "
+        "HARE RAMA HARE RAMA RAMA RAMA HARE HARE / "
+        "and be happy.",
+    )
+
+    # Applies to both admin sessions (Flask-Login) and donor OTP-login
+    # sessions -- Flask's session lifetime is app-wide, not per-login-type.
+    PERMANENT_SESSION_LIFETIME = timedelta(hours=8)
+
+    # --- Security ---
+    # Set FLASK_ENV=production (or ENV=production) when you deploy behind
+    # HTTPS so session/CSRF cookies are marked Secure. Leave unset for local
+    # http://localhost development, or the browser will silently drop the
+    # cookies and login will appear to "not work".
+    IS_PRODUCTION = os.environ.get("FLASK_ENV") == "production" or os.environ.get("ENV") == "production"
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = "Lax"
+    SESSION_COOKIE_SECURE = IS_PRODUCTION
+    REMEMBER_COOKIE_HTTPONLY = True
+    REMEMBER_COOKIE_SECURE = IS_PRODUCTION
+
+    # No expiry on CSRF tokens -- a donor filling out the donation form
+    # shouldn't hit a stale-token error just because they took a while.
+    WTF_CSRF_TIME_LIMIT = None
+
+    # Admin login lockout
+    LOGIN_MAX_ATTEMPTS = int(os.environ.get("LOGIN_MAX_ATTEMPTS", 5))
+    LOGIN_LOCKOUT_MINUTES = int(os.environ.get("LOGIN_LOCKOUT_MINUTES", 15))
+
+    # --- Consent (DPDP Act) ---
+    # Bump this whenever the consent checkbox's wording on the donation
+    # form materially changes, so `Donation.consent_version` records which
+    # exact wording a given donor actually agreed to, not just that some
+    # version of it existed.
+    CONSENT_VERSION = os.environ.get("CONSENT_VERSION", "2026-07")
+
+    # --- Error monitoring (Sentry) ---
+    # Leave blank to run without error monitoring (the default). Set to a
+    # real Sentry DSN (Settings -> Projects -> <project> -> Client Keys) to
+    # start reporting unhandled exceptions -- see README "Error monitoring"
+    # for setup.
+    SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
+
+    # --- Receipt emailing (SMTP) ---
+    # Leave SMTP_HOST blank to run in DEMO MODE: receipts are still generated
+    # as PDFs and downloadable from the admin panel / donor portal, but no
+    # email is sent. Fill these in (Gmail works with an App Password -- see
+    # README "Emailing receipts") to email the receipt PDF to the donor
+    # automatically whenever a donation succeeds.
+    SMTP_HOST = os.environ.get("SMTP_HOST", "")
+    SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
+    SMTP_USERNAME = os.environ.get("SMTP_USERNAME", "")
+    SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+    SMTP_USE_TLS = os.environ.get("SMTP_USE_TLS", "true").strip().lower() not in ("false", "0", "no")
+    # Shown as the "From" address/name on receipt emails. Falls back to
+    # SMTP_USERNAME if left blank.
+    MAIL_FROM_ADDRESS = os.environ.get("MAIL_FROM_ADDRESS", "")
+    MAIL_FROM_NAME = os.environ.get("MAIL_FROM_NAME", "")
+
+    # --- Donor OTP login ---
+    # No SMS provider is wired up yet (see sms_utils.py) -- OTPs are shown
+    # directly on the verify page instead of texted, clearly marked "Demo
+    # Mode", so you can test the whole login flow before picking a vendor.
+    OTP_LENGTH = 6
+    OTP_EXPIRY_MINUTES = int(os.environ.get("OTP_EXPIRY_MINUTES", 10))
+    OTP_MAX_VERIFY_ATTEMPTS = int(os.environ.get("OTP_MAX_VERIFY_ATTEMPTS", 5))
+    OTP_MAX_REQUESTS_PER_HOUR = int(os.environ.get("OTP_MAX_REQUESTS_PER_HOUR", 5))

@@ -1,0 +1,299 @@
+/* =========================================================
+   Temple Donation System — theme
+   Warm maroon / saffron / gold palette, serif headings.
+   Overrides Bootstrap 5.3 CSS variables so components
+   (buttons, badges, links, focus rings) pick the theme up
+   automatically without a Sass build step.
+   ========================================================= */
+
+:root {
+  --maroon: #7a1730;
+  --maroon-dark: #55101f;
+  --maroon-rgb: 122, 23, 48;
+  --saffron: #e2a33d;
+  --saffron-dark: #c8862a;
+  --saffron-light: #f4d9a6;
+  --gold: #d4af37;
+  --cream: #fbf5ea;
+  --cream-alt: #f4e9d5;
+  --ink: #2c1c14;
+  --muted: #7a6a5c;
+
+  --bs-primary: var(--maroon);
+  --bs-primary-rgb: var(--maroon-rgb);
+  --bs-link-color: var(--maroon);
+  --bs-link-hover-color: var(--maroon-dark);
+  --bs-link-color-rgb: var(--maroon-rgb);
+  --bs-body-bg: var(--cream);
+  --bs-body-color: var(--ink);
+  --bs-body-font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --bs-border-radius: 0.65rem;
+  --bs-border-radius-sm: 0.5rem;
+  --bs-border-radius-lg: 1rem;
+}
+
+body {
+  background-color: var(--cream);
+  color: var(--ink);
+}
+
+h1, h2, h3, h4, h5, .brand-font {
+  font-family: 'Playfair Display', Georgia, serif;
+  color: var(--maroon-dark);
+}
+
+a {
+  color: var(--maroon);
+}
+a:hover {
+  color: var(--maroon-dark);
+}
+
+/* ---------- Cards ---------- */
+.card {
+  border: none;
+  border-radius: 1rem;
+  box-shadow: 0 2px 10px rgba(122, 23, 48, 0.07);
+}
+.card.shadow-sm {
+  box-shadow: 0 4px 18px rgba(122, 23, 48, 0.09) !important;
+}
+.stat-card {
+  border-radius: 1rem;
+  padding: 1.1rem 1.25rem;
+  background: linear-gradient(135deg, #ffffff 0%, var(--cream-alt) 100%);
+  border: 1px solid rgba(122, 23, 48, 0.08);
+}
+.stat-card .stat-label {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-weight: 600;
+}
+.stat-card .stat-value {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 1.7rem;
+  font-weight: 700;
+  color: var(--maroon-dark);
+}
+
+/* ---------- Buttons ---------- */
+.btn-primary {
+  --bs-btn-bg: var(--maroon);
+  --bs-btn-border-color: var(--maroon);
+  --bs-btn-hover-bg: var(--maroon-dark);
+  --bs-btn-hover-border-color: var(--maroon-dark);
+  --bs-btn-active-bg: var(--maroon-dark);
+  --bs-btn-active-border-color: var(--maroon-dark);
+  --bs-btn-focus-shadow-rgb: var(--maroon-rgb);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.btn-gold {
+  background-color: var(--saffron);
+  border-color: var(--saffron);
+  color: var(--maroon-dark);
+  font-weight: 600;
+}
+.btn-gold:hover {
+  background-color: var(--saffron-dark);
+  border-color: var(--saffron-dark);
+  color: #fff;
+}
+.btn-outline-secondary {
+  --bs-btn-color: var(--maroon);
+  --bs-btn-border-color: rgba(122, 23, 48, 0.35);
+  --bs-btn-hover-bg: var(--maroon);
+  --bs-btn-hover-border-color: var(--maroon);
+}
+
+/* ---------- Forms ---------- */
+.form-control:focus,
+.form-select:focus {
+  border-color: var(--saffron);
+  box-shadow: 0 0 0 0.2rem rgba(226, 163, 61, 0.25);
+}
+.form-label {
+  font-weight: 600;
+  color: var(--maroon-dark);
+  font-size: 0.9rem;
+}
+
+/* ---------- Badges ---------- */
+.badge.bg-success { background-color: #4c7a45 !important; }
+.badge.bg-warning { background-color: var(--saffron) !important; color: var(--ink) !important; }
+.badge.bg-danger { background-color: var(--maroon) !important; }
+
+/* ---------- Public hero header ---------- */
+.hero-banner {
+  background: linear-gradient(135deg, var(--maroon) 0%, var(--maroon-dark) 65%, #3a0c18 100%);
+  color: #fff;
+  padding: 2.75rem 1.5rem 3.25rem;
+  border-radius: 0 0 1.5rem 1.5rem;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+.hero-banner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% -10%, rgba(226,163,61,0.35), transparent 55%);
+  pointer-events: none;
+}
+.hero-banner .hero-symbol {
+  font-size: 2.4rem;
+  color: var(--saffron-light);
+  display: block;
+  margin-bottom: 0.4rem;
+}
+.hero-banner h1 {
+  color: #fff;
+  font-size: 1.9rem;
+  margin-bottom: 0.25rem;
+}
+.hero-banner p {
+  color: var(--saffron-light);
+  margin-bottom: 0;
+}
+.hero-card-offset {
+  margin-top: -2.25rem;
+  position: relative;
+  z-index: 2;
+}
+
+/* ---------- Public site footer note ---------- */
+.site-footer-note {
+  color: var(--muted);
+  font-size: 0.82rem;
+  text-align: center;
+  margin-top: 2rem;
+}
+
+/* ---------- Admin navbar ---------- */
+.admin-navbar {
+  background: linear-gradient(90deg, var(--maroon-dark) 0%, var(--maroon) 100%);
+  padding: 0.6rem 1.25rem;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+}
+.admin-navbar .navbar-brand {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 700;
+  color: #fff !important;
+  font-size: 1.2rem;
+}
+.admin-navbar .nav-link {
+  color: rgba(255,255,255,0.85) !important;
+  font-size: 0.92rem;
+  border-radius: 0.4rem;
+  padding: 0.4rem 0.7rem !important;
+  transition: background-color .15s ease, color .15s ease;
+}
+.admin-navbar .nav-link:hover {
+  background-color: rgba(255,255,255,0.12);
+  color: #fff !important;
+}
+.admin-navbar .nav-link.active {
+  background-color: var(--saffron);
+  color: var(--maroon-dark) !important;
+  font-weight: 600;
+}
+
+/* ---------- Tables ---------- */
+.table {
+  --bs-table-bg: transparent;
+}
+.table thead th {
+  color: var(--maroon-dark);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-bottom-width: 2px;
+  border-bottom-color: rgba(122,23,48,0.2);
+}
+.table.bg-white {
+  background-color: #fff !important;
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+
+/* ---------- Alerts ---------- */
+.alert-info {
+  background-color: var(--cream-alt);
+  border-color: rgba(122,23,48,0.15);
+  color: var(--maroon-dark);
+}
+.alert-warning {
+  background-color: #fdf1dc;
+  border-color: rgba(226,163,61,0.4);
+  color: #7a5310;
+}
+
+/* ---------- Donor experience refresh ---------- */
+body {
+  background: #fbf8f2;
+  min-height: 100vh;
+}
+.site-topbar {
+  background: rgba(255, 253, 248, 0.9);
+  border-bottom: 1px solid rgba(85, 16, 31, 0.1);
+  backdrop-filter: blur(12px);
+  position: relative;
+  z-index: 3;
+}
+.site-nav { min-height: 76px; }
+.site-brand { color: var(--maroon-dark); max-width: min(68vw, 430px); }
+.brand-mark {
+  display: grid; place-items: center; flex: 0 0 auto;
+  width: 39px; height: 39px; border-radius: 50%;
+  background: var(--maroon); color: #f9db9a; font-size: 1.35rem;
+  box-shadow: 0 5px 13px rgba(85,16,31,.16);
+}
+.brand-kicker { display:block; color:var(--saffron-dark); font-size:.59rem; font-weight:700; letter-spacing:.12em; line-height:1.2; }
+.site-brand .brand-font { font-size: .98rem; letter-spacing: -.025em; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.site-account-link { color:var(--maroon-dark); font-size:.82rem; font-weight:700; white-space:nowrap; padding:.54rem .75rem; border:1px solid rgba(122,23,48,.15); border-radius:99px; transition:.18s ease; }
+.site-account-link:hover { background:var(--maroon); border-color:var(--maroon); color:#fff; }
+.site-main { min-height: calc(100vh - 148px); }
+
+.donation-hero {
+  position:relative; isolation:isolate; overflow:hidden; border-radius:1.5rem;
+  min-height: 318px; padding: 3.6rem 4rem; display:flex; align-items:center;
+  background: linear-gradient(118deg, #4f0b1d 0%, #79182f 55%, #a03442 100%);
+  color:#fff; box-shadow: 0 18px 38px rgba(72, 15, 29, .15);
+}
+.donation-hero:before { content:""; position:absolute; inset:0; z-index:-1; background:radial-gradient(circle at 78% 38%, rgba(239,185,88,.32), transparent 18%), radial-gradient(circle at 98% 98%, rgba(255,255,255,.1), transparent 38%); }
+.donation-hero-copy { max-width:610px; }
+.hero-eyebrow, .section-kicker { color:#edc56f; font-size:.67rem; letter-spacing:.14em; font-weight:700; text-transform:uppercase; margin:0 0 .7rem; }
+.donation-hero h1 { color:#fff; margin:0; max-width:565px; font-size:clamp(2.75rem,5vw,4.2rem); line-height:.98; letter-spacing:-.06em; }
+.donation-hero h1 em { color:#f5ca75; font-style:italic; }
+.hero-lede { max-width:505px; margin:1.15rem 0 1.45rem; color:#f6dcb0; font-size:1.02rem; line-height:1.6; }
+.hero-trust-row { display:flex; gap:1.35rem; flex-wrap:wrap; color:#f7e8ce; font-size:.76rem; }
+.hero-trust-row span { display:flex; gap:.35rem; align-items:center; }.hero-trust-row b { color:#f6ca70; font-size:.85rem; }
+.hero-lotus { position:absolute; right:8.5%; top:50%; transform:translateY(-50%); width:185px; height:185px; z-index:-1; }
+.lotus-glow { position:absolute; inset:23px; border-radius:50%; display:grid; place-items:center; background:rgba(249,219,154,.18); color:#ffe8b3; font-size:3.8rem; box-shadow:0 0 0 23px rgba(255,255,255,.04),0 0 0 48px rgba(255,255,255,.025); }
+.hero-lotus i { position:absolute; display:block; width:68px; height:118px; left:59px; top:31px; border-radius:100% 0 100% 0; background:linear-gradient(140deg,#f3c872,#d78a52); opacity:.92; transform-origin:50% 100%; }
+.hero-lotus i:nth-of-type(1){transform:rotate(0deg)} .hero-lotus i:nth-of-type(2){transform:rotate(90deg)} .hero-lotus i:nth-of-type(3){transform:rotate(180deg)} .hero-lotus i:nth-of-type(4){transform:rotate(270deg)}
+.donation-layout { margin-top:-2.9rem; position:relative; z-index:2; }
+.donation-card { background:#fffdfa; border:1px solid rgba(100,47,30,.11); border-radius:1.25rem; padding:2rem; box-shadow:0 18px 42px rgba(62,28,19,.13); }
+.donation-card-head { display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; padding-bottom:1.35rem; border-bottom:1px solid #eee4d6; }
+.donation-card .section-kicker, .account-intro .section-kicker { color:var(--saffron-dark); display:block; margin-bottom:.32rem; }
+.donation-card h2 { font-size:1.8rem; margin:0; letter-spacing:-.04em; }.secure-pill { color:#555e47; background:#edf1e5; border-radius:99px; padding:.42rem .68rem; font-size:.7rem; font-weight:700; white-space:nowrap; }
+.form-section { padding:1.5rem 0; border-bottom:1px solid #eee4d6; }.form-section:last-of-type { border:0; }
+.form-label { font-size:.78rem; letter-spacing:.01em; margin-bottom:.48rem; }.field-note { color:#857566; font-size:.73rem; }
+.form-select,.form-control { border-color:#dfd5c6; min-height:46px; background:#fffefa; font-size:.93rem; }.form-control::placeholder{color:#a99b8d}.form-select:hover,.form-control:hover{border-color:#bdab95}
+.amount-picker { display:grid; grid-template-columns:repeat(4,1fr); gap:.55rem; margin: .8rem 0; }.amount-option { border:1px solid #e0d7c9; color:var(--maroon-dark); background:#fff; border-radius:.58rem; padding:.58rem .35rem; font-weight:700; font-size:.85rem; transition:.18s ease; }.amount-option:hover,.amount-option.active { background:var(--maroon); border-color:var(--maroon); color:#fff; box-shadow:0 4px 9px rgba(85,16,31,.18); }
+.currency-input { position:relative; }.currency-input>span { position:absolute; top:50%; transform:translateY(-50%); left: .9rem; z-index:2; color:var(--maroon-dark); font-weight:700; }.currency-input input { padding-left:2rem; }
+.section-label { display:flex; align-items:center; gap:.55rem; color:var(--maroon-dark); font-size:.8rem; font-weight:700; margin:0 0 1rem; text-transform:uppercase; letter-spacing:.08em; }.section-label span { display:grid; place-items:center; background:var(--cream-alt); color:var(--maroon); width:23px; height:23px; border-radius:50%; font-size:.64rem; }
+.consent-box { margin:1.45rem 0 1.2rem; padding:1rem; border:1px solid #eee1d0; border-radius:.7rem; background:#fcf8f0; }.consent-box .form-check-input{margin-left:-1.5rem}.consent-box .form-check-label{line-height:1.5;color:#716455!important;}
+.donation-submit { min-height:52px; display:flex; align-items:center; justify-content:space-between; padding:0 1.15rem; border-radius:.7rem; font-size:.95rem; }.donation-submit span:last-child{font-size:1.3rem}.donation-reassurance{text-align:center;color:#867666;font-size:.71rem;margin: .85rem 0 0;}
+
+.success-card { margin-top: 4.5rem; border-top:5px solid var(--saffron); padding:2.8rem!important; }.success-symbol,.account-symbol { display:grid; place-items:center; width:54px; height:54px; margin:0 auto .8rem; background:var(--cream-alt); color:var(--maroon); border-radius:50%; font-size:1.8rem; }.success-card h3 { font-size:2rem; }.receipt-reference { display:inline-block; padding:.45rem .7rem; border-radius:.45rem; color:#756453; background:#fbf4e8; font-size:.82rem; }.success-action { display:flex; justify-content:space-between; align-items:center; width:min(100%,280px); margin:1.25rem auto .35rem; }
+.account-intro { margin-top:3.25rem; }.account-intro .account-symbol{width:48px;height:48px;font-size:1.45rem;margin-bottom:.55rem}.account-intro h3{font-size:2.15rem;letter-spacing:-.05em}.account-card{border-top:4px solid var(--saffron);}.account-card .btn-gold{min-height:47px}
+.site-footer-note { margin:0; padding:1.4rem 1rem 2rem; color:#8a7c6d; font-size:.75rem; text-align:center; }.site-footer-note span { color:var(--saffron-dark); font-size:1rem; margin-right:.3rem; }
+
+@media (max-width: 767.98px) {
+  .site-nav { min-height:67px; }.site-brand .brand-font { font-size:.79rem; }.brand-kicker { font-size:.5rem; }.brand-mark{width:34px;height:34px;font-size:1.1rem}.site-account-link{font-size:.72rem;padding:.46rem .55rem}
+  .site-main{padding-top:1rem!important}.donation-hero{border-radius:1rem;padding:2.6rem 1.5rem;min-height:360px;align-items:flex-start}.donation-hero h1{font-size:3rem}.hero-lede{font-size:.93rem;max-width:340px}.hero-trust-row{gap:.7rem;font-size:.69rem}.hero-lotus{right:-18px;bottom:-40px;top:auto;transform:none;opacity:.74}
+  .donation-layout{margin-top:-1.6rem}.donation-card{padding:1.3rem;border-radius:1rem}.donation-card-head{padding-bottom:1rem}.donation-card h2{font-size:1.55rem}.secure-pill{font-size:.61rem;padding:.35rem .48rem}.form-section{padding:1.15rem 0}.amount-picker{grid-template-columns:repeat(2,1fr)}.consent-box{margin:1.1rem 0 .9rem;padding:.8rem}.success-card{margin-top:2.2rem;padding:2rem 1.25rem!important}.account-intro{margin-top:1.7rem}
+}

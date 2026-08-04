@@ -1,0 +1,27 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Donors{% endblock %}
+{% block content %}
+<h3 class="mb-3">🙏 Donor Database</h3>
+<form class="mb-3" method="get">
+  <input type="text" name="q" value="{{ q }}" class="form-control" style="max-width:400px" placeholder="Search by name, phone, email, or PAN">
+</form>
+<table class="table table-sm table-hover bg-white shadow-sm">
+  <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>PAN</th><th class="text-end"># Donations</th><th class="text-end">Total</th></tr></thead>
+  <tbody>
+    {% for d in donors %}
+    {% set t = totals.get(d.id, (0, 0)) %}
+    <tr>
+      <td><a href="{{ url_for('admin.donor_detail', donor_id=d.id) }}">{{ d.full_name }}</a></td>
+      <td>{{ d.phone or '-' }}</td>
+      <td>{{ d.email or '-' }}</td>
+      <td>{{ d.pan or '-' }}</td>
+      <td class="text-end">{{ t[1] }}</td>
+      <td class="text-end">Rs. {{ t[0] | inr }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="text-muted">No donors found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% include "admin/_pagination.html" %}
+{% endblock %}

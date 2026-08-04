@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}My Account{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start">
+  <h3>Welcome, {{ donor.full_name }} 🙏</h3>
+  <a href="{{ url_for('donor_portal.logout') }}" class="btn btn-sm btn-outline-secondary">Logout</a>
+</div>
+
+<div class="d-flex flex-wrap gap-3 mb-4 align-items-start">
+  <div class="stat-card d-inline-block">
+    <div class="stat-label">Total Donated</div>
+    <div class="stat-value">Rs. {{ donor.total_donated | inr }}</div>
+    <div class="text-muted small mt-1">across {{ donor.donation_count }} donation(s)</div>
+  </div>
+
+  {% if available_fys %}
+  <div class="card card-body p-3">
+    <div class="small fw-bold mb-2" style="color: var(--maroon-dark);">📄 Annual Statement</div>
+    <form method="get" action="{{ url_for('donor_portal.download_statement', donor_id=donor.id) }}" class="d-flex gap-2">
+      <select name="fy" class="form-select form-select-sm">
+        {% for fy in available_fys %}
+        <option value="{{ fy }}">FY {{ fy }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn btn-sm btn-gold text-nowrap">Download</button>
+    </form>
+    <div class="text-muted small mt-1">One PDF with everything you gave that year.</div>
+  </div>
+  {% endif %}
+</div>
+
+<h6 class="mb-2">Donation History</h6>
+<table class="table table-sm bg-white shadow-sm mb-4">
+  <thead><tr><th>Date</th><th>Campaign</th><th>Amount</th><th>Receipt</th></tr></thead>
+  <tbody>
+    {% for d in donations %}
+    <tr>
+      <td>{{ d.donation_date.strftime('%d-%b-%Y') }}</td>
+      <td>{{ d.campaign.name }}</td>
+      <td>Rs. {{ d.amount | inr }}</td>
+      <td><a href="{{ url_for('public.download_receipt', donation_id=d.id) }}">Download {{ d.receipt_number }}</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4" class="text-muted">No donations yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="row justify-content-start">
+  <div class="col-lg-7">
+    <h6 class="mb-2">👤 My Details</h6>
+    <form method="post" action="{{ url_for('donor_portal.account_update') }}" class="card card-body shadow-sm p-4">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <div class="mb-3">
+        <label class="form-label">Full Name</label>
+        <input type="text" class="form-control" name="full_name" value="{{ donor.full_name }}" required>
+      </div>
+
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Phone</label>
+          <input type="tel" class="form-control" value="{{ donor.phone or '' }}" disabled>
+          <div class="form-text">To change your phone number, please contact the temple office.</div>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Email <span class="text-muted">(receipts are sent here)</span></label>
+          <input type="email" class="form-control" name="email" value="{{ donor.email or '' }}">
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">WhatsApp Number <span class="text-muted">(if different from phone)</span></label>
+        <input type="tel" class="form-control" name="whatsapp_number" value="{{ donor.whatsapp_number or '' }}">
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">PAN <span class="text-muted">(for 80G receipts)</span></label>
+        <input type="text" class="form-control" name="pan" value="{{ donor.pan or '' }}" style="text-transform:uppercase" maxlength="10"
+               pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10 characters, e.g. ABCDE1234F">
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Address</label>
+        <textarea class="form-control" name="address" rows="2">{{ donor.address or '' }}</textarea>
+      </div>
+
+      <div class="row">
+        <div class="col-md-4 mb-3"><label class="form-label">City</label><input type="text" class="form-control" name="city" value="{{ donor.city or '' }}"></div>
+        <div class="col-md-4 mb-3"><label class="form-label">State</label><input type="text" class="form-control" name="state" value="{{ donor.state or '' }}"></div>
+        <div class="col-md-4 mb-3"><label class="form-label">Pincode</label><input type="text" class="form-control" name="pincode" value="{{ donor.pincode or '' }}"></div>
+      </div>
+
+      <button class="btn btn-gold">Save Changes</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

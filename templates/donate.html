@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block title %}Donate - {{ org_name }}{% endblock %}
+{% block content %}
+<section class="donation-hero">
+  <div class="donation-hero-copy">
+    <p class="hero-eyebrow">A simple offering, a lasting service</p>
+    <h1>Share in the <em>joy</em> of seva.</h1>
+    <p class="hero-lede">Your generosity supports daily worship, community care, festivals, and a welcoming spiritual home for all.</p>
+    <div class="hero-trust-row">
+      <span><b>100%</b> secure payment</span><span><b>80G</b> options available</span><span><b>∞</b> gratitude</span>
+    </div>
+  </div>
+  <div class="hero-lotus" aria-hidden="true"><div class="lotus-glow">ॐ</div><i></i><i></i><i></i><i></i></div>
+</section>
+
+<div class="row justify-content-center donation-layout">
+  <div class="col-xl-8 col-lg-9">
+    {% if not razorpay_enabled %}
+      <div class="alert alert-warning py-2 text-center">Demo mode: live Razorpay keys are not configured, so payment will be simulated. See README to go live.</div>
+    {% endif %}
+
+    <form id="donate-form" class="donation-card">
+      <div class="donation-card-head">
+        <div><span class="section-kicker">Make an offering</span><h2>Choose your seva</h2></div>
+        <span class="secure-pill">⌁ Secure donation</span>
+      </div>
+
+      <div class="form-section">
+        <label class="form-label" for="campaign_id">Purpose / campaign</label>
+        <select class="form-select" name="campaign_id" id="campaign_id" required>
+          <optgroup label="80G Eligible Donations">
+            {% for c in campaigns if c.is_80g %}
+              <option value="{{ c.id }}">{{ c.name }}</option>
+            {% endfor %}
+          </optgroup>
+          <optgroup label="Non-80G Collections">
+            {% for c in campaigns if not c.is_80g %}
+              <option value="{{ c.id }}">{{ c.name }}</option>
+            {% endfor %}
+          </optgroup>
+        </select>
+      </div>
+
+      <div class="form-section">
+        <div class="d-flex justify-content-between align-items-center"><label class="form-label mb-0" for="amount">Your offering</label><span class="field-note">Any amount is meaningful</span></div>
+        <div class="amount-picker" aria-label="Suggested donation amounts">
+          <button type="button" class="amount-option" data-amount="501">₹501</button><button type="button" class="amount-option active" data-amount="1100">₹1,100</button><button type="button" class="amount-option" data-amount="2100">₹2,100</button><button type="button" class="amount-option" data-amount="5100">₹5,100</button>
+        </div>
+        <div class="currency-input"><span>₹</span><input type="number" min="1" step="1" class="form-control" name="amount" id="amount" value="1100" placeholder="Enter an amount" required></div>
+      </div>
+
+      <div class="form-section">
+      <div class="section-label"><span>01</span> Your details</div>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Full Name</label>
+          <input type="text" class="form-control" name="full_name" required>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Phone</label>
+          <input type="tel" class="form-control" name="phone" required>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">WhatsApp Number <span class="text-muted">(if different from phone)</span></label>
+          <input type="tel" class="form-control" name="whatsapp_number">
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Email address <span class="text-muted">(your receipt will be sent here)</span></label>
+          <input type="email" class="form-control" name="email" required>
+        </div>
+      </div>
+
+      <div class="row mb-0">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">PAN <span class="text-muted">(required for 80G receipt)</span></label>
+          <input type="text" class="form-control" name="pan" style="text-transform:uppercase" maxlength="10"
+                 pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10 characters, e.g. ABCDE1234F">
+        </div>
+      </div>
+
+      <div class="mb-0">
+        <label class="form-label">Address</label>
+        <textarea class="form-control" name="address" rows="2"></textarea>
+      </div>
+
+      <div class="row">
+        <div class="col-md-4 mb-3">
+          <label class="form-label">City</label>
+          <input type="text" class="form-control" name="city">
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label">State</label>
+          <input type="text" class="form-control" name="state">
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label">Pincode</label>
+          <input type="text" class="form-control" name="pincode">
+        </div>
+      </div>
+      </div>
+
+      <div class="consent-box form-check">
+        <input class="form-check-input" type="checkbox" name="consent" id="consent" required>
+        <label class="form-check-label small text-muted" for="consent">
+          I agree that {{ org_name }} may store my name, contact details, and PAN (if provided) to issue
+          donation receipts and, where applicable, report this donation to the Income Tax Department
+          under Section 80G (Form 10BE). This information will not be shared for any other purpose.
+        </label>
+      </div>
+
+      <button type="submit" class="btn btn-gold donation-submit w-100" id="pay-btn">
+        {% if razorpay_enabled %}<span>Continue to secure payment</span><span>→</span>{% else %}<span>Simulate payment success</span><span>→</span>{% endif %}
+      </button>
+      <p class="donation-reassurance">Your donation is handled securely. A receipt is generated after successful payment.</p>
+    </form>
+  </div>
+</div>
+
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script>
+const form = document.getElementById('donate-form');
+const razorpayEnabled = {{ razorpay_enabled | tojson }};
+const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+
+document.querySelectorAll('.amount-option').forEach((option) => {
+  option.addEventListener('click', () => {
+    document.querySelectorAll('.amount-option').forEach((item) => item.classList.remove('active'));
+    option.classList.add('active');
+    document.getElementById('amount').value = option.dataset.amount;
+  });
+});
+document.getElementById('amount').addEventListener('input', () => {
+  document.querySelectorAll('.amount-option').forEach((item) => item.classList.remove('active'));
+});
+
+form.addEventListener('submit', async function (e) {
+  e.preventDefault();
+  const btn = document.getElementById('pay-btn');
+  btn.disabled = true;
+
+  const data = Object.fromEntries(new FormData(form).entries());
+
+  const orderResp = await fetch('/api/create-order', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+    body: JSON.stringify(data),
+  });
+  const order = await orderResp.json();
+
+  if (!orderResp.ok) {
+    alert(order.error || 'Something went wrong');
+    btn.disabled = false;
+    return;
+  }
+
+  if (razorpayEnabled) {
+    const options = {
+      key: order.key_id,
+      amount: Math.round(order.amount * 100),
+      currency: 'INR',
+      name: '{{ org_name }}',
+      description: 'Donation',
+      order_id: order.order_id,
+      handler: async function (response) {
+        const verifyResp = await fetch('/api/verify-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+          body: JSON.stringify({
+            donation_id: order.donation_id,
+            razorpay_order_id: response.razorpay_order_id,
+            razorpay_payment_id: response.razorpay_payment_id,
+            razorpay_signature: response.razorpay_signature,
+          }),
+        });
+        if (verifyResp.ok) {
+          window.location.href = `/donate/success/${order.donation_id}`;
+        } else {
+          alert('Payment verification failed. Please contact the temple office.');
+        }
+      },
+      prefill: {
+        name: data.full_name,
+        email: data.email,
+        contact: data.phone,
+      },
+      theme: { color: '#7a1730' },
+    };
+    const rzp = new Razorpay(options);
+    rzp.on('payment.failed', function () { btn.disabled = false; });
+    rzp.open();
+  } else {
+    const simResp = await fetch('/api/simulate-payment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify({ donation_id: order.donation_id }),
+    });
+    if (simResp.ok) {
+      window.location.href = `/donate/success/${order.donation_id}`;
+    } else {
+      alert('Simulation failed');
+      btn.disabled = false;
+    }
+  }
+});
+</script>
+{% endblock %}

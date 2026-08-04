@@ -1,0 +1,21 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Lapsed Donors{% endblock %}
+{% block content %}
+<h3 class="mb-3">📞 Recurring Donors Who May Need Follow-Up</h3>
+<p class="text-muted">Donors who gave in each of the 3 months before last month, but not last month.</p>
+<table class="table table-sm bg-white shadow-sm">
+  <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Last Donation</th></tr></thead>
+  <tbody>
+    {% for d in donors %}
+    <tr>
+      <td><a href="{{ url_for('admin.donor_detail', donor_id=d.id) }}">{{ d.full_name }}</a></td>
+      <td>{{ d.phone or '-' }}</td>
+      <td>{{ d.email or '-' }}</td>
+      <td>{{ d.last_donation_date.strftime('%d-%b-%Y') if d.last_donation_date else '-' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4" class="text-muted">None found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

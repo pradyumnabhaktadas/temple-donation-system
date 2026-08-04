@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Verify OTP{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-5">
+    <div class="text-center account-intro mb-3">
+      <span class="account-symbol">⌁</span>
+      <span class="section-kicker">One quick step</span>
+      <h3 class="mb-0">Enter your code</h3>
+      <p class="text-muted small">We've sent a code for <strong>{{ phone }}</strong></p>
+    </div>
+    <form method="post" action="{{ url_for('donor_portal.verify_submit') }}" class="card card-body account-card shadow-sm p-4">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="phone" value="{{ phone }}">
+      <div class="mb-3">
+        <label class="form-label">One-Time Password</label>
+        <input type="text" class="form-control text-center" name="otp" inputmode="numeric" pattern="[0-9]*"
+               maxlength="6" placeholder="6-digit code" required autofocus style="letter-spacing: 0.3em; font-size:1.2rem;">
+      </div>
+      <button class="btn btn-gold w-100">Verify &amp; sign in <span class="ms-2">→</span></button>
+    </form>
+    <form method="post" action="{{ url_for('donor_portal.send_otp_route') }}" class="text-center mt-2">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="phone" value="{{ phone }}">
+      <button type="submit" class="btn btn-link btn-sm">Resend OTP</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

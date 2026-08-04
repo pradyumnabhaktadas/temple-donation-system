@@ -1,0 +1,75 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Log Offline Donation{% endblock %}
+{% block content %}
+<h3 class="mb-3">💵 Log Offline Donation (Cash / Cheque / Bank Transfer)</h3>
+<form method="post" class="card card-body shadow-sm p-4" style="max-width:600px">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="mb-3">
+    <label class="form-label">Campaign / Purpose</label>
+    <select class="form-select" name="campaign_id" required>
+      {% for c in campaigns %}
+      <option value="{{ c.id }}">{{ c.name }} {% if not c.is_80g %}(Non-80G){% endif %}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="row">
+    <div class="col-md-6 mb-3">
+      <label class="form-label">Amount (Rs.)</label>
+      <input type="number" min="1" class="form-control" name="amount" required>
+    </div>
+    <div class="col-md-6 mb-3">
+      <label class="form-label">Payment Mode</label>
+      <select class="form-select" name="payment_mode">
+        <option value="cash">Cash</option>
+        <option value="cheque">Cheque</option>
+        <option value="bank_transfer">Bank Transfer</option>
+      </select>
+    </div>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Donation Date</label>
+    <input type="date" class="form-control" name="donation_date" value="{{ today.isoformat() }}">
+  </div>
+  <div class="row">
+    <div class="col-md-6 mb-3">
+      <label class="form-label">Donor Full Name</label>
+      <input type="text" class="form-control" name="full_name" required>
+    </div>
+    <div class="col-md-6 mb-3">
+      <label class="form-label">Phone</label>
+      <input type="tel" class="form-control" name="phone">
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-md-6 mb-3">
+      <label class="form-label">WhatsApp Number <span class="text-muted">(if different from phone)</span></label>
+      <input type="tel" class="form-control" name="whatsapp_number">
+    </div>
+    <div class="col-md-6 mb-3">
+      <label class="form-label">Email</label>
+      <input type="email" class="form-control" name="email">
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-md-6 mb-3">
+      <label class="form-label">PAN</label>
+      <input type="text" class="form-control" name="pan" style="text-transform:uppercase" maxlength="10"
+             pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10 characters, e.g. ABCDE1234F">
+    </div>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Address</label>
+    <textarea class="form-control" name="address" rows="2"></textarea>
+  </div>
+  <div class="row">
+    <div class="col-md-4 mb-3"><label class="form-label">City</label><input type="text" class="form-control" name="city"></div>
+    <div class="col-md-4 mb-3"><label class="form-label">State</label><input type="text" class="form-control" name="state"></div>
+    <div class="col-md-4 mb-3"><label class="form-label">Pincode</label><input type="text" class="form-control" name="pincode"></div>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Remarks</label>
+    <input type="text" class="form-control" name="remarks">
+  </div>
+  <button type="submit" class="btn btn-gold">Save & Generate Receipt</button>
+</form>
+{% endblock %}

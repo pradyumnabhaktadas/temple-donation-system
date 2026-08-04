@@ -1,0 +1,26 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Edit Campaign{% endblock %}
+{% block content %}
+<a href="{{ url_for('admin.campaigns') }}">&larr; Back to Campaigns</a>
+<h3 class="mt-2 mb-3">✏️ Edit Campaign</h3>
+<form method="post" class="card card-body shadow-sm p-4" style="max-width:500px">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="mb-2">
+    <label class="form-label">Name</label>
+    <input type="text" class="form-control" name="name" value="{{ campaign.name }}" required>
+  </div>
+  <div class="form-check mb-2">
+    <input class="form-check-input" type="checkbox" name="is_80g" id="is80g" {% if campaign.is_80g %}checked{% endif %}>
+    <label class="form-check-label" for="is80g">80G Eligible</label>
+  </div>
+  <div class="mb-2">
+    <label class="form-label">Target Amount (optional)</label>
+    <input type="number" class="form-control" name="target_amount" value="{{ campaign.target_amount or '' }}">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Description</label>
+    <textarea class="form-control" name="description" rows="2">{{ campaign.description or '' }}</textarea>
+  </div>
+  <button class="btn btn-gold">Save Changes</button>
+</form>
+{% endblock %}

@@ -1,0 +1,12 @@
+Flask==3.0.3
+Flask-SQLAlchemy==3.1.1
+Flask-Login==0.6.3
+Flask-WTF==1.2.1
+Flask-Migrate==4.0.7
+razorpay==1.4.2
+reportlab==4.2.2
+python-dotenv==1.0.1
+pytest==8.3.3
+gunicorn==22.0.0
+sentry-sdk[flask]==2.13.0
+psycopg2-binary==2.9.9   # Postgres driver -- only used if DATABASE_URL points at Postgres (e.g. on Render)

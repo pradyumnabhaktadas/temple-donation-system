@@ -1,0 +1,118 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}{{ donor.full_name }}{% endblock %}
+{% block content %}
+<a href="{{ url_for('admin.donors') }}">&larr; Back to Donors</a>
+<div class="d-flex justify-content-between align-items-start mt-2">
+  <h3 class="mb-0">{{ donor.full_name }}</h3>
+  <a href="{{ url_for('admin.donor_edit', donor_id=donor.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+</div>
+<p class="text-muted">
+  {{ donor.phone or '-' }} &middot; {{ donor.email or '-' }} &middot; PAN: {{ donor.pan or 'Not Provided' }}<br>
+  {{ donor.address or '' }} {{ donor.city or '' }} {{ donor.state or '' }} {{ donor.pincode or '' }}
+</p>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-4">
+    <div class="stat-card text-center"><div class="stat-label">Total Donated</div><div class="stat-value" style="font-size:1.3rem;">Rs. {{ donor.total_donated | inr }}</div></div>
+  </div>
+  <div class="col-md-4">
+    <div class="stat-card text-center"><div class="stat-label"># Donations</div><div class="stat-value" style="font-size:1.3rem;">{{ donor.donation_count }}</div></div>
+  </div>
+  <div class="col-md-4">
+    <div class="stat-card text-center"><div class="stat-label">Last Donation</div><div class="stat-value" style="font-size:1.3rem;">{{ donor.last_donation_date.strftime('%d-%b-%Y') if donor.last_donation_date else '-' }}</div></div>
+  </div>
+</div>
+
+{% if available_fys %}
+<div class="card card-body shadow-sm p-3 mb-3" style="max-width:400px">
+  <div class="small fw-bold mb-2" style="color: var(--maroon-dark);">📄 Annual Statement</div>
+  <form method="get" action="{{ url_for('donor_portal.download_statement', donor_id=donor.id) }}" class="d-flex gap-2">
+    <select name="fy" class="form-select form-select-sm">
+      {% for fy in available_fys %}
+      <option value="{{ fy }}">FY {{ fy }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn btn-sm btn-outline-secondary text-nowrap">Download</button>
+  </form>
+</div>
+{% endif %}
+
+<table class="table table-sm bg-white shadow-sm">
+  <thead><tr><th>Date</th><th>Campaign</th><th>Amount</th><th>Mode</th><th>Receipt</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+    {% for d in donations %}
+    <tr>
+      <td>{{ d.donation_date.strftime('%d-%b-%Y') }}</td>
+      <td>{{ d.campaign.name }}</td>
+      <td>Rs. {{ d.amount | inr }}</td>
+      <td>{{ d.payment_mode.replace('_',' ').title() }}</td>
+      <td>
+        {% if d.status == 'success' %}
+          <a href="{{ url_for('public.download_receipt', donation_id=d.id) }}">{{ d.receipt_number }}</a>
+        {% else %}-{% endif %}
+      </td>
+      <td>
+        {% if d.status == 'success' %}<span class="badge bg-success">Success</span>
+        {% elif d.status == 'pending' %}<span class="badge bg-warning">Pending</span>
+        {% else %}<span class="badge bg-danger">Failed</span>{% endif %}
+      </td>
+      <td>
+        {% if d.razorpay_payment_id %}
+        <a href="#" data-bs-toggle="modal" data-bs-target="#paymentDetails{{ d.id }}" class="small">Payment details</a>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% for d in donations %}
+{% if d.razorpay_payment_id %}
+<div class="modal fade" id="paymentDetails{{ d.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">Payment details -- {{ d.receipt_number or ('Donation #' ~ d.id) }}</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <table class="table table-sm mb-3">
+          <tbody>
+            <tr><th class="text-muted" style="width:40%">Payment ID</th><td>{{ d.razorpay_payment_id }}</td></tr>
+            <tr><th class="text-muted">Order ID</th><td>{{ d.razorpay_order_id or '-' }}</td></tr>
+            <tr><th class="text-muted">Method</th><td>{{ (d.razorpay_method or '-').upper() }}</td></tr>
+            <tr><th class="text-muted">Reference</th><td>{{ d.razorpay_reference or '-' }}</td></tr>
+            <tr><th class="text-muted">Razorpay fee</th><td>{{ 'Rs. ' ~ (d.razorpay_fee | inr) if d.razorpay_fee is not none else '-' }}</td></tr>
+            <tr><th class="text-muted">Checkout email</th><td>{{ d.razorpay_email or '-' }}</td></tr>
+            <tr><th class="text-muted">Checkout contact</th><td>{{ d.razorpay_contact or '-' }}</td></tr>
+          </tbody>
+        </table>
+        {% if d.razorpay_raw_payload %}
+        <details>
+          <summary class="text-muted small">Full raw payload from Razorpay</summary>
+          <pre class="small bg-light p-2 mt-2" style="white-space:pre-wrap; max-height:300px; overflow:auto;">{{ d.razorpay_raw_payload }}</pre>
+        </details>
+        {% else %}
+        <p class="text-muted small mb-0">Full payload not available -- this donation was likely confirmed before the webhook was set up, or via the browser-only flow without RAZORPAY_WEBHOOK_SECRET configured.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endfor %}
+
+{% if current_user.role == 'admin' %}
+<div class="card card-body shadow-sm p-4 mt-4" style="max-width:500px">
+  <h6 class="mb-2">🔗 Merge a Duplicate Record</h6>
+  <p class="text-muted small">If this person has another donor record (e.g. from a typo'd phone number),
+    enter that record's phone or email below. All of its donations will be moved here and the duplicate removed.</p>
+  <form method="post" action="{{ url_for('admin.donor_merge', donor_id=donor.id) }}" class="d-flex gap-2"
+        onsubmit="return confirm('Merge the matching donor into {{ donor.full_name }}? This cannot be undone.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="text" name="duplicate_lookup" class="form-control" placeholder="Duplicate's phone or email" required>
+    <button class="btn btn-outline-secondary text-nowrap">Merge In</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

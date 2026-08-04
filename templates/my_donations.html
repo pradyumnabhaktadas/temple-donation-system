@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}My Account{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-5">
+    <div class="text-center account-intro mb-3">
+      <span class="account-symbol">ॐ</span>
+      <span class="section-kicker">Donor portal</span>
+      <h3 class="mb-0">Welcome back</h3>
+      <p class="visually-hidden">Donor Login</p>
+      <p class="text-muted small">Log in with your phone number to view your donation history and receipts.</p>
+    </div>
+    <form method="post" action="{{ url_for('donor_portal.send_otp_route') }}" class="card card-body account-card shadow-sm p-4">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="mb-3">
+        <label class="form-label">Phone Number</label>
+        <input type="tel" class="form-control" name="phone" placeholder="The number you donated with" required autofocus>
+      </div>
+      <button class="btn btn-gold w-100">Send secure code <span class="ms-2">→</span></button>
+    </form>
+    <p class="text-muted small mt-2 text-center">
+      Only phone numbers with a donation on record can log in. If you've never donated
+      before, <a href="{{ url_for('public.donate_form') }}">make your first donation here</a>.
+    </p>
+  </div>
+</div>
+{% endblock %}
