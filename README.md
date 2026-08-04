@@ -466,3 +466,4 @@ temple-donation-system/
 ├── templates/                                # Jinja2 templates (Bootstrap 5 + Chart.js via CDN)
 └── static/style.css                            # temple theme (maroon/saffron/gold)
 ```
+# temple-donation-system
