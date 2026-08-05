@@ -1,3 +1,26 @@
+"""The public donation flow: the form, order creation, and every path that
+can confirm a payment succeeded.
+
+Payment confirmation has three layers, from most to least reliable:
+
+  1. Webhook (razorpay_webhook) -- Razorpay's own server calls this
+     directly, entirely independent of the donor's browser. This is the
+     source of truth. Configure it under Razorpay Dashboard -> Settings ->
+     Webhooks -> https://<your-domain>/webhooks/razorpay, subscribed to
+     payment.captured.
+  2. Browser fast path (verify_payment) -- checkout.js's `handler` callback
+     posts here immediately after payment, so most donors see their
+     receipt within a second or two. Not guaranteed to fire in every
+     browser (JS context can be interrupted, some browsers restrict a
+     payment iframe's ability to call back into the page).
+  3. Client polling (donation_status) -- donate.html polls this endpoint
+     every few seconds after checkout as a fallback. It doesn't confirm
+     anything itself; it just reports whatever the webhook or fast path
+     already recorded, so the donor's tab finds out even if #2 never fires.
+
+_finalize_success() is idempotent and shared by all three, so it's safe
+for more than one of them to fire for the same donation.
+"""
 import datetime
 import hmac
 import hashlib
@@ -112,10 +135,6 @@ def create_order():
         campaign_id = int(data["campaign_id"])
         amount = float(data["amount"])
     except (KeyError, TypeError, ValueError):
-        # Missing/non-numeric campaign_id or amount -- previously this
-        # raised an unhandled ValueError straight out of int()/float(),
-        # which the donor would see as a generic server error page instead
-        # of a normal "something's wrong with your submission" message.
         return jsonify({"error": "Missing or invalid campaign/amount."}), 400
 
     campaign = Campaign.query.get_or_404(campaign_id)
@@ -138,9 +157,6 @@ def create_order():
         payment_mode="online",
         status="pending",
         recorded_by="online",
-        # Actually persist the consent this donor just gave -- previously
-        # only checked at submission time and then discarded, with no
-        # record of it afterwards.
         consent_given=True,
         consent_at=datetime.datetime.utcnow(),
         consent_version=current_app.config.get("CONSENT_VERSION"),
@@ -154,14 +170,22 @@ def create_order():
         client = razorpay.Client(
             auth=(current_app.config["RAZORPAY_KEY_ID"], current_app.config["RAZORPAY_KEY_SECRET"])
         )
-        order = client.order.create(
-            {
-                "amount": int(amount * 100),  # paise
-                "currency": "INR",
-                "receipt": f"donation_{donation.id}",
-                "notes": {"donation_id": str(donation.id), "campaign": campaign.name},
-            }
-        )
+        try:
+            order = client.order.create(
+                {
+                    "amount": int(amount * 100),  # paise
+                    "currency": "INR",
+                    "receipt": f"donation_{donation.id}",
+                    "notes": {"donation_id": str(donation.id), "campaign": campaign.name},
+                }
+            )
+        except Exception:
+            # Razorpay unreachable/misconfigured -- don't leave an orphaned
+            # pending donation behind, and show the donor a normal "try
+            # again" message instead of a crashed page.
+            db.session.rollback()
+            current_app.logger.exception("Razorpay order creation failed")
+            return jsonify({"error": "Could not start payment right now. Please try again in a moment."}), 502
         order_id = order["id"]
         donation.razorpay_order_id = order_id
 
@@ -193,12 +217,18 @@ def _send_receipt_email_background(app, donation_id, pdf_bytes):
 
 
 def _finalize_success(donation):
-    # Idempotency guard: a receipt number must be issued exactly once per
-    # donation. Without this, a double-submitted verify/simulate call (double
-    # click, browser retry, etc.) would burn a second serial number and
-    # overwrite the first receipt on a donation that already succeeded --
-    # exactly the kind of gap/duplicate that shouldn't show up in data that
-    # ultimately goes into the Form 10BD filing to the Income Tax Department.
+    """Marks a donation successful, issues its receipt number, generates
+    and stores the receipt PDF, and emails it. Called from all three
+    confirmation paths described in the module docstring above.
+
+    Idempotency guard: a receipt number must be issued exactly once per
+    donation. Without this, a double-submitted verify/simulate/webhook
+    call (double click, browser retry, webhook redelivery, etc.) would burn
+    a second serial number and overwrite the first receipt on a donation
+    that already succeeded -- exactly the kind of gap/duplicate that
+    shouldn't show up in data that ultimately goes into the Form 10BD
+    filing to the Income Tax Department.
+    """
     if donation.status == "success" and donation.receipt_number:
         return
 
@@ -213,14 +243,12 @@ def _finalize_success(donation):
     donation.receipt_pdf = pdf_bytes
     db.session.commit()
 
-    # Send the email in a background thread rather than blocking this
-    # request on it. A slow/hanging SMTP connection (Gmail has been observed
-    # taking 10-20s+ over some hosts' networks) stacking on top of PDF
-    # generation can blow past gunicorn's worker timeout (30s default),
-    # which SIGKILLs the whole worker mid-response -- not a clean 500, but
-    # the connection dropping outright while a donor is watching Razorpay
-    # redirect them back after paying. The receipt is already saved to the
-    # database at this point regardless of whether the email send succeeds.
+    # Email in a background thread rather than blocking the request on it.
+    # A slow/hanging SMTP connection stacking on top of PDF generation can
+    # blow past gunicorn's worker timeout, which kills the whole worker
+    # mid-response -- not a clean error, just the connection dropping
+    # outright. The receipt is already saved to the database at this point
+    # regardless of whether the email send succeeds.
     #
     # Synchronous under TESTING so the test suite can assert on the send
     # deterministically instead of racing a background thread.
@@ -236,6 +264,7 @@ def _finalize_success(donation):
 @bp.route("/api/verify-payment", methods=["POST"])
 @limiter.limit("30 per hour")
 def verify_payment():
+    """Browser fast path -- see module docstring, layer 2."""
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"error": "Invalid request."}), 400
@@ -251,9 +280,7 @@ def verify_payment():
 
     key_secret = current_app.config["RAZORPAY_KEY_SECRET"]
     payload = f"{data['razorpay_order_id']}|{data['razorpay_payment_id']}"
-    expected_sig = hmac.new(
-        key_secret.encode(), payload.encode(), hashlib.sha256
-    ).hexdigest()
+    expected_sig = hmac.new(key_secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
     if not hmac.compare_digest(expected_sig, data.get("razorpay_signature", "")):
         donation.status = "failed"
@@ -265,81 +292,13 @@ def verify_payment():
     return jsonify({"ok": True, "receipt_number": donation.receipt_number})
 
 
-@bp.route("/payment/callback", methods=["POST"])
-@csrf.exempt
-def payment_callback():
-    """Second, more reliable confirmation path alongside /api/verify-payment.
-
-    The JS `handler` callback above only runs if checkout.js successfully
-    calls back into the donor's own tab after payment -- this has been
-    observed to silently not fire in some browsers (notably Safari, where
-    Intelligent Tracking Prevention can block the checkout iframe's
-    postMessage back to the parent page), leaving a donation stuck on
-    "pending" forever even though Razorpay shows the payment as captured.
-
-    Razorpay Checkout supports a `callback_url` + `redirect: true` option
-    (set in donate.html) that, when present, has Razorpay's own server do a
-    real HTTP POST/redirect straight to this route instead of relying on
-    JS in the donor's tab at all -- so it works even if the tab's JS
-    context never gets the postMessage. Same signature verification as
-    /api/verify-payment; _finalize_success() is idempotent so it's safe for
-    this, /api/verify-payment, and the webhook to all fire for the same
-    donation.
-    """
-    data = request.form
-    order_id = data.get("razorpay_order_id")
-    payment_id = data.get("razorpay_payment_id")
-    signature = data.get("razorpay_signature")
-
-    donation = Donation.query.filter_by(razorpay_order_id=order_id).first() if order_id else None
-
-    if not (order_id and payment_id and signature) or donation is None:
-        flash("We couldn't confirm your payment. If money was deducted, please contact the temple office.")
-        return redirect(url_for("public.donate_form"))
-
-    key_secret = current_app.config["RAZORPAY_KEY_SECRET"]
-    payload = f"{order_id}|{payment_id}"
-    expected_sig = hmac.new(key_secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
-
-    if not hmac.compare_digest(expected_sig, signature):
-        donation.status = "failed"
-        db.session.commit()
-        flash("Payment verification failed. If money was deducted, please contact the temple office.")
-        return redirect(url_for("public.donate_form"))
-
-    donation.razorpay_payment_id = payment_id
-    try:
-        _finalize_success(donation)
-    except Exception:
-        # Payment is already verified genuine at this point (signature
-        # check above passed) -- a failure past here is something like a
-        # PDF-generation bug, not a fake payment. Don't leave the donor
-        # looking at a crashed page after money has actually moved; the
-        # webhook (if configured) will retry finalization independently,
-        # and this is loud in the server logs either way.
-        current_app.logger.exception(
-            "Failed to finalize donation %s after verified Razorpay callback", donation.id
-        )
-        flash(
-            "Your payment was received, but we hit a snag preparing your receipt. "
-            "It will appear shortly, or please contact the temple office with payment ID "
-            f"{payment_id}."
-        )
-        return redirect(url_for("public.donate_form"))
-    return redirect(url_for("public.donate_success", donation_id=donation.id))
-
-
 @bp.route("/api/donation-status/<int:donation_id>", methods=["GET"])
 @limiter.limit("60 per minute")
 def donation_status(donation_id):
-    """Polled by donate.html after checkout, as the reliable fallback to
-    the JS `handler` callback (which has been observed not firing in some
-    browsers) and to a callback_url redirect (found to get blocked before
-    leaving the checkout iframe on at least one real device). The webhook
-    finalizes donations server-to-server, independent of the browser --
-    this endpoint just lets the donor's tab find out once that's happened,
-    without needing any particular browser-mediated confirmation to work.
-    """
+    """Client polling target -- see module docstring, layer 3. Doesn't
+    confirm anything itself; just reports whatever the webhook or the
+    browser fast path has already recorded, so a donor's tab finds out
+    even when the fast path never fires."""
     donation = Donation.query.get_or_404(donation_id)
     return jsonify({"status": donation.status, "receipt_number": donation.receipt_number})
 
@@ -370,21 +329,13 @@ def simulate_payment():
 @bp.route("/webhooks/razorpay", methods=["POST"])
 @csrf.exempt
 def razorpay_webhook():
-    """Server-to-server payment confirmation, called directly by Razorpay
-    (Dashboard -> Settings -> Webhooks), independent of the browser.
-
-    /api/verify-payment above only fires if the donor's browser stays open
-    long enough to run Razorpay checkout's `handler` callback after paying.
-    This webhook is a reliable backstop: Razorpay calls it from their own
-    servers regardless of what happens to the donor's tab, so the donation
-    still gets finalized (receipt generated + emailed) even if they close
-    the browser, lose signal, or the callback JS never runs for some other
-    reason. _finalize_success() is idempotent, so it's safe for this and
-    /api/verify-payment to both fire for the same donation.
+    """Server-to-server payment confirmation -- see module docstring,
+    layer 1, the source of truth. Called directly by Razorpay (Dashboard ->
+    Settings -> Webhooks), entirely independent of the donor's browser.
 
     Verified using RAZORPAY_WEBHOOK_SECRET -- a separate secret from
-    RAZORPAY_KEY_SECRET, generated when you add the webhook in the
-    Dashboard and never sent to the browser. There's no session/cookie on a
+    RAZORPAY_KEY_SECRET, chosen when you add the webhook in the Dashboard
+    and never sent to the browser. There's no session/cookie on a
     server-to-server call, so this route is CSRF-exempt; the webhook
     signature check *is* its authentication.
     """

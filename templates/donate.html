@@ -115,159 +115,166 @@
         {% if razorpay_enabled %}<span>Continue to secure payment</span><span>→</span>{% else %}<span>Simulate payment success</span><span>→</span>{% endif %}
       </button>
       <p class="donation-reassurance">Your donation is handled securely. A receipt is generated after successful payment.</p>
+      <p class="donation-reassurance" id="status-note" style="display:none;"></p>
     </form>
   </div>
 </div>
 
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <script>
-const form = document.getElementById('donate-form');
-const razorpayEnabled = {{ razorpay_enabled | tojson }};
-const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+(function () {
+  const form = document.getElementById('donate-form');
+  const payBtn = document.getElementById('pay-btn');
+  const statusNote = document.getElementById('status-note');
+  const razorpayEnabled = {{ razorpay_enabled | tojson }};
+  const orgName = {{ org_name | tojson }};
+  const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
 
-document.querySelectorAll('.amount-option').forEach((option) => {
-  option.addEventListener('click', () => {
+  // -- Amount picker -------------------------------------------------
+  document.querySelectorAll('.amount-option').forEach((option) => {
+    option.addEventListener('click', () => {
+      document.querySelectorAll('.amount-option').forEach((item) => item.classList.remove('active'));
+      option.classList.add('active');
+      document.getElementById('amount').value = option.dataset.amount;
+    });
+  });
+  document.getElementById('amount').addEventListener('input', () => {
     document.querySelectorAll('.amount-option').forEach((item) => item.classList.remove('active'));
-    option.classList.add('active');
-    document.getElementById('amount').value = option.dataset.amount;
   });
-});
-document.getElementById('amount').addEventListener('input', () => {
-  document.querySelectorAll('.amount-option').forEach((item) => item.classList.remove('active'));
-});
 
-form.addEventListener('submit', async function (e) {
-  e.preventDefault();
-  const btn = document.getElementById('pay-btn');
-  btn.disabled = true;
-
-  const data = Object.fromEntries(new FormData(form).entries());
-
-  const orderResp = await fetch('/api/create-order', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-    body: JSON.stringify(data),
-  });
-  const order = await orderResp.json();
-
-  if (!orderResp.ok) {
-    alert(order.error || 'Something went wrong');
-    btn.disabled = false;
-    return;
+  // -- Small fetch helper ---------------------------------------------
+  async function postJSON(url, body) {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify(body),
+    });
+    let data = {};
+    try { data = await resp.json(); } catch (err) { /* non-JSON error page */ }
+    return { ok: resp.ok, data };
   }
 
-  if (razorpayEnabled) {
-    // Confirmation is decoupled from any single browser round-trip on
-    // purpose: the JS `handler` below only fires if this tab stays alive
-    // and reachable, which has been observed to silently fail in some
-    // browsers (a callback_url server redirect was also tried and found to
-    // get blocked before it left the checkout iframe on at least one real
-    // device -- browsers increasingly restrict a payment iframe's ability
-    // to navigate the parent page). So `handler` is kept as a fast path,
-    // but the real safety net is polling this donation's status on our own
-    // server, which Razorpay's webhook (server-to-server, no browser
-    // involved at all) updates independently the moment the payment is
-    // captured -- regardless of what this tab does afterward.
-    let pollTimer = null;
-    let pollAttempts = 0;
-    const statusNote = document.createElement('p');
-    statusNote.className = 'donation-reassurance';
-    statusNote.style.display = 'none';
-    statusNote.textContent = 'Confirming your payment... this can take up to a minute. Please don\'t close this page.';
-    form.appendChild(statusNote);
+  function goToReceipt(donationId) {
+    window.location.href = `/donate/success/${donationId}`;
+  }
 
-    function goToSuccess() {
-      if (pollTimer) clearInterval(pollTimer);
-      window.location.href = `/donate/success/${order.donation_id}`;
-    }
+  function showStatusNote(text) {
+    statusNote.textContent = text;
+    statusNote.style.display = '';
+  }
 
-    function startPolling(maxAttempts, quiet) {
-      if (pollTimer) clearInterval(pollTimer);
-      pollAttempts = 0;
-      statusNote.style.display = quiet ? 'none' : '';
-      pollTimer = setInterval(async () => {
-        pollAttempts += 1;
-        if (pollAttempts > maxAttempts) {
-          clearInterval(pollTimer);
-          if (!quiet) {
-            statusNote.textContent = 'Still waiting on confirmation from the payment gateway. If money was deducted, your receipt will appear in "My Donations" shortly, or contact the temple office.';
-          }
-          return;
+  // -- Payment confirmation --------------------------------------------
+  // Razorpay's checkout `handler` callback below is a fast path, but it
+  // isn't guaranteed to fire in every browser (the JS context can be
+  // interrupted, and some browsers restrict what a payment iframe can do
+  // back to the parent page). The reliable source of truth is the
+  // Razorpay webhook, which confirms payments server-to-server without
+  // involving this tab at all (see public.py). This function is the
+  // fallback/safety net: it just asks our own server whether the webhook
+  // (or the fast path) has already marked the donation successful, and
+  // redirects once it has.
+  function pollDonationStatus(donationId, { attempts, intervalMs, quiet, onGiveUp }) {
+    let count = 0;
+    if (!quiet) showStatusNote('Confirming your payment... this can take up to a minute. Please don\'t close this page.');
+    const timer = setInterval(async () => {
+      count += 1;
+      if (count > attempts) {
+        clearInterval(timer);
+        if (onGiveUp) onGiveUp();
+        return;
+      }
+      try {
+        const resp = await fetch(`/api/donation-status/${donationId}`);
+        const status = await resp.json();
+        if (status.status === 'success') {
+          clearInterval(timer);
+          goToReceipt(donationId);
         }
-        try {
-          const statusResp = await fetch(`/api/donation-status/${order.donation_id}`);
-          const status = await statusResp.json();
-          if (status.status === 'success') {
-            goToSuccess();
-          }
-        } catch (err) {
-          // Transient network hiccup -- just try again on the next tick.
-        }
-      }, 3000);
-    }
+      } catch (err) {
+        // Transient network hiccup -- just try again on the next tick.
+      }
+    }, intervalMs);
+  }
 
+  function launchRazorpayCheckout(order, donorInput) {
     const options = {
       key: order.key_id,
       amount: Math.round(order.amount * 100),
       currency: 'INR',
-      name: '{{ org_name }}',
+      name: orgName,
       description: 'Donation',
       order_id: order.order_id,
       handler: async function (response) {
-        const verifyResp = await fetch('/api/verify-payment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-          body: JSON.stringify({
-            donation_id: order.donation_id,
-            razorpay_order_id: response.razorpay_order_id,
-            razorpay_payment_id: response.razorpay_payment_id,
-            razorpay_signature: response.razorpay_signature,
-          }),
+        const { ok } = await postJSON('/api/verify-payment', {
+          donation_id: order.donation_id,
+          razorpay_order_id: response.razorpay_order_id,
+          razorpay_payment_id: response.razorpay_payment_id,
+          razorpay_signature: response.razorpay_signature,
         });
-        if (verifyResp.ok) {
-          goToSuccess();
+        if (ok) {
+          goToReceipt(order.donation_id);
         } else {
-          // Don't alert-and-stop here -- the webhook may still confirm this
-          // payment independently even if browser-side verification just
-          // failed/errored, so keep polling instead of dead-ending the donor.
-          startPolling(40, false);  // ~2 min, visible -- a real attempt happened
+          // Browser-side verification failed/errored -- the webhook may
+          // still confirm this payment independently, so keep waiting
+          // instead of dead-ending the donor with an alert.
+          pollDonationStatus(order.donation_id, {
+            attempts: 40, intervalMs: 3000, quiet: false,  // ~2 min, visible -- a real attempt happened
+            onGiveUp: () => showStatusNote(
+              'Still waiting on confirmation from the payment gateway. If money was deducted, your ' +
+              'receipt will appear in "My Donations" shortly, or contact the temple office.'
+            ),
+          });
         }
       },
       modal: {
         ondismiss: function () {
-          // Donor closed the checkout modal. Most of the time this is just
-          // a cancel and nothing further will happen -- but on the small
-          // chance a payment actually went through in the moment before
-          // they closed it, the webhook will still catch it independently.
-          // Poll quietly and briefly rather than assuming failure or
-          // nagging someone who genuinely just changed their mind.
-          btn.disabled = false;
-          startPolling(5, true);  // ~15s, silent unless it actually succeeds
+          payBtn.disabled = false;
+          // Most dismissals are a genuine cancel, but on the small chance a
+          // payment actually went through right before closing, poll
+          // briefly and quietly rather than assuming failure or nagging
+          // someone who just changed their mind.
+          pollDonationStatus(order.donation_id, { attempts: 5, intervalMs: 3000, quiet: true });
         },
       },
       prefill: {
-        name: data.full_name,
-        email: data.email,
-        contact: data.phone,
+        name: donorInput.full_name,
+        email: donorInput.email,
+        contact: donorInput.phone,
       },
       theme: { color: '#7a1730' },
     };
     const rzp = new Razorpay(options);
-    rzp.on('payment.failed', function () { btn.disabled = false; });
+    rzp.on('payment.failed', function () { payBtn.disabled = false; });
     rzp.open();
-  } else {
-    const simResp = await fetch('/api/simulate-payment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-      body: JSON.stringify({ donation_id: order.donation_id }),
-    });
-    if (simResp.ok) {
-      window.location.href = `/donate/success/${order.donation_id}`;
-    } else {
-      alert('Simulation failed');
-      btn.disabled = false;
-    }
   }
-});
+
+  // -- Form submit ------------------------------------------------------
+  form.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    payBtn.disabled = true;
+    statusNote.style.display = 'none';
+
+    const donorInput = Object.fromEntries(new FormData(form).entries());
+    const { ok, data: order } = await postJSON('/api/create-order', donorInput);
+
+    if (!ok) {
+      alert(order.error || 'Something went wrong');
+      payBtn.disabled = false;
+      return;
+    }
+
+    if (razorpayEnabled) {
+      launchRazorpayCheckout(order, donorInput);
+    } else {
+      const { ok: simOk } = await postJSON('/api/simulate-payment', { donation_id: order.donation_id });
+      if (simOk) {
+        goToReceipt(order.donation_id);
+      } else {
+        alert('Simulation failed');
+        payBtn.disabled = false;
+      }
+    }
+  });
+})();
 </script>
 {% endblock %}
