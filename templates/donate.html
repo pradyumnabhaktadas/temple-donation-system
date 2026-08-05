@@ -169,7 +169,7 @@ form.addEventListener('submit', async function (e) {
       // staying alive/reachable (some browsers, notably Safari, can block
       // the postMessage the `handler` below relies on). `handler` is kept
       // as a secondary path in case redirect is ever disabled.
-      callback_url: '{{ url_for("public.payment_callback") }}',
+      callback_url: '{{ url_for("public.payment_callback", _external=True) }}',
       redirect: true,
       handler: async function (response) {
         const verifyResp = await fetch('/api/verify-payment', {
