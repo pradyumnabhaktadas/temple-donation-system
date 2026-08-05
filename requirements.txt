@@ -1,8 +1,6 @@
-setuptools>=70   # provides pkg_resources -- razorpay's client.py imports it directly, but
-                 # Python 3.12+ venvs no longer bundle setuptools by default, so without this
-                 # explicit dependency `import razorpay` fails with ModuleNotFoundError on a
-                 # fresh install even though it worked fine wherever setuptools happened to
-                 # already be present (e.g. an older local venv).
+# provides pkg_resources, which razorpay's client.py imports directly --
+# Python 3.12+ venvs no longer bundle setuptools by default.
+setuptools>=70
 Flask==3.0.3
 Flask-SQLAlchemy==3.1.1
 Flask-Login==0.6.3
