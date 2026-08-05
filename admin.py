@@ -346,7 +346,14 @@ def manual_donation():
     campaigns = Campaign.query.filter_by(is_active=True).order_by(Campaign.name).all()
     if request.method == "POST":
         form = request.form
-        campaign = Campaign.query.get_or_404(int(form["campaign_id"]))
+
+        try:
+            campaign_id = int(form["campaign_id"])
+            amount = float(form["amount"])
+        except (KeyError, TypeError, ValueError):
+            flash("Please choose a campaign and enter a valid amount.")
+            return redirect(url_for("admin.manual_donation"))
+        campaign = Campaign.query.get_or_404(campaign_id)
 
         pan = (form.get("pan") or "").strip()
         if pan and not is_valid_pan(pan):
@@ -356,16 +363,20 @@ def manual_donation():
         donor = find_or_create_donor(form)
 
         donation_date_str = form.get("donation_date")
-        donation_date = (
-            datetime.datetime.strptime(donation_date_str, "%Y-%m-%d")
-            if donation_date_str
-            else datetime.datetime.utcnow()
-        )
+        try:
+            donation_date = (
+                datetime.datetime.strptime(donation_date_str, "%Y-%m-%d")
+                if donation_date_str
+                else datetime.datetime.utcnow()
+            )
+        except ValueError:
+            flash("That donation date doesn't look right.")
+            return redirect(url_for("admin.manual_donation"))
 
         donation = Donation(
             donor_id=donor.id,
             campaign_id=campaign.id,
-            amount=float(form["amount"]),
+            amount=amount,
             payment_mode=form.get("payment_mode", "cash"),
             status="success",
             donation_date=donation_date,
@@ -380,8 +391,10 @@ def manual_donation():
         donation.financial_year = fy
         db.session.commit()
 
-        pdf_path = generate_receipt_pdf(donation, donor, campaign, _org_cfg())
-        send_receipt_email(donation, donor, _org_cfg(), pdf_path)
+        pdf_bytes = generate_receipt_pdf(donation, donor, campaign, _org_cfg())
+        donation.receipt_pdf = pdf_bytes
+        db.session.commit()
+        send_receipt_email(donation, donor, _org_cfg(), pdf_bytes)
 
         flash(f"Donation recorded. Receipt {receipt_number} generated.")
         return redirect(url_for("admin.donor_detail", donor_id=donor.id))

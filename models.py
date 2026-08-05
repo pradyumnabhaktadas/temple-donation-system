@@ -113,6 +113,15 @@ class Donation(db.Model):
 
     receipt_number = db.Column(db.String(50), unique=True)
     financial_year = db.Column(db.String(10))
+    # The exact PDF as originally issued, stored verbatim (not regenerated
+    # on demand) so it stays byte-for-byte the receipt the donor actually
+    # got, even if the org's address/logo/template code changes later --
+    # important for a legal 80G document. Lives in the database rather than
+    # on local disk so it survives redeploys/restarts on hosts with no
+    # persistent filesystem, and rides along with your regular Postgres
+    # backups instead of needing a separate backup story. See README
+    # "Receipt storage" for the migration note on existing installs.
+    receipt_pdf = db.Column(db.LargeBinary)
 
     donation_date = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     remarks = db.Column(db.String(300))

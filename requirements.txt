@@ -1,3 +1,8 @@
+setuptools>=70   # provides pkg_resources -- razorpay's client.py imports it directly, but
+                 # Python 3.12+ venvs no longer bundle setuptools by default, so without this
+                 # explicit dependency `import razorpay` fails with ModuleNotFoundError on a
+                 # fresh install even though it worked fine wherever setuptools happened to
+                 # already be present (e.g. an older local venv).
 Flask==3.0.3
 Flask-SQLAlchemy==3.1.1
 Flask-Login==0.6.3
@@ -10,3 +15,5 @@ pytest==8.3.3
 gunicorn==22.0.0
 sentry-sdk[flask]==2.13.0
 psycopg2-binary==2.9.9   # Postgres driver -- only used if DATABASE_URL points at Postgres (e.g. on Render)
+Flask-Limiter==3.8.0     # rate limiting on the public donation API
+Flask-Talisman==1.1.0    # security headers (HSTS/CSP/X-Frame-Options/etc.), production only

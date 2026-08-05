@@ -137,10 +137,10 @@ def main():
                     donation.receipt_number = receipt_number
                     donation.financial_year = fy
 
-                db.session.commit()
-
                 if args.generate_receipts:
-                    generate_receipt_pdf(donation, donor, campaign, _org_cfg())
+                    donation.receipt_pdf = generate_receipt_pdf(donation, donor, campaign, _org_cfg())
+
+                db.session.commit()
 
                 imported += 1
 

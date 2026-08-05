@@ -289,6 +289,45 @@ now. A failed or unconfigured send never blocks the donation or receipt PDF
 itself (the error is logged, not raised) — email is strictly additive on
 top of the always-available PDF download.
 
+## Receipt storage
+
+Receipt PDFs are generated once, at the moment a donation succeeds, and
+stored as bytes on `Donation.receipt_pdf` — not written to local disk. This
+matters for two reasons: it survives redeploys/restarts on hosts with no
+persistent filesystem (Render's free tier, most serverless platforms), and
+it rides along with your regular database backups instead of needing a
+separate backup story for a folder of PDFs. The PDF is never regenerated on
+demand — what's stored is byte-for-byte what the donor actually got, so it
+stays accurate even if you change the org's address, logo, or the receipt
+template's code later. Downloads (`/receipt/<id>`) and the email attachment
+both read straight from that column.
+
+**Size, if you're wondering:** each receipt is about 250 KB. At 500-2,000
+donations/year for a single branch, that's roughly 120-490 MB/year —
+genuinely small, and it grows with your existing Postgres storage, which
+you can resize anytime without downtime (see "Deploying to Render" above).
+The bulk of that 250 KB is the hologram sticker image; it was originally
+~900 KB/receipt until the source image (622x624px, but only ever drawn at
+24x27 points on the page) was downsampled to a still-generous 240x240px —
+worth knowing if you ever swap in a different hologram/logo image and
+receipt sizes creep back up: keep source images sized close to their actual
+print size, not "as high-res as I happened to have."
+
+⚠️ **Migration note for existing installs:** this adds a new
+`Donation.receipt_pdf` column. If you already have a live database (e.g.
+your first Render deploy is already running), pull this change and run:
+```bash
+flask db migrate -m "add receipt_pdf column"
+flask db upgrade
+```
+Any receipts already issued before this change keep working — the
+`/receipt/<id>` download route falls back to the old on-disk location
+(`instance/receipts/`) if `receipt_pdf` is empty on that donation, so
+nothing 404s. Only *new* donations after the migration get the DB-stored
+PDF; there's no automatic backfill of historical receipts from disk into
+the database (write a one-off script if you want that, using
+`receipt_pdf_path()` in `pdf_utils.py` to locate each old file).
+
 ## Backups
 
 SQLite is a single file (`instance/temple.db`) — back it up. `backup_db.py`
@@ -319,7 +358,10 @@ management, the full donor OTP login flow (request/verify/expiry/
 rate-limiting/wrong-attempts, account access control, profile updates),
 receipt emailing (demo mode when unconfigured, message construction/
 attachment/SMTP delivery via a mocked `smtplib.SMTP`, and that a broken mail
-server never raises into the donation flow), and the Razorpay webhook
+server never raises into the donation flow), receipt PDF storage (bytes
+land on Donation.receipt_pdf for both the online and manual-entry flows,
+downloads are served from the database, and the legacy on-disk fallback
+still works for receipts issued before this change), and the Razorpay webhook
 (signature verification accepts/rejects correctly, unconfigured secret is
 refused, unrelated event types and unknown order IDs are acknowledged
 without side effects, a duplicate delivery of the same event doesn't burn a
@@ -436,6 +478,36 @@ donation traffic issuing legal 80G receipts.
 - **Receipts are now emailed to donors automatically** on every successful
   donation (online and manual), off by default until `SMTP_HOST` is set —
   see "Emailing receipts" above.
+- **The public donation API is now rate-limited** (`/api/create-order`,
+  `/api/verify-payment`, `/api/simulate-payment` — 30 requests/hour per IP),
+  via Flask-Limiter, guarded the same way as Flask-Migrate/Sentry so the app
+  still runs before you `pip install`, just without throttling. Behind a
+  reverse proxy (Render, etc.) this needs to see the real visitor IP rather
+  than the proxy's — `app.py` now wraps the app in `ProxyFix` when
+  `FLASK_ENV=production`, trusting one proxy hop. The Razorpay webhook is
+  deliberately NOT rate-limited (its own signature check is its
+  authentication, and Razorpay's own servers are the caller).
+- **Security headers (HSTS, clickjacking protection, MIME-sniffing
+  protection, Referrer-Policy, and Content-Security-Policy) are now applied
+  in production** via Flask-Talisman, guarded like Sentry/Flask-Migrate so
+  local dev is unaffected. The CSP allow-lists exactly the external
+  resources this app's templates load (Bootstrap/Chart.js from jsdelivr,
+  Google Fonts, Razorpay's checkout script/iframe/API) — nothing was
+  guessed, it was checked against the actual template files. ⚠️ **Test your
+  donation form + a real Razorpay checkout once after your first deploy
+  with this live** — I couldn't verify CSP against a real browser from
+  where this was built. If anything looks blocked (check the browser
+  console for CSP violation messages), set `CONTENT_SECURITY_POLICY_ENABLED=false`
+  in your env vars and redeploy to disable just the CSP header (HSTS/
+  clickjacking/etc. stay on), then let me know what broke so the allow-list
+  can be fixed properly.
+- **Receipt PDFs are now stored in the database** instead of local disk —
+  see "Receipt storage" above for the full explanation, size numbers, and
+  the migration step existing installs need to run.
+- **Malformed API requests now fail gracefully.** A missing/non-numeric
+  `campaign_id`, `donation_id`, or `amount` used to raise an unhandled
+  `ValueError` and show the donor a generic server error page; these now
+  return a clean `400` with a JSON error message instead.
 - **Razorpay payments are now confirmed server-to-server via a webhook**
   (`/webhooks/razorpay`), not just by trusting the browser's callback after
   checkout closes — off by default until `RAZORPAY_WEBHOOK_SECRET` is set,

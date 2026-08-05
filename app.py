@@ -2,11 +2,12 @@ import os
 from flask import Flask, jsonify, render_template, request
 from dotenv import load_dotenv
 from flask_wtf.csrf import CSRFError
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
 
 from config import Config
-from extensions import db, login_manager, csrf
+from extensions import db, login_manager, csrf, limiter, LIMITER_AVAILABLE
 from models import AdminUser
 from utils import format_inr
 
@@ -23,6 +24,75 @@ def create_app(test_config=None):
     app.config["RAZORPAY_ENABLED"] = bool(
         app.config.get("RAZORPAY_KEY_ID") and app.config.get("RAZORPAY_KEY_SECRET")
     )
+
+    if app.config.get("IS_PRODUCTION"):
+        # Render (and most PaaS hosts) puts a reverse proxy in front of the
+        # app -- without this, request.remote_addr is the proxy's own IP
+        # for every single visitor, which would make IP-based rate limiting
+        # below apply to everyone as one shared bucket instead of per
+        # visitor, and could also confuse the Secure-cookie/HTTPS detection
+        # used by SESSION_COOKIE_SECURE. x_for=1/x_proto=1 trusts exactly
+        # one hop, matching a typical single-reverse-proxy deployment.
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+
+    if not LIMITER_AVAILABLE:
+        app.logger.warning(
+            "Flask-Limiter isn't installed -- the public donation API has no "
+            "rate limiting. Run `pip install -r requirements.txt` to enable it."
+        )
+
+    # Security headers (HSTS, clickjacking/X-Frame-Options, MIME-sniffing/
+    # X-Content-Type-Options, Referrer-Policy, Content-Security-Policy) --
+    # only in production, since force_https would redirect-loop local
+    # http://localhost dev. The CSP allow-list below is deliberately an
+    # exact match for every external resource this app's templates actually
+    # load (checked via grep, not guessed) -- Bootstrap/Chart.js from
+    # jsdelivr, Google Fonts, and Razorpay's checkout script/iframe/API.
+    # Guarded the same way as Sentry/Flask-Migrate above.
+    if app.config.get("IS_PRODUCTION"):
+        try:
+            from flask_talisman import Talisman
+
+            csp = {
+                "default-src": "'self'",
+                # 'unsafe-inline' is needed for the inline <script> blocks
+                # (donate.html's fetch()-based checkout flow) and the many
+                # inline style="..." attributes across the admin templates --
+                # a full nonce-based rewrite is a bigger job than this pass.
+                "script-src": [
+                    "'self'", "'unsafe-inline'",
+                    "https://cdn.jsdelivr.net", "https://checkout.razorpay.com",
+                ],
+                "style-src": [
+                    "'self'", "'unsafe-inline'",
+                    "https://cdn.jsdelivr.net", "https://fonts.googleapis.com",
+                ],
+                "font-src": ["'self'", "https://fonts.gstatic.com", "https://cdn.jsdelivr.net", "data:"],
+                "img-src": ["'self'", "data:"],
+                # Razorpay's checkout.js makes its own XHR/telemetry calls.
+                "connect-src": ["'self'", "https://api.razorpay.com", "https://lumberjack.razorpay.com"],
+                # The actual payment popup/iframe.
+                "frame-src": ["https://api.razorpay.com", "https://checkout.razorpay.com"],
+            }
+            Talisman(
+                app,
+                force_https=True,
+                strict_transport_security=True,
+                frame_options="SAMEORIGIN",
+                referrer_policy="strict-origin-when-cross-origin",
+                content_security_policy=csp if app.config.get("CONTENT_SECURITY_POLICY_ENABLED") else None,
+                # CSP report-only would be safer to roll out blind, but
+                # Talisman applies it directly -- test the actual donation
+                # form + Razorpay checkout after your first deploy with this
+                # enabled (see README "Security headers"), and flip
+                # CONTENT_SECURITY_POLICY_ENABLED=false if anything's blocked.
+            )
+        except ImportError:
+            app.logger.warning(
+                "Flask-Talisman isn't installed -- security headers "
+                "(CSP/HSTS/etc.) are off. Run `pip install -r requirements.txt` "
+                "to enable them."
+            )
 
     # Error monitoring -- no-op unless SENTRY_DSN is set (see README "Error
     # monitoring"). Guarded so a missing sentry-sdk package degrades to
@@ -49,6 +119,7 @@ def create_app(test_config=None):
     db.init_app(app)
     login_manager.init_app(app)
     csrf.init_app(app)
+    limiter.init_app(app)
 
     # Schema migrations (Alembic via Flask-Migrate) -- see README "Database
     # migrations" for the flask db init/migrate/upgrade workflow. Guarded

@@ -123,6 +123,21 @@ class Config:
     # version of it existed.
     CONSENT_VERSION = os.environ.get("CONSENT_VERSION", "2026-07")
 
+    # --- Security headers (Flask-Talisman) ---
+    # HSTS, clickjacking (X-Frame-Options), MIME-sniffing (X-Content-Type-
+    # Options), and Referrer-Policy are always applied in production (see
+    # IS_PRODUCTION above). Content-Security-Policy is also on by default,
+    # allow-listing exactly the external resources this app actually loads
+    # (Bootstrap/Chart.js from jsdelivr, Google Fonts, Razorpay checkout) --
+    # see app.py's create_app(). If a future template change ever needs a
+    # new external resource and the CSP starts blocking something
+    # unexpectedly, set this to false to disable just the CSP header
+    # without touching HSTS/clickjacking/etc., then update the allow-list
+    # in app.py at your leisure.
+    CONTENT_SECURITY_POLICY_ENABLED = os.environ.get(
+        "CONTENT_SECURITY_POLICY_ENABLED", "true"
+    ).strip().lower() not in ("false", "0", "no")
+
     # --- Error monitoring (Sentry) ---
     # Leave blank to run without error monitoring (the default). Set to a
     # real Sentry DSN (Settings -> Projects -> <project> -> Client Keys) to

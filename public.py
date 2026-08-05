@@ -2,13 +2,15 @@ import datetime
 import hmac
 import hashlib
 import json
+import io
+import os
 
 from flask import (
     Blueprint, render_template, request, jsonify, redirect, url_for,
     send_file, current_app, flash,
 )
 
-from extensions import db, csrf
+from extensions import db, csrf, limiter
 from models import Donor, Campaign, Donation, ReceiptCounter
 from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email
@@ -99,10 +101,23 @@ def donate_form():
 
 
 @bp.route("/api/create-order", methods=["POST"])
+@limiter.limit("30 per hour")
 def create_order():
-    data = request.get_json()
-    campaign = Campaign.query.get_or_404(int(data["campaign_id"]))
-    amount = float(data["amount"])
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid request."}), 400
+
+    try:
+        campaign_id = int(data["campaign_id"])
+        amount = float(data["amount"])
+    except (KeyError, TypeError, ValueError):
+        # Missing/non-numeric campaign_id or amount -- previously this
+        # raised an unhandled ValueError straight out of int()/float(),
+        # which the donor would see as a generic server error page instead
+        # of a normal "something's wrong with your submission" message.
+        return jsonify({"error": "Missing or invalid campaign/amount."}), 400
+
+    campaign = Campaign.query.get_or_404(campaign_id)
     if amount <= 0:
         return jsonify({"error": "Invalid amount"}), 400
 
@@ -179,14 +194,27 @@ def _finalize_success(donation):
     donation.status = "success"
     db.session.commit()
 
-    pdf_path = generate_receipt_pdf(donation, donation.donor, campaign, _org_cfg())
-    send_receipt_email(donation, donation.donor, _org_cfg(), pdf_path)
+    pdf_bytes = generate_receipt_pdf(donation, donation.donor, campaign, _org_cfg())
+    donation.receipt_pdf = pdf_bytes
+    db.session.commit()
+    send_receipt_email(donation, donation.donor, _org_cfg(), pdf_bytes)
 
 
 @bp.route("/api/verify-payment", methods=["POST"])
+@limiter.limit("30 per hour")
 def verify_payment():
-    data = request.get_json()
-    donation = Donation.query.get_or_404(int(data["donation_id"]))
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid request."}), 400
+
+    try:
+        donation_id = int(data["donation_id"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"error": "Missing or invalid donation_id."}), 400
+    donation = Donation.query.get_or_404(donation_id)
+
+    if "razorpay_order_id" not in data or "razorpay_payment_id" not in data:
+        return jsonify({"error": "Missing payment verification fields."}), 400
 
     key_secret = current_app.config["RAZORPAY_KEY_SECRET"]
     payload = f"{data['razorpay_order_id']}|{data['razorpay_payment_id']}"
@@ -205,6 +233,7 @@ def verify_payment():
 
 
 @bp.route("/api/simulate-payment", methods=["POST"])
+@limiter.limit("30 per hour")
 def simulate_payment():
     """Only meaningful when Razorpay keys are not configured (demo mode).
     Lets you exercise the full donor -> donation -> receipt pipeline
@@ -212,8 +241,15 @@ def simulate_payment():
     if current_app.config["RAZORPAY_ENABLED"]:
         return jsonify({"error": "Live payments are enabled; simulate is disabled."}), 400
 
-    data = request.get_json()
-    donation = Donation.query.get_or_404(int(data["donation_id"]))
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid request."}), 400
+
+    try:
+        donation_id = int(data["donation_id"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"error": "Missing or invalid donation_id."}), 400
+    donation = Donation.query.get_or_404(donation_id)
     donation.razorpay_payment_id = "SIMULATED"
     _finalize_success(donation)
     return jsonify({"ok": True, "receipt_number": donation.receipt_number})
@@ -335,5 +371,25 @@ def download_receipt(donation_id):
     if donation.status != "success" or not donation.receipt_number:
         flash("Receipt not available for this donation.")
         return redirect(url_for("public.donate_form"))
-    path = receipt_pdf_path(donation.receipt_number)
-    return send_file(path, as_attachment=True, download_name=f"{donation.receipt_number.replace('/', '_')}.pdf")
+
+    if donation.receipt_pdf:
+        pdf_bytes = donation.receipt_pdf
+    else:
+        # Legacy fallback: donations issued before receipts moved into the
+        # database (see README "Receipt storage") were written to disk
+        # instead. Read from there if it's still around, rather than
+        # 404ing on a receipt that was genuinely issued.
+        legacy_path = receipt_pdf_path(donation.receipt_number)
+        if os.path.isfile(legacy_path):
+            with open(legacy_path, "rb") as f:
+                pdf_bytes = f.read()
+        else:
+            flash("This receipt needs to be regenerated -- please contact the office.")
+            return redirect(url_for("public.donate_form"))
+
+    return send_file(
+        io.BytesIO(pdf_bytes),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=f"{donation.receipt_number.replace('/', '_')}.pdf",
+    )

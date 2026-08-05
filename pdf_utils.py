@@ -243,7 +243,15 @@ def _draw_centered_bits_with_icon(c, cx, y, bits, font, size, color, icon_prefix
         x += c.stringWidth(b, font, size) + space_w
 
 
-HOLOGRAM_PATH = os.path.join(os.path.dirname(__file__), "static", "branding", "hologram_circle.png")
+HOLOGRAM_PATH = os.path.join(os.path.dirname(__file__), "static", "branding", "hologram_circle_small.png")
+# ^ Downsampled from the original 622x624 source (still kept on disk,
+# unused) to 240x240 -- the hologram is only ever drawn into a 24x27pt box
+# on the receipt (see _draw_hologram call below), so the original was ~25x
+# oversized in each dimension and was, by far, the single biggest
+# contributor to each generated receipt's file size (embedding raw bitmap data
+# for a sticker nobody ever sees larger than a thumbnail). 240x240 is still
+# an 8-9x supersample over the box it's drawn into, comfortable headroom
+# for print quality with a fraction of the embedded data.
 
 
 def _draw_hologram(c, x0, y0, x1, y1):
@@ -284,7 +292,13 @@ def _draw_hologram_placeholder(c, x0, y0, x1, y1):
 
 
 def generate_receipt_pdf(donation, donor, campaign, org_cfg):
-    """Generates the donation receipt PDF and returns the file path.
+    """Generates the donation receipt PDF and returns the raw PDF bytes.
+
+    Built entirely in memory (no file written to disk) -- the caller is
+    responsible for persisting it, normally to Donation.receipt_pdf, so it
+    survives exactly as issued regardless of what host/filesystem this is
+    running on. Same in-memory approach as generate_annual_statement_pdf
+    below.
 
     This mirrors the temple's actual issued receipt (a landscape,
     two-page document: page 1 is the filled receipt, page 2 the Terms &
@@ -299,8 +313,7 @@ def generate_receipt_pdf(donation, donor, campaign, org_cfg):
     80G certificate) follows separately, generally by 31 May of the next
     financial year -- see README for how Form 10BD export ties into this.
     """
-    _ensure_dir()
-    path = receipt_pdf_path(donation.receipt_number)
+    buffer = io.BytesIO()
 
     # Single page now: the receipt itself (exact size of the temple's own
     # receipt PDF) with the Terms & Conditions / closing chant -- previously
@@ -308,7 +321,7 @@ def generate_receipt_pdf(donation, donor, campaign, org_cfg):
     # second page.
     width, height = 612, 396
     TC_H = 260
-    c = canvas.Canvas(path, pagesize=(width, height + TC_H))
+    c = canvas.Canvas(buffer, pagesize=(width, height + TC_H))
 
     # ---------------------------------------------------------------
     # RECEIPT -- drawn translated up by TC_H so all of its existing
@@ -659,7 +672,8 @@ def generate_receipt_pdf(donation, donor, campaign, org_cfg):
 
     c.showPage()
     c.save()
-    return path
+    buffer.seek(0)
+    return buffer.getvalue()
 
 
 def generate_annual_statement_pdf(donor, donations, fy, org_cfg):

@@ -19,8 +19,9 @@ from email.message import EmailMessage
 from flask import current_app
 
 
-def send_receipt_email(donation, donor, org_cfg, pdf_path):
-    """Emails the receipt PDF at `pdf_path` to `donor`. Returns True if it was
+def send_receipt_email(donation, donor, org_cfg, pdf_bytes):
+    """Emails the receipt PDF (raw bytes, as returned by
+    pdf_utils.generate_receipt_pdf) to `donor`. Returns True if it was
     actually sent, False if skipped (demo mode, or donor has no email on
     file). Never raises -- a failed/unconfigured email should never break the
     donation or receipt-generation flow, so any SMTP error is caught, logged,
@@ -50,13 +51,12 @@ def send_receipt_email(donation, donor, org_cfg, pdf_path):
             f"Hare Krishna,\n{org_name}"
         )
 
-        with open(pdf_path, "rb") as f:
-            msg.add_attachment(
-                f.read(),
-                maintype="application",
-                subtype="pdf",
-                filename=f"Receipt_{donation.receipt_number.replace('/', '_')}.pdf",
-            )
+        msg.add_attachment(
+            pdf_bytes,
+            maintype="application",
+            subtype="pdf",
+            filename=f"Receipt_{donation.receipt_number.replace('/', '_')}.pdf",
+        )
 
         smtp_port = int(cfg.get("SMTP_PORT", 587))
         use_tls = cfg.get("SMTP_USE_TLS", True)

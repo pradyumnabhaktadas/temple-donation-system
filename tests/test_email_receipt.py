@@ -1,5 +1,4 @@
 import os
-import tempfile
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -18,11 +17,11 @@ def _fake_donor(email="donor@example.com"):
     return SimpleNamespace(full_name="Test Donor", email=email)
 
 
-def _fake_pdf():
-    fd, path = tempfile.mkstemp(suffix=".pdf")
-    os.write(fd, b"%PDF-1.4 fake receipt content")
-    os.close(fd)
-    return path
+def _fake_pdf_bytes():
+    # generate_receipt_pdf() now returns raw bytes (built in-memory, see
+    # pdf_utils.py) rather than a file path -- send_receipt_email() takes
+    # those bytes directly.
+    return b"%PDF-1.4 fake receipt content"
 
 
 class TestEmailReceipt:
@@ -34,20 +33,16 @@ class TestEmailReceipt:
 
     def test_demo_mode_when_smtp_host_not_configured(self, app):
         # conftest's app fixture doesn't set SMTP_HOST, so this is demo mode.
-        pdf_path = _fake_pdf()
         with app.app_context(), patch("email_utils.smtplib.SMTP") as mock_smtp:
-            sent = send_receipt_email(_fake_donation(), _fake_donor(), {}, pdf_path)
-        os.remove(pdf_path)
+            sent = send_receipt_email(_fake_donation(), _fake_donor(), {}, _fake_pdf_bytes())
 
         assert sent is False
         mock_smtp.assert_not_called()
 
     def test_skips_when_donor_has_no_email(self, app):
         app.config["SMTP_HOST"] = "smtp.example.com"
-        pdf_path = _fake_pdf()
         with app.app_context(), patch("email_utils.smtplib.SMTP") as mock_smtp:
-            sent = send_receipt_email(_fake_donation(), _fake_donor(email=None), {}, pdf_path)
-        os.remove(pdf_path)
+            sent = send_receipt_email(_fake_donation(), _fake_donor(email=None), {}, _fake_pdf_bytes())
 
         assert sent is False
         mock_smtp.assert_not_called()
@@ -58,7 +53,6 @@ class TestEmailReceipt:
         app.config["SMTP_USERNAME"] = "temple@example.com"
         app.config["SMTP_PASSWORD"] = "app-password"
         app.config["MAIL_FROM_NAME"] = "ISKCON Dwarka"
-        pdf_path = _fake_pdf()
 
         mock_server = MagicMock()
         mock_smtp_cm = MagicMock()
@@ -67,8 +61,9 @@ class TestEmailReceipt:
         with app.app_context(), patch("email_utils.smtplib.SMTP", return_value=mock_smtp_cm) as mock_smtp:
             donation = _fake_donation()
             donor = _fake_donor()
-            sent = send_receipt_email(donation, donor, {"ORG_NAME": "Sri Sri Rukmini Dwarkadhish Temple"}, pdf_path)
-        os.remove(pdf_path)
+            sent = send_receipt_email(
+                donation, donor, {"ORG_NAME": "Sri Sri Rukmini Dwarkadhish Temple"}, _fake_pdf_bytes()
+            )
 
         assert sent is True
         mock_smtp.assert_called_once_with("smtp.example.com", 587, timeout=15)
@@ -86,11 +81,9 @@ class TestEmailReceipt:
 
     def test_smtp_failure_is_swallowed_not_raised(self, app):
         app.config["SMTP_HOST"] = "smtp.example.com"
-        pdf_path = _fake_pdf()
 
         with app.app_context(), patch("email_utils.smtplib.SMTP", side_effect=OSError("connection refused")):
-            sent = send_receipt_email(_fake_donation(), _fake_donor(), {}, pdf_path)
-        os.remove(pdf_path)
+            sent = send_receipt_email(_fake_donation(), _fake_donor(), {}, _fake_pdf_bytes())
 
         assert sent is False
 
