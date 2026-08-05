@@ -329,6 +329,21 @@ def payment_callback():
     return redirect(url_for("public.donate_success", donation_id=donation.id))
 
 
+@bp.route("/api/donation-status/<int:donation_id>", methods=["GET"])
+@limiter.limit("60 per minute")
+def donation_status(donation_id):
+    """Polled by donate.html after checkout, as the reliable fallback to
+    the JS `handler` callback (which has been observed not firing in some
+    browsers) and to a callback_url redirect (found to get blocked before
+    leaving the checkout iframe on at least one real device). The webhook
+    finalizes donations server-to-server, independent of the browser --
+    this endpoint just lets the donor's tab find out once that's happened,
+    without needing any particular browser-mediated confirmation to work.
+    """
+    donation = Donation.query.get_or_404(donation_id)
+    return jsonify({"status": donation.status, "receipt_number": donation.receipt_number})
+
+
 @bp.route("/api/simulate-payment", methods=["POST"])
 @limiter.limit("30 per hour")
 def simulate_payment():
