@@ -4,6 +4,7 @@ import hashlib
 import json
 import io
 import os
+import threading
 
 from flask import (
     Blueprint, render_template, request, jsonify, redirect, url_for,
@@ -177,6 +178,20 @@ def create_order():
     )
 
 
+def _send_receipt_email_background(app, donation_id, pdf_bytes):
+    """Runs in a background thread -- see the comment in _finalize_success()
+    for why. Needs its own app context (and its own DB session, which a
+    fresh app context gives it) since it's not running inside the request
+    that spawned it anymore."""
+    with app.app_context():
+        donation = Donation.query.get(donation_id)
+        if donation is not None:
+            try:
+                send_receipt_email(donation, donation.donor, _org_cfg(), pdf_bytes)
+            except Exception:
+                app.logger.exception("Background receipt email failed for donation %s", donation_id)
+
+
 def _finalize_success(donation):
     # Idempotency guard: a receipt number must be issued exactly once per
     # donation. Without this, a double-submitted verify/simulate call (double
@@ -197,7 +212,25 @@ def _finalize_success(donation):
     pdf_bytes = generate_receipt_pdf(donation, donation.donor, campaign, _org_cfg())
     donation.receipt_pdf = pdf_bytes
     db.session.commit()
-    send_receipt_email(donation, donation.donor, _org_cfg(), pdf_bytes)
+
+    # Send the email in a background thread rather than blocking this
+    # request on it. A slow/hanging SMTP connection (Gmail has been observed
+    # taking 10-20s+ over some hosts' networks) stacking on top of PDF
+    # generation can blow past gunicorn's worker timeout (30s default),
+    # which SIGKILLs the whole worker mid-response -- not a clean 500, but
+    # the connection dropping outright while a donor is watching Razorpay
+    # redirect them back after paying. The receipt is already saved to the
+    # database at this point regardless of whether the email send succeeds.
+    #
+    # Synchronous under TESTING so the test suite can assert on the send
+    # deterministically instead of racing a background thread.
+    app = current_app._get_current_object()
+    if app.config.get("TESTING"):
+        _send_receipt_email_background(app, donation.id, pdf_bytes)
+    else:
+        threading.Thread(
+            target=_send_receipt_email_background, args=(app, donation.id, pdf_bytes), daemon=True
+        ).start()
 
 
 @bp.route("/api/verify-payment", methods=["POST"])
@@ -275,7 +308,24 @@ def payment_callback():
         return redirect(url_for("public.donate_form"))
 
     donation.razorpay_payment_id = payment_id
-    _finalize_success(donation)
+    try:
+        _finalize_success(donation)
+    except Exception:
+        # Payment is already verified genuine at this point (signature
+        # check above passed) -- a failure past here is something like a
+        # PDF-generation bug, not a fake payment. Don't leave the donor
+        # looking at a crashed page after money has actually moved; the
+        # webhook (if configured) will retry finalization independently,
+        # and this is loud in the server logs either way.
+        current_app.logger.exception(
+            "Failed to finalize donation %s after verified Razorpay callback", donation.id
+        )
+        flash(
+            "Your payment was received, but we hit a snag preparing your receipt. "
+            "It will appear shortly, or please contact the temple office with payment ID "
+            f"{payment_id}."
+        )
+        return redirect(url_for("public.donate_form"))
     return redirect(url_for("public.donate_success", donation_id=donation.id))
 
 
