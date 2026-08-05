@@ -1,6 +1,8 @@
 # provides pkg_resources, which razorpay's client.py imports directly --
-# Python 3.12+ venvs no longer bundle setuptools by default.
-setuptools>=70
+# Python 3.12+ venvs no longer bundle setuptools by default. Capped below
+# 82: setuptools removed pkg_resources entirely as of v82.0 (Feb 2026), so
+# an unpinned upper bound installs a version that's missing it again.
+setuptools<82
 Flask==3.0.3
 Flask-SQLAlchemy==3.1.1
 Flask-Login==0.6.3
