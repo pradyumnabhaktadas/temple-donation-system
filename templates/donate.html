@@ -164,6 +164,13 @@ form.addEventListener('submit', async function (e) {
       name: '{{ org_name }}',
       description: 'Donation',
       order_id: order.order_id,
+      // Primary confirmation path: Razorpay's own server POSTs straight to
+      // this URL after payment, so it doesn't depend on this tab's JS
+      // staying alive/reachable (some browsers, notably Safari, can block
+      // the postMessage the `handler` below relies on). `handler` is kept
+      // as a secondary path in case redirect is ever disabled.
+      callback_url: '{{ url_for("public.payment_callback") }}',
+      redirect: true,
       handler: async function (response) {
         const verifyResp = await fetch('/api/verify-payment', {
           method: 'POST',

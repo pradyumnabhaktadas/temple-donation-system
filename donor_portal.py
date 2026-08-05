@@ -155,8 +155,16 @@ def account():
         session.pop("donor_id", None)
         return redirect(url_for("donor_portal.login"))
 
-    donations = donor.donations.filter_by(status="success").order_by(Donation.donation_date.desc()).all()
-    available_fys = sorted({d.financial_year for d in donations if d.financial_year}, reverse=True)
+    # Show every donation attempt, not just successful ones -- a donor
+    # wondering "did my payment go through?" should be able to see a
+    # pending/failed row here instead of it just silently not appearing
+    # (Total Donated / donation_count above are unaffected, since those
+    # properties on Donor already filter to status == "success" on their
+    # own).
+    donations = donor.donations.order_by(Donation.donation_date.desc()).all()
+    available_fys = sorted(
+        {d.financial_year for d in donations if d.financial_year and d.status == "success"}, reverse=True
+    )
 
     return render_template(
         "my_donations_results.html", donor=donor, donations=donations, available_fys=available_fys

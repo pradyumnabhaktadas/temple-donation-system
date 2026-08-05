@@ -38,14 +38,15 @@
 {% endif %}
 
 <table class="table table-sm bg-white shadow-sm">
-  <thead><tr><th>Date</th><th>Campaign</th><th>Amount</th><th>Mode</th><th>Receipt</th><th>Status</th><th></th></tr></thead>
+  <thead><tr><th>Date</th><th>Campaign</th><th>Amount</th><th>Mode</th><th>Transaction ID</th><th>Receipt</th><th>Status</th><th></th></tr></thead>
   <tbody>
     {% for d in donations %}
     <tr>
       <td>{{ d.donation_date.strftime('%d-%b-%Y') }}</td>
       <td>{{ d.campaign.name }}</td>
       <td>Rs. {{ d.amount | inr }}</td>
-      <td>{{ d.payment_mode.replace('_',' ').title() }}</td>
+      <td>{{ d.payment_mode.replace('_',' ').title() }}{% if d.razorpay_method %} ({{ d.razorpay_method.upper() }}){% endif %}</td>
+      <td class="small text-muted">{{ d.razorpay_payment_id or '-' }}</td>
       <td>
         {% if d.status == 'success' %}
           <a href="{{ url_for('public.download_receipt', donation_id=d.id) }}">{{ d.receipt_number }}</a>
@@ -58,7 +59,7 @@
       </td>
       <td>
         {% if d.razorpay_payment_id %}
-        <a href="#" data-bs-toggle="modal" data-bs-target="#paymentDetails{{ d.id }}" class="small">Payment details</a>
+        <a href="#" data-bs-toggle="modal" data-bs-target="#paymentDetails{{ d.id }}" class="small">Full details</a>
         {% endif %}
       </td>
     </tr>

@@ -31,17 +31,28 @@
 
 <h6 class="mb-2">Donation History</h6>
 <table class="table table-sm bg-white shadow-sm mb-4">
-  <thead><tr><th>Date</th><th>Campaign</th><th>Amount</th><th>Receipt</th></tr></thead>
+  <thead><tr><th>Date</th><th>Campaign</th><th>Amount</th><th>Mode</th><th>Transaction ID</th><th>Status</th><th>Receipt</th></tr></thead>
   <tbody>
     {% for d in donations %}
     <tr>
       <td>{{ d.donation_date.strftime('%d-%b-%Y') }}</td>
       <td>{{ d.campaign.name }}</td>
       <td>Rs. {{ d.amount | inr }}</td>
-      <td><a href="{{ url_for('public.download_receipt', donation_id=d.id) }}">Download {{ d.receipt_number }}</a></td>
+      <td>{{ d.payment_mode.replace('_',' ').title() }}{% if d.razorpay_method %} ({{ d.razorpay_method.upper() }}){% endif %}</td>
+      <td class="small text-muted">{{ d.razorpay_payment_id or '-' }}</td>
+      <td>
+        {% if d.status == 'success' %}<span class="badge bg-success">Success</span>
+        {% elif d.status == 'pending' %}<span class="badge bg-warning">Pending</span>
+        {% else %}<span class="badge bg-danger">Failed</span>{% endif %}
+      </td>
+      <td>
+        {% if d.status == 'success' %}
+          <a href="{{ url_for('public.download_receipt', donation_id=d.id) }}">Download {{ d.receipt_number }}</a>
+        {% else %}-{% endif %}
+      </td>
     </tr>
     {% else %}
-    <tr><td colspan="4" class="text-muted">No donations yet.</td></tr>
+    <tr><td colspan="7" class="text-muted">No donations yet.</td></tr>
     {% endfor %}
   </tbody>
 </table>

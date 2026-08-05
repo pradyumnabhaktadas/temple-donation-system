@@ -232,6 +232,53 @@ def verify_payment():
     return jsonify({"ok": True, "receipt_number": donation.receipt_number})
 
 
+@bp.route("/payment/callback", methods=["POST"])
+@csrf.exempt
+def payment_callback():
+    """Second, more reliable confirmation path alongside /api/verify-payment.
+
+    The JS `handler` callback above only runs if checkout.js successfully
+    calls back into the donor's own tab after payment -- this has been
+    observed to silently not fire in some browsers (notably Safari, where
+    Intelligent Tracking Prevention can block the checkout iframe's
+    postMessage back to the parent page), leaving a donation stuck on
+    "pending" forever even though Razorpay shows the payment as captured.
+
+    Razorpay Checkout supports a `callback_url` + `redirect: true` option
+    (set in donate.html) that, when present, has Razorpay's own server do a
+    real HTTP POST/redirect straight to this route instead of relying on
+    JS in the donor's tab at all -- so it works even if the tab's JS
+    context never gets the postMessage. Same signature verification as
+    /api/verify-payment; _finalize_success() is idempotent so it's safe for
+    this, /api/verify-payment, and the webhook to all fire for the same
+    donation.
+    """
+    data = request.form
+    order_id = data.get("razorpay_order_id")
+    payment_id = data.get("razorpay_payment_id")
+    signature = data.get("razorpay_signature")
+
+    donation = Donation.query.filter_by(razorpay_order_id=order_id).first() if order_id else None
+
+    if not (order_id and payment_id and signature) or donation is None:
+        flash("We couldn't confirm your payment. If money was deducted, please contact the temple office.")
+        return redirect(url_for("public.donate_form"))
+
+    key_secret = current_app.config["RAZORPAY_KEY_SECRET"]
+    payload = f"{order_id}|{payment_id}"
+    expected_sig = hmac.new(key_secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+
+    if not hmac.compare_digest(expected_sig, signature):
+        donation.status = "failed"
+        db.session.commit()
+        flash("Payment verification failed. If money was deducted, please contact the temple office.")
+        return redirect(url_for("public.donate_form"))
+
+    donation.razorpay_payment_id = payment_id
+    _finalize_success(donation)
+    return redirect(url_for("public.donate_success", donation_id=donation.id))
+
+
 @bp.route("/api/simulate-payment", methods=["POST"])
 @limiter.limit("30 per hour")
 def simulate_payment():
