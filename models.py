@@ -90,18 +90,36 @@ class Donation(db.Model):
 
     razorpay_order_id = db.Column(db.String(100))
     razorpay_payment_id = db.Column(db.String(100))
+    # `receipt` we sent Razorpay when creating the order (donation_<id>) --
+    # stored back for a self-contained audit record; known at order-creation
+    # time (see public.create_order), not something pulled from a webhook.
+    razorpay_order_receipt = db.Column(db.String(100))
     # The fields below are only ever populated by the webhook (see
     # public.razorpay_webhook) -- the browser-side /api/verify-payment call
     # doesn't get this level of detail from Razorpay's checkout response,
     # only the order/payment/signature. If RAZORPAY_WEBHOOK_SECRET isn't
     # configured, these simply stay blank; everything else about the
     # donation flow works exactly the same either way.
+    razorpay_status = db.Column(db.String(20))  # created/authorized/captured/failed/refunded
+    razorpay_currency = db.Column(db.String(10))  # e.g. "INR"
     razorpay_method = db.Column(db.String(20))  # card/netbanking/wallet/upi/emi
     # Human-readable payment reference matching the method above -- UPI VPA,
     # masked card (network + last 4), bank name, or wallet name. Useful for
     # matching a donation to a bank statement line without needing to look
     # up the raw payload below.
     razorpay_reference = db.Column(db.String(100))
+    # UPI-specific: how the payment was initiated -- "collect" (donor pays a
+    # request), "intent" (donor opens their UPI app directly), "in_app".
+    razorpay_upi_flow = db.Column(db.String(20))
+    # Card-specific, broken out separately from razorpay_reference (which
+    # already combines these into one display string) for anyone who wants
+    # to filter/report on network or type directly.
+    razorpay_card_network = db.Column(db.String(30))  # Visa/Mastercard/RuPay/...
+    razorpay_card_type = db.Column(db.String(20))  # credit/debit/prepaid
+    # Bank-side reference number (RRN/UTR) from Razorpay's acquirer_data --
+    # what you'd actually match against a bank statement line for UPI/
+    # netbanking payments. Not present for every method or every payment.
+    razorpay_utr = db.Column(db.String(50))
     razorpay_fee = db.Column(db.Numeric(12, 2))  # Razorpay's fee, in rupees (what actually lands minus this)
     razorpay_email = db.Column(db.String(200))  # email entered at Razorpay checkout (may differ from donor.email)
     razorpay_contact = db.Column(db.String(20))  # phone entered at Razorpay checkout
@@ -110,6 +128,13 @@ class Donation(db.Model):
     # fields pulled out above, in case you ever need to reconcile something
     # those fields don't cover.
     razorpay_raw_payload = db.Column(db.Text)
+
+    # Captured from the donor's own request when they submitted the form
+    # (see public.create_order) -- not from Razorpay at all. Razorpay's
+    # webhook payload doesn't include the payer's IP/browser, so this is
+    # the closest equivalent: who/what actually hit our own server.
+    donor_ip_address = db.Column(db.String(45))  # IPv4 or IPv6
+    donor_user_agent = db.Column(db.String(300))
 
     receipt_number = db.Column(db.String(50), unique=True)
     financial_year = db.Column(db.String(10))
@@ -138,6 +163,12 @@ class Donation(db.Model):
     consent_version = db.Column(db.String(20))  # see CONSENT_VERSION in config.py
 
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    # Auto-updates on every save -- "modified time" for the audit trail
+    # (e.g. distinguishing when a donation was first created pending vs.
+    # when the webhook/verify-payment call actually finalized it).
+    updated_at = db.Column(
+        db.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow
+    )
 
     def __repr__(self):
         return f"<Donation {self.id} {self.amount}>"

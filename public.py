@@ -160,6 +160,12 @@ def create_order():
         consent_given=True,
         consent_at=datetime.datetime.utcnow(),
         consent_version=current_app.config.get("CONSENT_VERSION"),
+        # Not from Razorpay -- captured from the donor's own request to our
+        # server, for the same fraud/audit-trail purpose. request.remote_addr
+        # reflects the real client IP behind Render's proxy because
+        # ProxyFix is wired up in app.py for production.
+        donor_ip_address=(request.remote_addr or "")[:45] or None,
+        donor_user_agent=(request.headers.get("User-Agent") or "")[:300] or None,
     )
     db.session.add(donation)
     db.session.flush()
@@ -170,12 +176,13 @@ def create_order():
         client = razorpay.Client(
             auth=(current_app.config["RAZORPAY_KEY_ID"], current_app.config["RAZORPAY_KEY_SECRET"])
         )
+        order_receipt = f"donation_{donation.id}"
         try:
             order = client.order.create(
                 {
                     "amount": int(amount * 100),  # paise
                     "currency": "INR",
-                    "receipt": f"donation_{donation.id}",
+                    "receipt": order_receipt,
                     "notes": {"donation_id": str(donation.id), "campaign": campaign.name},
                 }
             )
@@ -188,6 +195,7 @@ def create_order():
             return jsonify({"error": "Could not start payment right now. Please try again in a moment."}), 502
         order_id = order["id"]
         donation.razorpay_order_id = order_id
+        donation.razorpay_order_receipt = order_receipt
 
     db.session.commit()
 
@@ -394,21 +402,37 @@ def _apply_payment_details(donation, payment_entity):
     """
     method = payment_entity.get("method")
     donation.razorpay_method = method
+    donation.razorpay_status = payment_entity.get("status")
+    donation.razorpay_currency = payment_entity.get("currency")
 
     reference = None
     if method == "upi":
-        reference = payment_entity.get("vpa")
+        upi = payment_entity.get("upi") or {}
+        reference = payment_entity.get("vpa") or upi.get("vpa")
+        donation.razorpay_upi_flow = upi.get("flow")
     elif method == "card":
         card = payment_entity.get("card") or {}
         network = card.get("network")
         last4 = card.get("last4")
         if network or last4:
             reference = f"{network or 'Card'} ****{last4 or ''}".strip()
+        donation.razorpay_card_network = network
+        donation.razorpay_card_type = card.get("type")
     elif method == "netbanking":
         reference = payment_entity.get("bank")
     elif method == "wallet":
         reference = payment_entity.get("wallet")
     donation.razorpay_reference = reference
+
+    # Bank-side reference number for reconciliation -- present under
+    # different keys depending on method/acquirer; store whichever shows up.
+    acquirer_data = payment_entity.get("acquirer_data") or {}
+    donation.razorpay_utr = (
+        acquirer_data.get("rrn")
+        or acquirer_data.get("upi_transaction_id")
+        or acquirer_data.get("bank_transaction_id")
+        or acquirer_data.get("transaction_id")
+    )
 
     fee_paise = payment_entity.get("fee")
     donation.razorpay_fee = (fee_paise / 100) if isinstance(fee_paise, (int, float)) else None

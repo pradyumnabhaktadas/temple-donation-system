@@ -70,7 +70,7 @@
 {% for d in donations %}
 {% if d.razorpay_payment_id %}
 <div class="modal fade" id="paymentDetails{{ d.id }}" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
         <h6 class="modal-title">Payment details -- {{ d.receipt_number or ('Donation #' ~ d.id) }}</h6>
@@ -81,11 +81,26 @@
           <tbody>
             <tr><th class="text-muted" style="width:40%">Payment ID</th><td>{{ d.razorpay_payment_id }}</td></tr>
             <tr><th class="text-muted">Order ID</th><td>{{ d.razorpay_order_id or '-' }}</td></tr>
+            <tr><th class="text-muted">Order receipt</th><td>{{ d.razorpay_order_receipt or '-' }}</td></tr>
+            <tr><th class="text-muted">Payment status</th><td>{{ (d.razorpay_status or '-').title() }}</td></tr>
+            <tr><th class="text-muted">Currency</th><td>{{ d.razorpay_currency or '-' }}</td></tr>
             <tr><th class="text-muted">Method</th><td>{{ (d.razorpay_method or '-').upper() }}</td></tr>
             <tr><th class="text-muted">Reference</th><td>{{ d.razorpay_reference or '-' }}</td></tr>
+            {% if d.razorpay_method == 'upi' %}
+            <tr><th class="text-muted">UPI flow</th><td>{{ d.razorpay_upi_flow or '-' }}</td></tr>
+            {% endif %}
+            {% if d.razorpay_method == 'card' %}
+            <tr><th class="text-muted">Card network</th><td>{{ d.razorpay_card_network or '-' }}</td></tr>
+            <tr><th class="text-muted">Card type</th><td>{{ (d.razorpay_card_type or '-').title() }}</td></tr>
+            {% endif %}
+            <tr><th class="text-muted">Bank UTR / reference no.</th><td>{{ d.razorpay_utr or '-' }}</td></tr>
             <tr><th class="text-muted">Razorpay fee</th><td>{{ 'Rs. ' ~ (d.razorpay_fee | inr) if d.razorpay_fee is not none else '-' }}</td></tr>
             <tr><th class="text-muted">Checkout email</th><td>{{ d.razorpay_email or '-' }}</td></tr>
             <tr><th class="text-muted">Checkout contact</th><td>{{ d.razorpay_contact or '-' }}</td></tr>
+            <tr><th class="text-muted">Donor IP address</th><td>{{ d.donor_ip_address or '-' }}</td></tr>
+            <tr><th class="text-muted">Donor browser</th><td class="small">{{ d.donor_user_agent or '-' }}</td></tr>
+            <tr><th class="text-muted">Created</th><td>{{ d.created_at.strftime('%d-%b-%Y %H:%M') if d.created_at else '-' }}</td></tr>
+            <tr><th class="text-muted">Last modified</th><td>{{ d.updated_at.strftime('%d-%b-%Y %H:%M') if d.updated_at else '-' }}</td></tr>
           </tbody>
         </table>
         {% if d.razorpay_raw_payload %}
