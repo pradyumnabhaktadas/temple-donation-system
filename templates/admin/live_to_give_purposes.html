@@ -1,0 +1,54 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Live To Give Purposes{% endblock %}
+{% block content %}
+<h3 class="mb-3">🙏 Live To Give Purposes</h3>
+<p class="text-muted">These populate the donation-purpose dropdown on the public <a href="{{ url_for('public.live_to_give_form') }}" target="_blank">Live To Give</a> form.</p>
+
+<div class="row">
+  {% if current_user.role == 'admin' %}
+  <div class="col-md-5">
+    <div class="card card-body shadow-sm mb-3 p-4">
+      <h6 class="mb-3">New Purpose</h6>
+      <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-2">
+          <label class="form-label">Name</label>
+          <input type="text" class="form-control" name="name" placeholder="e.g. Cow Protection" required>
+        </div>
+        <button class="btn btn-gold btn-sm">Add</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+  <div class="{% if current_user.role == 'admin' %}col-md-7{% else %}col-12{% endif %}">
+    {% for p in purposes %}
+    <div class="card card-body shadow-sm mb-3 p-3">
+      <div class="d-flex justify-content-between align-items-center">
+        <div>
+          <div class="fw-bold">{{ p.name }}</div>
+          <div class="text-muted small">
+            {% if p.is_active %}<span class="badge bg-success ms-1">Active</span>{% else %}<span class="badge bg-secondary ms-1">Inactive</span>{% endif %}
+          </div>
+        </div>
+        {% if current_user.role == 'admin' %}
+        <div class="d-flex gap-2">
+          <form method="post" action="{{ url_for('admin.toggle_live_to_give_purpose', purpose_id=p.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-outline-secondary">{{ 'Deactivate' if p.is_active else 'Activate' }}</button>
+          </form>
+          <a href="{{ url_for('admin.live_to_give_purpose_edit', purpose_id=p.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+          <form method="post" action="{{ url_for('admin.live_to_give_purpose_delete', purpose_id=p.id) }}"
+                onsubmit="return confirm('Delete purpose \'{{ p.name }}\'? Only possible if it has no donations recorded.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-outline-danger">Delete</button>
+          </form>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% else %}
+    <p class="text-muted">No donation purposes yet.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

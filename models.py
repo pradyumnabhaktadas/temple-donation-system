@@ -143,6 +143,28 @@ class SevaType(db.Model):
         return f"<SevaType {self.name}>"
 
 
+class LiveToGivePurpose(db.Model):
+    """A donation-purpose option for the "Live To Give" (Nitya Seva)
+    collection form -- e.g. "Cow Protection", "Temple Construction",
+    "Sudama Seva". Donations against the "Live To Give" campaign record
+    which purpose the payment is for; this list is what populates the
+    dropdown on the dedicated Live To Give form, and is editable from
+    Admin -> Live To Give Purposes so staff can add/rename/retire options
+    without a code change."""
+
+    __tablename__ = "live_to_give_purposes"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False, unique=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    donations = db.relationship("Donation", backref="live_to_give_purpose", lazy="dynamic")
+
+    def __repr__(self):
+        return f"<LiveToGivePurpose {self.name}>"
+
+
 class Donation(db.Model):
     __tablename__ = "donations"
 
@@ -159,6 +181,16 @@ class Donation(db.Model):
     # optional on that form).
     festival_id = db.Column(db.Integer, db.ForeignKey("festivals.id"), nullable=True)
     seva_type_id = db.Column(db.Integer, db.ForeignKey("seva_types.id"), nullable=True)
+    # Only set for donations against the "Live To Give" campaign -- which
+    # purpose (Cow Protection, Temple Construction, Sudama Seva, ...) the
+    # payment is for. NULL for every other campaign.
+    live_to_give_purpose_id = db.Column(db.Integer, db.ForeignKey("live_to_give_purposes.id"), nullable=True)
+    # The Live To Give form lets the donor choose 80G vs Non-80G for this
+    # specific donation (unlike every other form, where 80G-eligibility is
+    # fixed per campaign) -- NULL here means "not asked" (every other
+    # campaign), in which case effective_is_80g below falls back to the
+    # campaign's own is_80g flag.
+    is_80g_requested = db.Column(db.Boolean, nullable=True)
 
     amount = db.Column(db.Numeric(12, 2), nullable=False)
     payment_mode = db.Column(db.String(20), nullable=False)  # online/cash/cheque/bank_transfer
@@ -245,6 +277,18 @@ class Donation(db.Model):
     updated_at = db.Column(
         db.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow
     )
+
+    @property
+    def effective_is_80g(self):
+        """Whether this specific donation counts as 80G for receipt
+        numbering, Form 10BD, and the annual statement. Almost every
+        campaign fixes this via Campaign.is_80g -- the one exception is
+        Live To Give, where the donor picks 80G/Non-80G per donation
+        (is_80g_requested), which takes priority over the campaign default
+        when set."""
+        if self.is_80g_requested is not None:
+            return self.is_80g_requested
+        return self.campaign.is_80g
 
     def __repr__(self):
         return f"<Donation {self.id} {self.amount}>"

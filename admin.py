@@ -11,7 +11,10 @@ from flask_login import login_user, logout_user, login_required, current_user
 from sqlalchemy import func, extract
 
 from extensions import db
-from models import Donor, Campaign, Donation, AdminUser, ReceiptCounter, BaceProperty, Festival, SevaType
+from models import (
+    Donor, Campaign, Donation, AdminUser, ReceiptCounter, BaceProperty, Festival, SevaType,
+    LiveToGivePurpose,
+)
 from utils import get_financial_year, is_valid_pan
 from pdf_utils import generate_receipt_pdf
 from email_utils import send_receipt_email
@@ -363,6 +366,7 @@ def manual_donation():
     bace_properties = BaceProperty.query.filter_by(is_active=True).order_by(BaceProperty.name).all()
     festivals = Festival.query.filter_by(is_active=True).order_by(Festival.name).all()
     seva_types = SevaType.query.filter_by(is_active=True).order_by(SevaType.name).all()
+    live_to_give_purposes = LiveToGivePurpose.query.filter_by(is_active=True).order_by(LiveToGivePurpose.name).all()
     if request.method == "POST":
         form = request.form
 
@@ -391,6 +395,20 @@ def manual_donation():
         if error:
             flash(error)
             return redirect(url_for("admin.manual_donation"))
+        live_to_give_purpose_id, error = _validated_id_from_form(
+            form, "live_to_give_purpose_id", LiveToGivePurpose, "donation purpose"
+        )
+        if error:
+            flash(error)
+            return redirect(url_for("admin.manual_donation"))
+
+        receipt_type = form.get("receipt_type")
+        if receipt_type == "80g":
+            is_80g_requested = True
+        elif receipt_type == "non80g":
+            is_80g_requested = False
+        else:
+            is_80g_requested = None
 
         donor = find_or_create_donor(form)
 
@@ -415,13 +433,15 @@ def manual_donation():
             bace_property_id=bace_property_id,
             festival_id=festival_id,
             seva_type_id=seva_type_id,
+            live_to_give_purpose_id=live_to_give_purpose_id,
+            is_80g_requested=is_80g_requested,
             remarks=form.get("remarks"),
             recorded_by=current_user.username,
         )
         db.session.add(donation)
         db.session.flush()
 
-        receipt_number, fy = ReceiptCounter.next_receipt_number(campaign.is_80g, donation_date)
+        receipt_number, fy = ReceiptCounter.next_receipt_number(donation.effective_is_80g, donation_date)
         donation.receipt_number = receipt_number
         donation.financial_year = fy
         db.session.commit()
@@ -436,7 +456,8 @@ def manual_donation():
 
     return render_template(
         "admin/manual_donation.html", campaigns=campaigns, bace_properties=bace_properties,
-        festivals=festivals, seva_types=seva_types, today=datetime.date.today(),
+        festivals=festivals, seva_types=seva_types, live_to_give_purposes=live_to_give_purposes,
+        today=datetime.date.today(),
     )
 
 
@@ -766,6 +787,83 @@ def seva_type_delete(seva_type_id):
     return redirect(url_for("admin.seva_types"))
 
 
+@bp.route("/live-to-give-purposes", methods=["GET", "POST"])
+@login_required
+def live_to_give_purposes():
+    if request.method == "POST":
+        if current_user.role != "admin":
+            flash("That action requires an administrator account.")
+            return redirect(url_for("admin.live_to_give_purposes"))
+        name = request.form.get("name", "").strip()
+        if not name:
+            flash("Purpose name can't be blank.")
+            return redirect(url_for("admin.live_to_give_purposes"))
+        if LiveToGivePurpose.query.filter_by(name=name).first():
+            flash(f"A donation purpose named '{name}' already exists.")
+            return redirect(url_for("admin.live_to_give_purposes"))
+        db.session.add(LiveToGivePurpose(name=name))
+        db.session.commit()
+        flash(f"Donation purpose '{name}' added.")
+        return redirect(url_for("admin.live_to_give_purposes"))
+
+    purpose_list = LiveToGivePurpose.query.order_by(LiveToGivePurpose.name).all()
+    return render_template("admin/live_to_give_purposes.html", purposes=purpose_list)
+
+
+@bp.route("/live-to-give-purposes/<int:purpose_id>/toggle", methods=["POST"])
+@login_required
+@admin_role_required
+def toggle_live_to_give_purpose(purpose_id):
+    purpose = LiveToGivePurpose.query.get_or_404(purpose_id)
+    purpose.is_active = not purpose.is_active
+    db.session.commit()
+    return redirect(url_for("admin.live_to_give_purposes"))
+
+
+@bp.route("/live-to-give-purposes/<int:purpose_id>/edit", methods=["GET", "POST"])
+@login_required
+@admin_role_required
+def live_to_give_purpose_edit(purpose_id):
+    purpose = LiveToGivePurpose.query.get_or_404(purpose_id)
+    if request.method == "POST":
+        new_name = request.form.get("name", "").strip()
+        if not new_name:
+            flash("Purpose name can't be blank.")
+            return redirect(url_for("admin.live_to_give_purpose_edit", purpose_id=purpose_id))
+        existing = LiveToGivePurpose.query.filter(
+            LiveToGivePurpose.name == new_name, LiveToGivePurpose.id != purpose.id
+        ).first()
+        if existing:
+            flash(f"Another donation purpose is already named '{new_name}'.")
+            return redirect(url_for("admin.live_to_give_purpose_edit", purpose_id=purpose_id))
+
+        purpose.name = new_name
+        db.session.commit()
+        flash(f"Donation purpose renamed to '{purpose.name}'.")
+        return redirect(url_for("admin.live_to_give_purposes"))
+
+    return render_template("admin/live_to_give_purpose_edit.html", purpose=purpose)
+
+
+@bp.route("/live-to-give-purposes/<int:purpose_id>/delete", methods=["POST"])
+@login_required
+@admin_role_required
+def live_to_give_purpose_delete(purpose_id):
+    purpose = LiveToGivePurpose.query.get_or_404(purpose_id)
+    has_donations = Donation.query.filter_by(live_to_give_purpose_id=purpose.id).first() is not None
+    if has_donations:
+        flash(
+            f"Can't delete '{purpose.name}' -- it has donations recorded against it. "
+            "Deactivate it instead to hide it from the Live To Give form."
+        )
+        return redirect(url_for("admin.live_to_give_purposes"))
+
+    db.session.delete(purpose)
+    db.session.commit()
+    flash(f"Donation purpose '{purpose.name}' deleted.")
+    return redirect(url_for("admin.live_to_give_purposes"))
+
+
 @bp.route("/export/10bd")
 @login_required
 def export_10bd():
@@ -774,10 +872,14 @@ def export_10bd():
         db.session.query(Donation, Donor, Campaign)
         .join(Donor, Donation.donor_id == Donor.id)
         .join(Campaign, Donation.campaign_id == Campaign.id)
-        .filter(Donation.status == "success", Donation.financial_year == fy, Campaign.is_80g.is_(True))
+        .filter(Donation.status == "success", Donation.financial_year == fy)
         .order_by(Donation.donation_date)
         .all()
     )
+    # Filtered in Python rather than at the query level (Campaign.is_80g)
+    # because 80G-eligibility is per-donation for Live To Give (donor picks
+    # 80G/Non-80G per donation) -- see Donation.effective_is_80g.
+    rows = [(donation, donor, campaign) for donation, donor, campaign in rows if donation.effective_is_80g]
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -838,7 +940,7 @@ def export_collections():
             float(donation.amount),
             donation.payment_mode,
             campaign.name,
-            "Yes" if campaign.is_80g else "No",
+            "Yes" if donation.effective_is_80g else "No",
         ])
 
     return Response(

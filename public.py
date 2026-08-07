@@ -35,7 +35,7 @@ from flask import (
 )
 
 from extensions import db, csrf, limiter
-from models import Donor, Campaign, Donation, ReceiptCounter, BaceProperty, Festival, SevaType
+from models import Donor, Campaign, Donation, ReceiptCounter, BaceProperty, Festival, SevaType, LiveToGivePurpose
 from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email
 from utils import is_valid_pan
@@ -70,7 +70,10 @@ class _InvalidFkError(Exception):
     into a normal 400 JSON error rather than propagating as a 500."""
 
 
-_FK_LABELS = {"bace_property_id": "BACE property", "festival_id": "festival", "seva_type_id": "seva type"}
+_FK_LABELS = {
+    "bace_property_id": "BACE property", "festival_id": "festival", "seva_type_id": "seva type",
+    "live_to_give_purpose_id": "donation purpose",
+}
 
 
 def _validated_fk_id(data, key, model):
@@ -200,6 +203,31 @@ def festival_seva_form():
     )
 
 
+@bp.route("/live-to-give")
+def live_to_give_form():
+    """Dedicated collection form for the "Live To Give" (Nitya Seva)
+    campaign -- same underlying donation pipeline as the main form, fixed
+    to the "Live To Give" campaign, with a donation-purpose picker
+    (LiveToGivePurpose, managed at Admin -> Live To Give Purposes) and a
+    donor-chosen 80G/Non-80G receipt type per donation (unique to this
+    form -- every other campaign's 80G status is fixed, see
+    Donation.effective_is_80g)."""
+    campaign = Campaign.query.filter_by(name="Live To Give").first()
+    if campaign is None or not campaign.is_active:
+        flash("The Live To Give campaign isn't set up yet -- please contact the office.")
+        return redirect(url_for("public.donate_form"))
+
+    purposes = LiveToGivePurpose.query.filter_by(is_active=True).order_by(LiveToGivePurpose.name).all()
+    return render_template(
+        "live_to_give.html",
+        campaign=campaign,
+        purposes=purposes,
+        razorpay_enabled=current_app.config["RAZORPAY_ENABLED"],
+        razorpay_key_id=current_app.config["RAZORPAY_KEY_ID"],
+        org_name=current_app.config["ORG_NAME"],
+    )
+
+
 @bp.route("/api/create-order", methods=["POST"])
 @limiter.limit("30 per hour")
 def create_order():
@@ -216,6 +244,8 @@ def create_order():
     campaign = Campaign.query.get_or_404(campaign_id)
     if amount <= 0:
         return jsonify({"error": "Invalid amount"}), 400
+    if campaign.name == "Live To Give" and amount < 101:
+        return jsonify({"error": "Minimum contribution for Live To Give is Rs. 101."}), 400
 
     if not data.get("consent"):
         return jsonify({"error": "Please confirm the data-use consent to continue."}), 400
@@ -225,15 +255,29 @@ def create_order():
         return jsonify({"error": "That PAN doesn't look right. It should be 10 characters like ABCDE1234F."}), 400
 
     # Optional fields only meaningful for the dedicated BACE Contribution /
-    # Festival Seva forms -- which campaign a request claims to be for is
-    # incidental (any campaign_id could technically send one), so validate
-    # each against the database rather than trust the caller.
+    # Festival Seva / Live To Give forms -- which campaign a request claims
+    # to be for is incidental (any campaign_id could technically send one),
+    # so validate each against the database rather than trust the caller.
     try:
         bace_property_id = _validated_fk_id(data, "bace_property_id", BaceProperty)
         festival_id = _validated_fk_id(data, "festival_id", Festival)
         seva_type_id = _validated_fk_id(data, "seva_type_id", SevaType)
+        live_to_give_purpose_id = _validated_fk_id(data, "live_to_give_purpose_id", LiveToGivePurpose)
     except _InvalidFkError as e:
         return jsonify({"error": str(e)}), 400
+
+    # Only the Live To Give form sends this -- the donor's own choice of
+    # 80G vs Non-80G receipt for this specific donation. Any other value
+    # (missing, or anything other than "80g"/"non80g") is treated as "not
+    # asked", so Donation.effective_is_80g falls back to the campaign's own
+    # is_80g flag exactly as it always has for every other form.
+    receipt_type = data.get("receipt_type")
+    if receipt_type == "80g":
+        is_80g_requested = True
+    elif receipt_type == "non80g":
+        is_80g_requested = False
+    else:
+        is_80g_requested = None
 
     remarks = (data.get("remarks") or "").strip()[:300] or None
 
@@ -249,6 +293,8 @@ def create_order():
         bace_property_id=bace_property_id,
         festival_id=festival_id,
         seva_type_id=seva_type_id,
+        live_to_give_purpose_id=live_to_give_purpose_id,
+        is_80g_requested=is_80g_requested,
         remarks=remarks,
         consent_given=True,
         consent_at=datetime.datetime.utcnow(),
@@ -334,7 +380,7 @@ def _finalize_success(donation):
         return
 
     campaign = donation.campaign
-    receipt_number, fy = ReceiptCounter.next_receipt_number(campaign.is_80g, donation.donation_date)
+    receipt_number, fy = ReceiptCounter.next_receipt_number(donation.effective_is_80g, donation.donation_date)
     donation.receipt_number = receipt_number
     donation.financial_year = fy
     donation.status = "success"

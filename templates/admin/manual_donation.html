@@ -44,6 +44,30 @@
     </div>
   </div>
 
+  <div class="mb-3" id="live-to-give-purpose-field" style="display:none;">
+    <label class="form-label">Donation Purpose</label>
+    <select class="form-select" name="live_to_give_purpose_id" id="live_to_give_purpose_id">
+      <option value="">-- Select a purpose --</option>
+      {% for p in live_to_give_purposes %}
+      <option value="{{ p.id }}">{{ p.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="mb-3" id="live-to-give-receipt-type-field" style="display:none;">
+    <label class="form-label">Receipt Required</label>
+    <div class="d-flex gap-3">
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="receipt_type" id="receipt_type_80g" value="80g">
+        <label class="form-check-label" for="receipt_type_80g">80G (To claim tax benefits)</label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="receipt_type" id="receipt_type_non80g" value="non80g">
+        <label class="form-check-label" for="receipt_type_non80g">Non 80G</label>
+      </div>
+    </div>
+  </div>
+
   <div class="row">
     <div class="col-md-6 mb-3">
       <label class="form-label">Amount (Rs.)</label>
@@ -111,6 +135,9 @@
   const baceSelect = document.getElementById('bace_property_id');
   const festivalFields = document.getElementById('festival-fields');
   const festivalSelect = document.getElementById('festival_id');
+  const liveToGivePurposeField = document.getElementById('live-to-give-purpose-field');
+  const liveToGivePurposeSelect = document.getElementById('live_to_give_purpose_id');
+  const liveToGiveReceiptTypeField = document.getElementById('live-to-give-receipt-type-field');
 
   function syncConditionalFields() {
     const selected = campaignSelect.options[campaignSelect.selectedIndex];
@@ -125,6 +152,12 @@
     festivalFields.style.display = isFestival ? '' : 'none';
     festivalSelect.required = isFestival;
     if (!isFestival) festivalSelect.value = '';
+
+    const isLiveToGive = name === 'Live To Give';
+    liveToGivePurposeField.style.display = isLiveToGive ? '' : 'none';
+    liveToGiveReceiptTypeField.style.display = isLiveToGive ? '' : 'none';
+    liveToGivePurposeSelect.required = isLiveToGive;
+    if (!isLiveToGive) liveToGivePurposeSelect.value = '';
   }
 
   campaignSelect.addEventListener('change', syncConditionalFields);

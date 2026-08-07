@@ -84,13 +84,13 @@
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script>
-const chartPalette = ['#7a1730', '#e2a33d', '#c8862a', '#a83a52', '#4c7a45', '#55101f', '#f4d9a6', '#3a0c18'];
+const chartPalette = ['#1d3b6d', '#e2a33d', '#c8862a', '#3f6ea8', '#4c7a45', '#0f2444', '#f4d9a6', '#0a1930'];
 
 new Chart(document.getElementById('monthlyChart'), {
   type: 'bar',
   data: {
     labels: {{ monthly | map(attribute='label') | list | tojson }},
-    datasets: [{ label: 'Collection (Rs.)', data: {{ monthly | map(attribute='total') | list | tojson }}, backgroundColor: '#7a1730', borderRadius: 4 }]
+    datasets: [{ label: 'Collection (Rs.)', data: {{ monthly | map(attribute='total') | list | tojson }}, backgroundColor: '#1d3b6d', borderRadius: 4 }]
   },
   options: { plugins: { legend: { display: false } } }
 });

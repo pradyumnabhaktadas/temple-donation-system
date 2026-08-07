@@ -1,15 +1,19 @@
 /* =========================================================
    Temple Donation System — theme
-   Warm maroon / saffron / gold palette, serif headings.
+   Krishna blue / gold palette, serif headings. The CSS
+   variable names below (--maroon, --maroon-dark) are kept
+   from the original warm palette to avoid touching every
+   rule that references them -- their VALUES are now deep
+   blue, not maroon. Read them as "primary" / "primary-dark".
    Overrides Bootstrap 5.3 CSS variables so components
    (buttons, badges, links, focus rings) pick the theme up
    automatically without a Sass build step.
    ========================================================= */
 
 :root {
-  --maroon: #7a1730;
-  --maroon-dark: #55101f;
-  --maroon-rgb: 122, 23, 48;
+  --maroon: #1d3b6d;
+  --maroon-dark: #0f2444;
+  --maroon-rgb: 29, 59, 109;
   --saffron: #e2a33d;
   --saffron-dark: #c8862a;
   --saffron-light: #f4d9a6;
@@ -53,16 +57,16 @@ a:hover {
 .card {
   border: none;
   border-radius: 1rem;
-  box-shadow: 0 2px 10px rgba(122, 23, 48, 0.07);
+  box-shadow: 0 2px 10px rgba(29, 59, 109, 0.07);
 }
 .card.shadow-sm {
-  box-shadow: 0 4px 18px rgba(122, 23, 48, 0.09) !important;
+  box-shadow: 0 4px 18px rgba(29, 59, 109, 0.09) !important;
 }
 .stat-card {
   border-radius: 1rem;
   padding: 1.1rem 1.25rem;
   background: linear-gradient(135deg, #ffffff 0%, var(--cream-alt) 100%);
-  border: 1px solid rgba(122, 23, 48, 0.08);
+  border: 1px solid rgba(29, 59, 109, 0.08);
 }
 .stat-card .stat-label {
   font-size: 0.78rem;
@@ -103,7 +107,7 @@ a:hover {
 }
 .btn-outline-secondary {
   --bs-btn-color: var(--maroon);
-  --bs-btn-border-color: rgba(122, 23, 48, 0.35);
+  --bs-btn-border-color: rgba(29, 59, 109, 0.35);
   --bs-btn-hover-bg: var(--maroon);
   --bs-btn-hover-border-color: var(--maroon);
 }
@@ -127,7 +131,7 @@ a:hover {
 
 /* ---------- Public hero header ---------- */
 .hero-banner {
-  background: linear-gradient(135deg, var(--maroon) 0%, var(--maroon-dark) 65%, #3a0c18 100%);
+  background: linear-gradient(135deg, var(--maroon) 0%, var(--maroon-dark) 65%, #0a1930 100%);
   color: #fff;
   padding: 2.75rem 1.5rem 3.25rem;
   border-radius: 0 0 1.5rem 1.5rem;
@@ -210,7 +214,7 @@ a:hover {
   text-transform: uppercase;
   letter-spacing: 0.03em;
   border-bottom-width: 2px;
-  border-bottom-color: rgba(122,23,48,0.2);
+  border-bottom-color: rgba(29,59,109,0.2);
 }
 .table.bg-white {
   background-color: #fff !important;
@@ -221,7 +225,7 @@ a:hover {
 /* ---------- Alerts ---------- */
 .alert-info {
   background-color: var(--cream-alt);
-  border-color: rgba(122,23,48,0.15);
+  border-color: rgba(29,59,109,0.15);
   color: var(--maroon-dark);
 }
 .alert-warning {
@@ -237,38 +241,38 @@ body {
 }
 .site-topbar {
   background: rgba(255, 253, 248, 0.9);
-  border-bottom: 1px solid rgba(85, 16, 31, 0.1);
+  border-bottom: 1px solid rgba(15,36,68,0.1);
   backdrop-filter: blur(12px);
   position: relative;
   z-index: 3;
 }
 .site-nav { min-height: 76px; }
 .site-brand { color: var(--maroon-dark); max-width: min(68vw, 430px); }
-.brand-mark {
-  display: grid; place-items: center; flex: 0 0 auto;
-  width: 39px; height: 39px; border-radius: 50%;
-  background: var(--maroon); color: #f9db9a; font-size: 1.35rem;
-  box-shadow: 0 5px 13px rgba(85,16,31,.16);
+.brand-marks { display:flex; align-items:center; gap:.4rem; flex:0 0 auto; }
+.brand-logo-main { height:42px; width:auto; flex:0 0 auto; }
+.brand-logo-iyf {
+  height:34px; width:34px; border-radius:50%; flex:0 0 auto;
+  object-fit:cover; box-shadow:0 2px 7px rgba(15,36,68,.18);
 }
 .brand-kicker { display:block; color:var(--saffron-dark); font-size:.59rem; font-weight:700; letter-spacing:.12em; line-height:1.2; }
 .site-brand .brand-font { font-size: .98rem; letter-spacing: -.025em; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.site-account-link { color:var(--maroon-dark); font-size:.82rem; font-weight:700; white-space:nowrap; padding:.54rem .75rem; border:1px solid rgba(122,23,48,.15); border-radius:99px; transition:.18s ease; }
+.site-account-link { color:var(--maroon-dark); font-size:.82rem; font-weight:700; white-space:nowrap; padding:.54rem .75rem; border:1px solid rgba(29,59,109,.15); border-radius:99px; transition:.18s ease; }
 .site-account-link:hover { background:var(--maroon); border-color:var(--maroon); color:#fff; }
 .site-main { min-height: calc(100vh - 148px); }
 
 .donation-hero {
   position:relative; isolation:isolate; overflow:hidden; border-radius:1.5rem;
   min-height: 318px; padding: 3.6rem 4rem; display:flex; align-items:center;
-  background: linear-gradient(90deg, rgba(48,7,17,.86) 0%, rgba(63,10,23,.68) 32%, rgba(80,15,30,.38) 58%, rgba(90,20,34,.18) 78%, rgba(90,20,34,.12) 100%),
+  background: linear-gradient(90deg, rgba(10,20,38,.86) 0%, rgba(14,28,50,.68) 32%, rgba(18,38,66,.38) 58%, rgba(22,46,78,.18) 78%, rgba(22,46,78,.12) 100%),
               url('images/temple/front-view.jpg') center 30%/cover no-repeat;
-  color:#fff; box-shadow: 0 18px 38px rgba(72, 15, 29, .15);
+  color:#fff; box-shadow: 0 18px 38px rgba(15,36,68,.15);
 }
 .donation-hero:before { content:""; position:absolute; inset:0; z-index:-1; background:radial-gradient(circle at 78% 38%, rgba(239,185,88,.32), transparent 18%), radial-gradient(circle at 98% 98%, rgba(255,255,255,.1), transparent 38%); }
 .donation-hero-copy { max-width:610px; }
 .hero-eyebrow, .section-kicker { color:#edc56f; font-size:.67rem; letter-spacing:.14em; font-weight:700; text-transform:uppercase; margin:0 0 .7rem; }
-.donation-hero h1 { color:#fff; margin:0; max-width:565px; font-size:clamp(2.75rem,5vw,4.2rem); line-height:.98; letter-spacing:-.06em; text-shadow:0 2px 18px rgba(20,3,8,.45); }
+.donation-hero h1 { color:#fff; margin:0; max-width:565px; font-size:clamp(2.75rem,5vw,4.2rem); line-height:.98; letter-spacing:-.06em; text-shadow:0 2px 18px rgba(4,10,20,.45); }
 .donation-hero h1 em { color:#f5ca75; font-style:italic; }
-.hero-lede { max-width:505px; margin:1.15rem 0 1.45rem; color:#f6dcb0; font-size:1.02rem; line-height:1.6; text-shadow:0 1px 10px rgba(20,3,8,.4); }
+.hero-lede { max-width:505px; margin:1.15rem 0 1.45rem; color:#f6dcb0; font-size:1.02rem; line-height:1.6; text-shadow:0 1px 10px rgba(4,10,20,.4); }
 .hero-trust-row { display:flex; gap:1.35rem; flex-wrap:wrap; color:#f7e8ce; font-size:.76rem; }
 .hero-trust-row span { display:flex; gap:.35rem; align-items:center; }.hero-trust-row b { color:#f6ca70; font-size:.85rem; }
 .hero-lotus { position:absolute; right:8.5%; top:50%; transform:translateY(-50%); width:185px; height:185px; z-index:-1; }
@@ -282,8 +286,8 @@ body {
 .photo-gallery-grid.cols-5 .photo-card { aspect-ratio:4/3; }
 .photo-card {
   position:relative; aspect-ratio:4/5; border-radius:1rem; overflow:hidden;
-  display:flex; align-items:flex-end; box-shadow:0 10px 24px rgba(62,28,19,.14);
-  background:linear-gradient(150deg,var(--maroon) 0%,#a03442 100%);
+  display:flex; align-items:flex-end; box-shadow:0 10px 24px rgba(14,26,46,.14);
+  background:linear-gradient(150deg,var(--maroon) 0%,#3f6ea8 100%);
 }
 .photo-card img {
   position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
@@ -296,8 +300,24 @@ body {
 }
 .photo-card-caption {
   position:relative; z-index:1; width:100%; padding:.9rem .85rem .8rem;
-  background:linear-gradient(0deg, rgba(20,8,4,.72) 0%, transparent 100%);
+  background:linear-gradient(0deg, rgba(5,10,20,.72) 0%, transparent 100%);
   color:#fff; font-size:.78rem; font-weight:700; letter-spacing:.01em;
+}
+
+/* Live To Give promo banner -- the artwork is a complete, self-contained
+   graphic (logo, title, tagline already baked in), so it's shown at its
+   own natural aspect ratio rather than cropped into a wide strip. */
+.live-to-give-banner {
+  display:block; position:relative; max-width:820px; margin:2.4rem auto 0;
+  border-radius:1.25rem; overflow:hidden; box-shadow:0 14px 34px rgba(15,36,68,.16);
+  transition:.2s ease;
+}
+.live-to-give-banner:hover { transform:translateY(-3px); box-shadow:0 20px 42px rgba(15,36,68,.22); }
+.live-to-give-banner img { display:block; width:100%; height:auto; }
+.live-to-give-banner-cta {
+  position:absolute; right:1.1rem; bottom:1.1rem; background:var(--maroon); color:#fff;
+  font-weight:700; font-size:.82rem; padding:.55rem 1rem; border-radius:99px;
+  box-shadow:0 6px 14px rgba(15,36,68,.25);
 }
 
 /* "Ways to give" hub cards -- links out to the dedicated Festival Seva /
@@ -305,11 +325,11 @@ body {
 .ways-to-give { margin: 0 0 2.8rem; }
 .ways-to-give-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; }
 .give-way-card {
-  display:block; text-decoration:none; background:#fffdfa; border:1px solid rgba(100,47,30,.11);
-  border-radius:1rem; padding:1.4rem 1.3rem; box-shadow:0 8px 20px rgba(62,28,19,.08);
+  display:block; text-decoration:none; background:#fffdfa; border:1px solid rgba(22,42,72,.11);
+  border-radius:1rem; padding:1.4rem 1.3rem; box-shadow:0 8px 20px rgba(14,26,46,.08);
   transition:.18s ease; height:100%;
 }
-.give-way-card:hover { transform:translateY(-3px); box-shadow:0 14px 28px rgba(62,28,19,.15); border-color:rgba(122,23,48,.25); }
+.give-way-card:hover { transform:translateY(-3px); box-shadow:0 14px 28px rgba(14,26,46,.15); border-color:rgba(29,59,109,.25); }
 .give-way-card .give-way-icon {
   display:grid; place-items:center; width:44px; height:44px; margin-bottom:.75rem;
   background:var(--cream-alt); color:var(--maroon); border-radius:50%; font-size:1.3rem;
@@ -319,14 +339,14 @@ body {
 .give-way-card .give-way-arrow { display:inline-block; margin-top:.6rem; color:var(--saffron-dark); font-weight:700; font-size:.82rem; }
 
 .donation-layout { margin-top:-2.9rem; position:relative; z-index:2; }
-.donation-card { background:#fffdfa; border:1px solid rgba(100,47,30,.11); border-radius:1.25rem; padding:2rem; box-shadow:0 18px 42px rgba(62,28,19,.13); }
+.donation-card { background:#fffdfa; border:1px solid rgba(22,42,72,.11); border-radius:1.25rem; padding:2rem; box-shadow:0 18px 42px rgba(14,26,46,.13); }
 .donation-card-head { display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; padding-bottom:1.35rem; border-bottom:1px solid #eee4d6; }
 .donation-card .section-kicker, .account-intro .section-kicker { color:var(--saffron-dark); display:block; margin-bottom:.32rem; }
 .donation-card h2 { font-size:1.8rem; margin:0; letter-spacing:-.04em; }.secure-pill { color:#555e47; background:#edf1e5; border-radius:99px; padding:.42rem .68rem; font-size:.7rem; font-weight:700; white-space:nowrap; }
 .form-section { padding:1.5rem 0; border-bottom:1px solid #eee4d6; }.form-section:last-of-type { border:0; }
 .form-label { font-size:.78rem; letter-spacing:.01em; margin-bottom:.48rem; }.field-note { color:#857566; font-size:.73rem; }
 .form-select,.form-control { border-color:#dfd5c6; min-height:46px; background:#fffefa; font-size:.93rem; }.form-control::placeholder{color:#a99b8d}.form-select:hover,.form-control:hover{border-color:#bdab95}
-.amount-picker { display:grid; grid-template-columns:repeat(4,1fr); gap:.55rem; margin: .8rem 0; }.amount-option { border:1px solid #e0d7c9; color:var(--maroon-dark); background:#fff; border-radius:.58rem; padding:.58rem .35rem; font-weight:700; font-size:.85rem; transition:.18s ease; }.amount-option:hover,.amount-option.active { background:var(--maroon); border-color:var(--maroon); color:#fff; box-shadow:0 4px 9px rgba(85,16,31,.18); }
+.amount-picker { display:grid; grid-template-columns:repeat(4,1fr); gap:.55rem; margin: .8rem 0; }.amount-option { border:1px solid #e0d7c9; color:var(--maroon-dark); background:#fff; border-radius:.58rem; padding:.58rem .35rem; font-weight:700; font-size:.85rem; transition:.18s ease; }.amount-option:hover,.amount-option.active { background:var(--maroon); border-color:var(--maroon); color:#fff; box-shadow:0 4px 9px rgba(15,36,68,.18); }
 .currency-input { position:relative; }.currency-input>span { position:absolute; top:50%; transform:translateY(-50%); left: .9rem; z-index:2; color:var(--maroon-dark); font-weight:700; }.currency-input input { padding-left:2rem; }
 .section-label { display:flex; align-items:center; gap:.55rem; color:var(--maroon-dark); font-size:.8rem; font-weight:700; margin:0 0 1rem; text-transform:uppercase; letter-spacing:.08em; }.section-label span { display:grid; place-items:center; background:var(--cream-alt); color:var(--maroon); width:23px; height:23px; border-radius:50%; font-size:.64rem; }
 .consent-box { margin:1.45rem 0 1.2rem; padding:1rem; border:1px solid #eee1d0; border-radius:.7rem; background:#fcf8f0; }.consent-box .form-check-input{margin-left:-1.5rem}.consent-box .form-check-label{line-height:1.5;color:#716455!important;}
@@ -337,8 +357,8 @@ body {
 .site-footer-note { margin:0; padding:1.4rem 1rem 2rem; color:#8a7c6d; font-size:.75rem; text-align:center; }.site-footer-note span { color:var(--saffron-dark); font-size:1rem; margin-right:.3rem; }
 
 @media (max-width: 767.98px) {
-  .site-nav { min-height:67px; }.site-brand .brand-font { font-size:.79rem; }.brand-kicker { font-size:.5rem; }.brand-mark{width:34px;height:34px;font-size:1.1rem}.site-account-link{font-size:.72rem;padding:.46rem .55rem}
+  .site-nav { min-height:67px; }.site-brand .brand-font { font-size:.79rem; }.brand-kicker { font-size:.5rem; }.brand-logo-main{height:34px}.brand-logo-iyf{width:27px;height:27px}.site-account-link{font-size:.72rem;padding:.46rem .55rem}
   .site-main{padding-top:1rem!important}.donation-hero{border-radius:1rem;padding:2.6rem 1.5rem;min-height:360px;align-items:flex-start}.donation-hero h1{font-size:3rem}.hero-lede{font-size:.93rem;max-width:340px}.hero-trust-row{gap:.7rem;font-size:.69rem}.hero-lotus{right:-18px;bottom:-40px;top:auto;transform:none;opacity:.74}
   .donation-layout{margin-top:-1.6rem}.donation-card{padding:1.3rem;border-radius:1rem}.donation-card-head{padding-bottom:1rem}.donation-card h2{font-size:1.55rem}.secure-pill{font-size:.61rem;padding:.35rem .48rem}.form-section{padding:1.15rem 0}.amount-picker{grid-template-columns:repeat(2,1fr)}.consent-box{margin:1.1rem 0 .9rem;padding:.8rem}.success-card{margin-top:2.2rem;padding:2rem 1.25rem!important}.account-intro{margin-top:1.7rem}
-  .photo-gallery-grid{grid-template-columns:repeat(2,1fr)}.photo-gallery-grid.cols-5{grid-template-columns:repeat(2,1fr)}.ways-to-give-grid{grid-template-columns:1fr}
+  .photo-gallery-grid{grid-template-columns:repeat(2,1fr)}.photo-gallery-grid.cols-5{grid-template-columns:repeat(2,1fr)}.ways-to-give-grid{grid-template-columns:1fr}.live-to-give-banner{border-radius:1rem;margin-top:1.6rem}.live-to-give-banner-cta{right:.7rem;bottom:.7rem;font-size:.72rem;padding:.45rem .8rem}
 }

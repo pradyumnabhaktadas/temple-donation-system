@@ -5,7 +5,7 @@ Usage: python seed.py
 """
 from app import create_app
 from extensions import db
-from models import Campaign, AdminUser, BaceProperty, Festival, SevaType
+from models import Campaign, AdminUser, BaceProperty, Festival, SevaType, LiveToGivePurpose
 
 CAMPAIGNS = [
     ("Temple Construction", True),
@@ -20,6 +20,10 @@ CAMPAIGNS = [
     ("Retreats and Event Registrations", False),
     ("Course Fees", False),
     ("Other Internal Collections", False),
+    # is_80g here is just the campaign's default -- the Live To Give form
+    # lets each donor pick 80G/Non-80G per donation, which overrides this
+    # (see Donation.effective_is_80g).
+    ("Live To Give", True),
 ]
 
 # Starting list for the BACE Contribution form's property dropdown -- editable
@@ -54,6 +58,24 @@ SEVA_TYPES = [
     ("Full Festival Sponsorship", None),
 ]
 
+# Starting list for the Live To Give form's donation-purpose dropdown --
+# editable afterwards from Admin -> Live To Give Purposes without touching
+# code. ("Sudama Seva" appeared twice in the reference list this was
+# sourced from -- seeded once here.)
+LIVE_TO_GIVE_PURPOSES = [
+    "ISKCON Life Membership",
+    "Cow Protection (गौ माता की सेवा के लिए)",
+    "Temple Construction (मंदिर निर्माण के लिए)",
+    "Food for Life (भोजन/प्रसाद वितरण के लिए)",
+    "Spreading Sanatan Dharma (सनातन धर्म के प्रचार के लिए)",
+    "College Preaching",
+    "As per the Need of the Service (सेवा की आवश्यकता अनुसार)",
+    "Sudama Seva",
+    "Mango Festival",
+    "Festivals",
+    "IYF Camp / Yatra",
+]
+
 app = create_app()
 
 with app.app_context():
@@ -72,6 +94,10 @@ with app.app_context():
     for name, suggested_amount in SEVA_TYPES:
         if not SevaType.query.filter_by(name=name).first():
             db.session.add(SevaType(name=name, suggested_amount=suggested_amount))
+
+    for name in LIVE_TO_GIVE_PURPOSES:
+        if not LiveToGivePurpose.query.filter_by(name=name).first():
+            db.session.add(LiveToGivePurpose(name=name))
 
     if not AdminUser.query.filter_by(username="admin").first():
         admin = AdminUser(username="admin", role="admin", must_change_password=True)

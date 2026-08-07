@@ -414,7 +414,38 @@ SQLite file or on-disk receipt PDFs without a larger rearchitecture.
    `RAZORPAY_WEBHOOK_SECRET`'s webhook URL in the Razorpay Dashboard to
    `https://<service-name>.onrender.com/webhooks/razorpay` (see "Webhook"
    above), and log in once as `admin` to set a real password.
-6. Add a custom domain under the service's **Settings** tab, if you have one.
+6. Add a custom domain under the service's **Settings** tab, if you have one
+   (see "Custom domain" below).
+
+#### Custom domain
+
+This app is live at **givetokrishna.com** (Cloudflare-managed DNS). Steps
+taken, for reference if you ever need to redo this (new domain, domain
+transfer, disaster recovery, etc.):
+
+1. Render dashboard → the web service → **Settings → Custom Domains → Add
+   Custom Domain** → add both the apex (`givetokrishna.com`) and `www`
+   (`www.givetokrishna.com`).
+2. In Cloudflare → the domain → **DNS → Records**, add:
+
+   | Type | Name | Target | Proxy status |
+   |---|---|---|---|
+   | CNAME | `@` (root) | `<service-name>.onrender.com` | DNS only (grey cloud) |
+   | CNAME | `www` | `<service-name>.onrender.com` | DNS only (grey cloud) |
+
+   A CNAME at the root works because Cloudflare flattens it automatically.
+   Keep both records **DNS only** (not proxied) while Render issues the TLS
+   certificate — the orange-cloud proxy can interfere with Let's Encrypt
+   validation. Safe to switch to proxied afterward, once Render shows both
+   domains as **Verified** with **Certificate Issued**.
+3. In Render, pick one domain as primary and let the other redirect to it —
+   `www.givetokrishna.com` redirects to `givetokrishna.com` here.
+4. Update the Razorpay webhook URL (Dashboard → Settings → Webhooks) from
+   the `onrender.com` URL to `https://givetokrishna.com/webhooks/razorpay`.
+5. No code changes are needed for a domain swap — nothing in this app
+   hardcodes a hostname (no `SERVER_NAME`, no hardcoded `onrender.com`
+   links); Flask, Talisman, and CSRF all validate against whatever host the
+   request actually came in on.
 
 **Manual path (no Blueprint):** New → Web Service → connect the repo → set
 Build Command to `pip install -r requirements.txt` and Start Command to

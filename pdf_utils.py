@@ -45,9 +45,10 @@ GREY = colors.HexColor("#6b6b6b")
 WATERMARK_GREEN = colors.HexColor("#d9ecd4")
 
 # Legacy names kept for generate_annual_statement_pdf, which still uses the
-# app's maroon/saffron site theme rather than the receipt's exact palette.
-MAROON = colors.HexColor("#7a1730")
-MAROON_DARK = colors.HexColor("#55101f")
+# app's site theme (now Krishna blue/gold) rather than the receipt's exact
+# palette. Values match static/style.css's --maroon/--maroon-dark/--saffron.
+MAROON = colors.HexColor("#1d3b6d")
+MAROON_DARK = colors.HexColor("#0f2444")
 SAFFRON = colors.HexColor("#e2a33d")
 
 
@@ -565,18 +566,28 @@ def generate_receipt_pdf(donation, donor, campaign, org_cfg):
 
     _box(c, purpose_box, fill=LAVENDER, stroke=PINK)
     _box_label_above(c, purpose_box, "Purpose of Donation (Corpus / General / Others)", size=9.5)
-    # For BACE Contribution / Festival Seva, show which property/occasion
-    # (and seva tier) this payment is for alongside the campaign name --
-    # _value_in_box already wraps to 2 lines, which fits these combinations
-    # for the names in use.
-    purpose_parts = [campaign.name]
-    if getattr(donation, "bace_property", None):
-        purpose_parts.append(donation.bace_property.name)
-    if getattr(donation, "festival", None):
-        purpose_parts.append(donation.festival.name)
-    if getattr(donation, "seva_type", None):
-        purpose_parts.append(donation.seva_type.name)
-    _value_in_box(c, purpose_box, " -- ".join(purpose_parts))
+    if campaign.name == "BACE Contribution":
+        # BACE Contribution receipts always read "BACE Contribution" here,
+        # regardless of which property the payment was for -- the property
+        # itself isn't shown on the receipt's Purpose line.
+        purpose_text = "BACE Contribution"
+    elif campaign.name == "Live To Give" and getattr(donation, "live_to_give_purpose", None):
+        # Live To Give receipts show the specific purpose the donor picked
+        # (e.g. "Cow Protection", "Temple Construction") in place of the
+        # campaign name.
+        purpose_text = donation.live_to_give_purpose.name
+    else:
+        # For Festival Seva, show which occasion (and seva tier) this
+        # payment is for alongside the campaign name -- _value_in_box
+        # already wraps to 2 lines, which fits these combinations for the
+        # names in use.
+        purpose_parts = [campaign.name]
+        if getattr(donation, "festival", None):
+            purpose_parts.append(donation.festival.name)
+        if getattr(donation, "seva_type", None):
+            purpose_parts.append(donation.seva_type.name)
+        purpose_text = " -- ".join(purpose_parts)
+    _value_in_box(c, purpose_box, purpose_text)
 
     # Signature boxes removed entirely, per request -- no boxes, no captions.
 
@@ -781,7 +792,7 @@ def generate_annual_statement_pdf(donor, donations, fy, org_cfg):
             c.setFillColor(INK)
 
         amount = float(d.amount)
-        is_80g = d.campaign.is_80g
+        is_80g = d.effective_is_80g
         if is_80g:
             total_80g += amount
         else:

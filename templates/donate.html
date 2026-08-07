@@ -120,6 +120,11 @@
   </div>
 </div>
 
+<a href="{{ url_for('public.live_to_give_form') }}" class="live-to-give-banner">
+  <img src="{{ url_for('static', filename='images/live-to-give/banner-b.jpg') }}" alt="Live To Give -- Nitya Seva. Our life is successful only when it becomes an offering in the service of Krishna.">
+  <span class="live-to-give-banner-cta">Give now →</span>
+</a>
+
 <section class="ways-to-give">
   <div class="section-label"><span>◌</span> More ways to give</div>
   <div class="ways-to-give-grid">
@@ -313,7 +318,7 @@
         email: donorInput.email,
         contact: donorInput.phone,
       },
-      theme: { color: '#7a1730' },
+      theme: { color: '#1d3b6d' },
     };
     const rzp = new Razorpay(options);
     rzp.on('payment.failed', function () { payBtn.disabled = false; });
