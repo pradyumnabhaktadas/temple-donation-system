@@ -320,7 +320,20 @@ def create_order():
         try:
             order = client.order.create(
                 {
-                    "amount": int(amount * 100),  # paise
+                    # round(), not int(): float multiplication can land a
+                    # hair under the intended paise value (e.g. 128.14 * 100
+                    # == 12813.999999999998 in IEEE 754 float64), and int()
+                    # truncates that down to the wrong paise amount --
+                    # off-by-one-paisa from what the browser then passes to
+                    # Razorpay's checkout widget (templates/*.html all do
+                    # Math.round(order.amount * 100), which rounds
+                    # correctly). That mismatch between the order Razorpay
+                    # actually created and the amount checkout.js opens with
+                    # is rejected client-side as a generic "Something went
+                    # wrong" -- silently breaking any donation amount whose
+                    # cents happen to round down under float imprecision
+                    # (roughly 1 in 20 possible two-decimal amounts).
+                    "amount": round(amount * 100),  # paise
                     "currency": "INR",
                     "receipt": order_receipt,
                     "notes": {"donation_id": str(donation.id), "campaign": campaign.name},
