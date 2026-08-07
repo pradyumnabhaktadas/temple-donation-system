@@ -30,7 +30,7 @@ def app():
         db.session.add_all([
             Campaign(name="Annadan", is_80g=True),
             Campaign(name="Temple Construction", is_80g=True, target_amount=1000000),
-            Campaign(name="BACE Rent", is_80g=False),
+            Campaign(name="BACE Contribution", is_80g=False),
         ])
 
         admin = AdminUser(username="testadmin", role="admin")

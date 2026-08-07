@@ -6,12 +6,44 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="mb-3">
     <label class="form-label">Campaign / Purpose</label>
-    <select class="form-select" name="campaign_id" required>
+    <select class="form-select" name="campaign_id" id="campaign_id" required>
       {% for c in campaigns %}
-      <option value="{{ c.id }}">{{ c.name }} {% if not c.is_80g %}(Non-80G){% endif %}</option>
+      <option value="{{ c.id }}" data-name="{{ c.name }}">{{ c.name }} {% if not c.is_80g %}(Non-80G){% endif %}</option>
       {% endfor %}
     </select>
   </div>
+
+  <div class="mb-3" id="bace-property-field" style="display:none;">
+    <label class="form-label">BACE Property</label>
+    <select class="form-select" name="bace_property_id" id="bace_property_id">
+      <option value="">-- Select a property --</option>
+      {% for p in bace_properties %}
+      <option value="{{ p.id }}">{{ p.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="row" id="festival-fields" style="display:none;">
+    <div class="col-md-6 mb-3">
+      <label class="form-label">Festival / Occasion</label>
+      <select class="form-select" name="festival_id" id="festival_id">
+        <option value="">-- Select a festival --</option>
+        {% for f in festivals %}
+        <option value="{{ f.id }}">{{ f.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-6 mb-3">
+      <label class="form-label">Seva Type <span class="text-muted">(optional)</span></label>
+      <select class="form-select" name="seva_type_id" id="seva_type_id">
+        <option value="">-- General contribution --</option>
+        {% for s in seva_types %}
+        <option value="{{ s.id }}">{{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
   <div class="row">
     <div class="col-md-6 mb-3">
       <label class="form-label">Amount (Rs.)</label>
@@ -72,4 +104,31 @@
   </div>
   <button type="submit" class="btn btn-gold">Save & Generate Receipt</button>
 </form>
+<script>
+(function () {
+  const campaignSelect = document.getElementById('campaign_id');
+  const baceField = document.getElementById('bace-property-field');
+  const baceSelect = document.getElementById('bace_property_id');
+  const festivalFields = document.getElementById('festival-fields');
+  const festivalSelect = document.getElementById('festival_id');
+
+  function syncConditionalFields() {
+    const selected = campaignSelect.options[campaignSelect.selectedIndex];
+    const name = selected ? selected.dataset.name : '';
+
+    const isBaceContribution = name === 'BACE Contribution';
+    baceField.style.display = isBaceContribution ? '' : 'none';
+    baceSelect.required = isBaceContribution;
+    if (!isBaceContribution) baceSelect.value = '';
+
+    const isFestival = name === 'Festivals';
+    festivalFields.style.display = isFestival ? '' : 'none';
+    festivalSelect.required = isFestival;
+    if (!isFestival) festivalSelect.value = '';
+  }
+
+  campaignSelect.addEventListener('change', syncConditionalFields);
+  syncConditionalFields();
+})();
+</script>
 {% endblock %}

@@ -77,12 +77,88 @@ class Campaign(db.Model):
         return f"<Campaign {self.name}>"
 
 
+class BaceProperty(db.Model):
+    """A specific BACE (Bhaktivedanta Academy for Culture and Education, or
+    similar temple-run property) location -- e.g. "Nandgaon BACE",
+    "Goverdhan BACE". Donations against the "BACE Contribution" campaign
+    record which specific property the payment is for; this list is what
+    populates that dropdown on the dedicated BACE Contribution form, and is
+    editable from Admin -> BACE Properties so staff can add/rename/retire
+    locations without a code change."""
+
+    __tablename__ = "bace_properties"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False, unique=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    donations = db.relationship("Donation", backref="bace_property", lazy="dynamic")
+
+    def __repr__(self):
+        return f"<BaceProperty {self.name}>"
+
+
+class Festival(db.Model):
+    """A specific festival/occasion -- e.g. "Janmashtami 2026",
+    "Radhashtami". Donations against the "Festivals" campaign record which
+    occasion the payment is for; this list is what populates the dropdown
+    on the dedicated Festival Seva form, and is editable from Admin ->
+    Festivals so staff can add upcoming festivals and retire past ones
+    without a code change. `event_date` is optional -- purely for sorting/
+    display ("upcoming" ordering), not enforced against the donation date."""
+
+    __tablename__ = "festivals"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False, unique=True)
+    event_date = db.Column(db.Date)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    donations = db.relationship("Donation", backref="festival", lazy="dynamic")
+
+    def __repr__(self):
+        return f"<Festival {self.name}>"
+
+
+class SevaType(db.Model):
+    """A seva/sponsorship tier for festival donations -- e.g. "Annakut
+    Seva", "Flower Decoration Seva", "Full Sponsorship". `suggested_amount`
+    pre-fills the amount field on the Festival Seva form when a donor picks
+    this tier (still editable -- it's a suggestion, not a fixed price).
+    Editable from Admin -> Seva Types."""
+
+    __tablename__ = "seva_types"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False, unique=True)
+    suggested_amount = db.Column(db.Numeric(12, 2))
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    donations = db.relationship("Donation", backref="seva_type", lazy="dynamic")
+
+    def __repr__(self):
+        return f"<SevaType {self.name}>"
+
+
 class Donation(db.Model):
     __tablename__ = "donations"
 
     id = db.Column(db.Integer, primary_key=True)
     donor_id = db.Column(db.Integer, db.ForeignKey("donors.id"), nullable=False)
     campaign_id = db.Column(db.Integer, db.ForeignKey("campaigns.id"), nullable=False)
+    # Only set for donations against the "BACE Contribution" campaign --
+    # which specific property the payment is for. NULL for every other campaign.
+    bace_property_id = db.Column(db.Integer, db.ForeignKey("bace_properties.id"), nullable=True)
+    # Only set for donations against the "Festivals" campaign via the
+    # dedicated Festival Seva form -- which occasion and which seva/
+    # sponsorship tier. Both NULL for every other campaign, and seva_type_id
+    # can be NULL even for a festival donation (choosing a seva tier is
+    # optional on that form).
+    festival_id = db.Column(db.Integer, db.ForeignKey("festivals.id"), nullable=True)
+    seva_type_id = db.Column(db.Integer, db.ForeignKey("seva_types.id"), nullable=True)
 
     amount = db.Column(db.Numeric(12, 2), nullable=False)
     payment_mode = db.Column(db.String(20), nullable=False)  # online/cash/cheque/bank_transfer

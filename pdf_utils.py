@@ -565,7 +565,18 @@ def generate_receipt_pdf(donation, donor, campaign, org_cfg):
 
     _box(c, purpose_box, fill=LAVENDER, stroke=PINK)
     _box_label_above(c, purpose_box, "Purpose of Donation (Corpus / General / Others)", size=9.5)
-    _value_in_box(c, purpose_box, campaign.name)
+    # For BACE Contribution / Festival Seva, show which property/occasion
+    # (and seva tier) this payment is for alongside the campaign name --
+    # _value_in_box already wraps to 2 lines, which fits these combinations
+    # for the names in use.
+    purpose_parts = [campaign.name]
+    if getattr(donation, "bace_property", None):
+        purpose_parts.append(donation.bace_property.name)
+    if getattr(donation, "festival", None):
+        purpose_parts.append(donation.festival.name)
+    if getattr(donation, "seva_type", None):
+        purpose_parts.append(donation.seva_type.name)
+    _value_in_box(c, purpose_box, " -- ".join(purpose_parts))
 
     # Signature boxes removed entirely, per request -- no boxes, no captions.
 

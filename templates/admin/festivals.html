@@ -1,0 +1,59 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Festivals{% endblock %}
+{% block content %}
+<h3 class="mb-3">🪔 Festivals</h3>
+<p class="text-muted">These populate the occasion dropdown on the public <a href="{{ url_for('public.festival_seva_form') }}" target="_blank">Festival Seva</a> form.</p>
+
+<div class="row">
+  {% if current_user.role == 'admin' %}
+  <div class="col-md-5">
+    <div class="card card-body shadow-sm mb-3 p-4">
+      <h6 class="mb-3">New Festival</h6>
+      <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-2">
+          <label class="form-label">Name</label>
+          <input type="text" class="form-control" name="name" placeholder="e.g. Janmashtami 2026" required>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Date (optional)</label>
+          <input type="date" class="form-control" name="event_date">
+        </div>
+        <button class="btn btn-gold btn-sm">Add</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+  <div class="{% if current_user.role == 'admin' %}col-md-7{% else %}col-12{% endif %}">
+    {% for f in festivals %}
+    <div class="card card-body shadow-sm mb-3 p-3">
+      <div class="d-flex justify-content-between align-items-center">
+        <div>
+          <div class="fw-bold">{{ f.name }}</div>
+          <div class="text-muted small">
+            {% if f.event_date %}{{ f.event_date.strftime('%d-%b-%Y') }}{% else %}No date set{% endif %}
+            {% if f.is_active %}<span class="badge bg-success ms-1">Active</span>{% else %}<span class="badge bg-secondary ms-1">Inactive</span>{% endif %}
+          </div>
+        </div>
+        {% if current_user.role == 'admin' %}
+        <div class="d-flex gap-2">
+          <form method="post" action="{{ url_for('admin.toggle_festival', festival_id=f.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-outline-secondary">{{ 'Deactivate' if f.is_active else 'Activate' }}</button>
+          </form>
+          <a href="{{ url_for('admin.festival_edit', festival_id=f.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+          <form method="post" action="{{ url_for('admin.festival_delete', festival_id=f.id) }}"
+                onsubmit="return confirm('Delete festival \'{{ f.name }}\'? Only possible if it has no donations recorded.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-outline-danger">Delete</button>
+          </form>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% else %}
+    <p class="text-muted">No festivals yet.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

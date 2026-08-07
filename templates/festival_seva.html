@@ -1,13 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Donate - {{ org_name }}{% endblock %}
+{% block title %}Festival Seva - {{ org_name }}{% endblock %}
 {% block content %}
 <section class="donation-hero">
   <div class="donation-hero-copy">
-    <p class="hero-eyebrow">A simple offering, a lasting service</p>
-    <h1>Share in the <em>joy</em> of seva.</h1>
-    <p class="hero-lede">Your generosity supports daily worship, community care, festivals, and a welcoming spiritual home for all.</p>
+    <p class="hero-eyebrow">Festival sevas &amp; sponsorships</p>
+    <h1>Offer a <em>seva</em> this festival.</h1>
+    <p class="hero-lede">Choose an upcoming occasion and a seva or sponsorship tier -- a receipt is generated automatically after payment.</p>
     <div class="hero-trust-row">
-      <span><b>100%</b> secure payment</span><span><b>80G</b> options available</span><span><b>∞</b> gratitude</span>
+      <span><b>100%</b> secure payment</span><span><b>80G</b> eligible</span><span><b>∞</b> gratitude</span>
     </div>
   </div>
   <div class="hero-lotus" aria-hidden="true"><div class="lotus-glow">ॐ</div><i></i><i></i><i></i><i></i></div>
@@ -18,35 +18,43 @@
     {% if not razorpay_enabled %}
       <div class="alert alert-warning py-2 text-center">Demo mode: live Razorpay keys are not configured, so payment will be simulated. See README to go live.</div>
     {% endif %}
+    {% if not festivals %}
+      <div class="alert alert-warning py-2 text-center">No festivals are configured yet. An admin can add them under Admin -&gt; Festivals.</div>
+    {% endif %}
 
-    <form id="donate-form" class="donation-card">
+    <form id="festival-seva-form" class="donation-card">
       <div class="donation-card-head">
-        <div><span class="section-kicker">Make an offering</span><h2>Choose your seva</h2></div>
+        <div><span class="section-kicker">Festival Seva</span><h2>Choose your seva</h2></div>
         <span class="secure-pill">⌁ Secure donation</span>
       </div>
 
+      <input type="hidden" name="campaign_id" value="{{ campaign.id }}">
+
       <div class="form-section">
-        <label class="form-label" for="campaign_id">Purpose / campaign</label>
-        <select class="form-select" name="campaign_id" id="campaign_id" required>
-          <optgroup label="80G Eligible Donations">
-            {% for c in campaigns if c.is_80g %}
-              <option value="{{ c.id }}">{{ c.name }}</option>
-            {% endfor %}
-          </optgroup>
-          <optgroup label="Non-80G Collections">
-            {% for c in campaigns if not c.is_80g %}
-              <option value="{{ c.id }}">{{ c.name }}</option>
-            {% endfor %}
-          </optgroup>
+        <label class="form-label" for="festival_id">Festival / Occasion</label>
+        <select class="form-select" name="festival_id" id="festival_id" required {% if not festivals %}disabled{% endif %}>
+          <option value="" disabled selected>-- Select a festival --</option>
+          {% for f in festivals %}
+            <option value="{{ f.id }}">{{ f.name }}{% if f.event_date %} ({{ f.event_date.strftime('%d-%b-%Y') }}){% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-section">
+        <label class="form-label" for="seva_type_id">Seva / Sponsorship <span class="text-muted">(optional)</span></label>
+        <select class="form-select" name="seva_type_id" id="seva_type_id">
+          <option value="" data-amount="">-- General contribution (no specific seva) --</option>
+          {% for s in seva_types %}
+            <option value="{{ s.id }}" data-amount="{{ s.suggested_amount or '' }}">
+              {{ s.name }}{% if s.suggested_amount %} (Rs. {{ s.suggested_amount | inr }} suggested){% endif %}
+            </option>
+          {% endfor %}
         </select>
       </div>
 
       <div class="form-section">
         <div class="d-flex justify-content-between align-items-center"><label class="form-label mb-0" for="amount">Your offering</label><span class="field-note">Any amount is meaningful</span></div>
-        <div class="amount-picker" aria-label="Suggested donation amounts">
-          <button type="button" class="amount-option" data-amount="501">₹501</button><button type="button" class="amount-option active" data-amount="1100">₹1,100</button><button type="button" class="amount-option" data-amount="2100">₹2,100</button><button type="button" class="amount-option" data-amount="5100">₹5,100</button>
-        </div>
-        <div class="currency-input"><span>₹</span><input type="number" min="1" step="1" class="form-control" name="amount" id="amount" value="1100" placeholder="Enter an amount" required></div>
+        <div class="currency-input"><span>₹</span><input type="number" min="1" step="1" class="form-control" name="amount" id="amount" placeholder="Enter an amount" required></div>
       </div>
 
       <div class="form-section">
@@ -102,6 +110,11 @@
       </div>
       </div>
 
+      <div class="form-section mb-0">
+        <label class="form-label">Remarks <span class="text-muted">(optional)</span></label>
+        <input type="text" class="form-control" name="remarks" maxlength="300">
+      </div>
+
       <div class="consent-box form-check">
         <input class="form-check-input" type="checkbox" name="consent" id="consent" required>
         <label class="form-check-label small text-muted" for="consent">
@@ -111,7 +124,7 @@
         </label>
       </div>
 
-      <button type="submit" class="btn btn-gold donation-submit w-100" id="pay-btn">
+      <button type="submit" class="btn btn-gold donation-submit w-100" id="pay-btn" {% if not festivals %}disabled{% endif %}>
         {% if razorpay_enabled %}<span>Continue to secure payment</span><span>→</span>{% else %}<span>Simulate payment success</span><span>→</span>{% endif %}
       </button>
       <p class="donation-reassurance">Your donation is handled securely. A receipt is generated after successful payment.</p>
@@ -120,98 +133,24 @@
   </div>
 </div>
 
-<section class="ways-to-give">
-  <div class="section-label"><span>◌</span> More ways to give</div>
-  <div class="ways-to-give-grid">
-    <a href="{{ url_for('public.festival_seva_form') }}" class="give-way-card">
-      <div class="give-way-icon">🪔</div>
-      <h3>Festival Seva</h3>
-      <p>Sponsor a seva or offering for an upcoming festival -- pick the occasion and the seva you'd like to support.</p>
-      <span class="give-way-arrow">Offer a seva →</span>
-    </a>
-    <a href="{{ url_for('public.bace_rent_form') }}" class="give-way-card">
-      <div class="give-way-icon">🏠</div>
-      <h3>BACE Contribution</h3>
-      <p>Contribute towards the upkeep of a specific BACE property.</p>
-      <span class="give-way-arrow">Contribute →</span>
-    </a>
-    <a href="{{ url_for('donor_portal.login') }}" class="give-way-card">
-      <div class="give-way-icon">📄</div>
-      <h3>Your Giving History</h3>
-      <p>Log in with your phone number to view past donations and download receipts or annual statements.</p>
-      <span class="give-way-arrow">View my donations →</span>
-    </a>
-  </div>
-</section>
-
-<section class="photo-gallery">
-  <div class="section-label"><span>◌</span> Our upcoming temple</div>
-  <div class="photo-gallery-grid">
-    <div class="photo-card">
-      <img src="{{ url_for('static', filename='images/temple/aerial-day.jpg') }}" alt="Aerial view of the upcoming temple complex" loading="lazy">
-      <div class="photo-card-caption">From Above</div>
-    </div>
-    <div class="photo-card">
-      <img src="{{ url_for('static', filename='images/temple/side-left.jpg') }}" alt="Elevation view of the temple's nine shikharas" loading="lazy">
-      <div class="photo-card-caption">Nine Sacred Shikharas</div>
-    </div>
-    <div class="photo-card">
-      <img src="{{ url_for('static', filename='images/temple/side-right.jpg') }}" alt="Elevation view of the temple building" loading="lazy">
-      <div class="photo-card-caption">A Temple Rising</div>
-    </div>
-    <div class="photo-card">
-      <img src="{{ url_for('static', filename='images/temple/aerial-dusk.jpg') }}" alt="Aerial view of the temple at dusk, illuminated" loading="lazy">
-      <div class="photo-card-caption">As Evening Falls</div>
-    </div>
-  </div>
-</section>
-
-<section class="photo-gallery">
-  <div class="section-label"><span>◌</span> Deity darshan</div>
-  <div class="photo-gallery-grid cols-5">
-    <div class="photo-card">
-      <img src="{{ url_for('static', filename='images/deities/rukmini-dwarkadish.jpg') }}" alt="Sri Sri Rukmini Dwarkadish deity darshan" loading="lazy">
-      <div class="photo-card-caption">Sri Sri Rukmini Dwarkadish</div>
-    </div>
-    <div class="photo-card">
-      <img src="{{ url_for('static', filename='images/deities/dwarkadish-closeup.jpg') }}" alt="Close-up darshan of Sri Dwarkadish" loading="lazy">
-      <div class="photo-card-caption">Dwarkadish</div>
-    </div>
-    <div class="photo-card">
-      <img src="{{ url_for('static', filename='images/deities/rukmini-dwarkadish-closeup.jpg') }}" alt="Close-up darshan of Sri Sri Rukmini Dwarkadish" loading="lazy">
-      <div class="photo-card-caption">A Closer Darshan</div>
-    </div>
-    <div class="photo-card">
-      <img src="{{ url_for('static', filename='images/deities/gaur-nitai.jpg') }}" alt="Sri Sri Gaur Nitai deity darshan" loading="lazy">
-      <div class="photo-card-caption">Sri Sri Gaur Nitai</div>
-    </div>
-    <div class="photo-card">
-      <img src="{{ url_for('static', filename='images/deities/jagannath-baldeva-subhadra.jpg') }}" alt="Sri Sri Jagannath Baldeva Subhadra deity darshan" loading="lazy">
-      <div class="photo-card-caption">Sri Sri Jagannath, Baldeva &amp; Subhadra</div>
-    </div>
-  </div>
-</section>
-
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <script>
 (function () {
-  const form = document.getElementById('donate-form');
+  const form = document.getElementById('festival-seva-form');
   const payBtn = document.getElementById('pay-btn');
   const statusNote = document.getElementById('status-note');
   const razorpayEnabled = {{ razorpay_enabled | tojson }};
   const orgName = {{ org_name | tojson }};
   const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
 
-  // -- Amount picker -------------------------------------------------
-  document.querySelectorAll('.amount-option').forEach((option) => {
-    option.addEventListener('click', () => {
-      document.querySelectorAll('.amount-option').forEach((item) => item.classList.remove('active'));
-      option.classList.add('active');
-      document.getElementById('amount').value = option.dataset.amount;
-    });
-  });
-  document.getElementById('amount').addEventListener('input', () => {
-    document.querySelectorAll('.amount-option').forEach((item) => item.classList.remove('active'));
+  // Picking a seva tier with a suggested amount pre-fills (but doesn't
+  // lock) the amount field.
+  const sevaSelect = document.getElementById('seva_type_id');
+  const amountInput = document.getElementById('amount');
+  sevaSelect.addEventListener('change', () => {
+    const selected = sevaSelect.options[sevaSelect.selectedIndex];
+    const suggested = selected ? selected.dataset.amount : '';
+    if (suggested) amountInput.value = suggested;
   });
 
   // -- Small fetch helper ---------------------------------------------
@@ -236,15 +175,10 @@
   }
 
   // -- Payment confirmation --------------------------------------------
-  // Razorpay's checkout `handler` callback below is a fast path, but it
-  // isn't guaranteed to fire in every browser (the JS context can be
-  // interrupted, and some browsers restrict what a payment iframe can do
-  // back to the parent page). The reliable source of truth is the
-  // Razorpay webhook, which confirms payments server-to-server without
-  // involving this tab at all (see public.py). This function is the
-  // fallback/safety net: it just asks our own server whether the webhook
-  // (or the fast path) has already marked the donation successful, and
-  // redirects once it has.
+  // Same design as the main donation form (see donate.html / public.py):
+  // the webhook is the reliable source of truth, `handler` is a fast path,
+  // and polling is the fallback that doesn't depend on any particular
+  // browser behavior.
   function pollDonationStatus(donationId, { attempts, intervalMs, quiet, onGiveUp }) {
     let count = 0;
     if (!quiet) showStatusNote('Confirming your payment... this can take up to a minute. Please don\'t close this page.');
@@ -274,7 +208,7 @@
       amount: Math.round(order.amount * 100),
       currency: 'INR',
       name: orgName,
-      description: 'Donation',
+      description: 'Festival Seva',
       order_id: order.order_id,
       handler: async function (response) {
         const { ok } = await postJSON('/api/verify-payment', {
@@ -286,11 +220,8 @@
         if (ok) {
           goToReceipt(order.donation_id);
         } else {
-          // Browser-side verification failed/errored -- the webhook may
-          // still confirm this payment independently, so keep waiting
-          // instead of dead-ending the donor with an alert.
           pollDonationStatus(order.donation_id, {
-            attempts: 40, intervalMs: 3000, quiet: false,  // ~2 min, visible -- a real attempt happened
+            attempts: 40, intervalMs: 3000, quiet: false,
             onGiveUp: () => showStatusNote(
               'Still waiting on confirmation from the payment gateway. If money was deducted, your ' +
               'receipt will appear in "My Donations" shortly, or contact the temple office.'
@@ -301,10 +232,6 @@
       modal: {
         ondismiss: function () {
           payBtn.disabled = false;
-          // Most dismissals are a genuine cancel, but on the small chance a
-          // payment actually went through right before closing, poll
-          // briefly and quietly rather than assuming failure or nagging
-          // someone who just changed their mind.
           pollDonationStatus(order.donation_id, { attempts: 5, intervalMs: 3000, quiet: true });
         },
       },

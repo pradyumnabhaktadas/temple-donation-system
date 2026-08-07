@@ -11,7 +11,7 @@ from flask_login import login_user, logout_user, login_required, current_user
 from sqlalchemy import func, extract
 
 from extensions import db
-from models import Donor, Campaign, Donation, AdminUser, ReceiptCounter
+from models import Donor, Campaign, Donation, AdminUser, ReceiptCounter, BaceProperty, Festival, SevaType
 from utils import get_financial_year, is_valid_pan
 from pdf_utils import generate_receipt_pdf
 from email_utils import send_receipt_email
@@ -340,10 +340,29 @@ def donations():
     )
 
 
+def _validated_id_from_form(form, key, model, label):
+    """Same idea as public.py's _validated_fk_id, but for the admin
+    manual-donation form (werkzeug form data, and flash+redirect instead of
+    a JSON error response on failure)."""
+    raw = form.get(key)
+    if not raw:
+        return None, None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None, f"Invalid {label}."
+    if not model.query.get(value):
+        return None, f"Invalid {label}."
+    return value, None
+
+
 @bp.route("/donations/manual", methods=["GET", "POST"])
 @login_required
 def manual_donation():
     campaigns = Campaign.query.filter_by(is_active=True).order_by(Campaign.name).all()
+    bace_properties = BaceProperty.query.filter_by(is_active=True).order_by(BaceProperty.name).all()
+    festivals = Festival.query.filter_by(is_active=True).order_by(Festival.name).all()
+    seva_types = SevaType.query.filter_by(is_active=True).order_by(SevaType.name).all()
     if request.method == "POST":
         form = request.form
 
@@ -358,6 +377,19 @@ def manual_donation():
         pan = (form.get("pan") or "").strip()
         if pan and not is_valid_pan(pan):
             flash("That PAN doesn't look right. It should be 10 characters like ABCDE1234F.")
+            return redirect(url_for("admin.manual_donation"))
+
+        bace_property_id, error = _validated_id_from_form(form, "bace_property_id", BaceProperty, "BACE property")
+        if error:
+            flash(error)
+            return redirect(url_for("admin.manual_donation"))
+        festival_id, error = _validated_id_from_form(form, "festival_id", Festival, "festival")
+        if error:
+            flash(error)
+            return redirect(url_for("admin.manual_donation"))
+        seva_type_id, error = _validated_id_from_form(form, "seva_type_id", SevaType, "seva type")
+        if error:
+            flash(error)
             return redirect(url_for("admin.manual_donation"))
 
         donor = find_or_create_donor(form)
@@ -380,6 +412,9 @@ def manual_donation():
             payment_mode=form.get("payment_mode", "cash"),
             status="success",
             donation_date=donation_date,
+            bace_property_id=bace_property_id,
+            festival_id=festival_id,
+            seva_type_id=seva_type_id,
             remarks=form.get("remarks"),
             recorded_by=current_user.username,
         )
@@ -399,7 +434,10 @@ def manual_donation():
         flash(f"Donation recorded. Receipt {receipt_number} generated.")
         return redirect(url_for("admin.donor_detail", donor_id=donor.id))
 
-    return render_template("admin/manual_donation.html", campaigns=campaigns, today=datetime.date.today())
+    return render_template(
+        "admin/manual_donation.html", campaigns=campaigns, bace_properties=bace_properties,
+        festivals=festivals, seva_types=seva_types, today=datetime.date.today(),
+    )
 
 
 @bp.route("/campaigns", methods=["GET", "POST"])
@@ -480,6 +518,252 @@ def campaign_delete(campaign_id):
     db.session.commit()
     flash(f"Campaign '{campaign.name}' deleted.")
     return redirect(url_for("admin.campaigns"))
+
+
+@bp.route("/bace-properties", methods=["GET", "POST"])
+@login_required
+def bace_properties():
+    if request.method == "POST":
+        if current_user.role != "admin":
+            flash("That action requires an administrator account.")
+            return redirect(url_for("admin.bace_properties"))
+        name = request.form.get("name", "").strip()
+        if not name:
+            flash("Property name can't be blank.")
+            return redirect(url_for("admin.bace_properties"))
+        if BaceProperty.query.filter_by(name=name).first():
+            flash(f"A BACE property named '{name}' already exists.")
+            return redirect(url_for("admin.bace_properties"))
+        db.session.add(BaceProperty(name=name))
+        db.session.commit()
+        flash(f"BACE property '{name}' added.")
+        return redirect(url_for("admin.bace_properties"))
+
+    properties = BaceProperty.query.order_by(BaceProperty.name).all()
+    return render_template("admin/bace_properties.html", properties=properties)
+
+
+@bp.route("/bace-properties/<int:property_id>/toggle", methods=["POST"])
+@login_required
+@admin_role_required
+def toggle_bace_property(property_id):
+    prop = BaceProperty.query.get_or_404(property_id)
+    prop.is_active = not prop.is_active
+    db.session.commit()
+    return redirect(url_for("admin.bace_properties"))
+
+
+@bp.route("/bace-properties/<int:property_id>/edit", methods=["GET", "POST"])
+@login_required
+@admin_role_required
+def bace_property_edit(property_id):
+    prop = BaceProperty.query.get_or_404(property_id)
+    if request.method == "POST":
+        new_name = request.form.get("name", "").strip()
+        if not new_name:
+            flash("Property name can't be blank.")
+            return redirect(url_for("admin.bace_property_edit", property_id=property_id))
+
+        existing = BaceProperty.query.filter(
+            BaceProperty.name == new_name, BaceProperty.id != prop.id
+        ).first()
+        if existing:
+            flash(f"Another BACE property is already named '{new_name}'.")
+            return redirect(url_for("admin.bace_property_edit", property_id=property_id))
+
+        prop.name = new_name
+        db.session.commit()
+        flash(f"BACE property renamed to '{prop.name}'.")
+        return redirect(url_for("admin.bace_properties"))
+
+    return render_template("admin/bace_property_edit.html", property=prop)
+
+
+@bp.route("/bace-properties/<int:property_id>/delete", methods=["POST"])
+@login_required
+@admin_role_required
+def bace_property_delete(property_id):
+    prop = BaceProperty.query.get_or_404(property_id)
+    has_donations = Donation.query.filter_by(bace_property_id=prop.id).first() is not None
+    if has_donations:
+        flash(
+            f"Can't delete '{prop.name}' -- it has donations recorded against it. "
+            "Deactivate it instead to hide it from the BACE Contribution form."
+        )
+        return redirect(url_for("admin.bace_properties"))
+
+    db.session.delete(prop)
+    db.session.commit()
+    flash(f"BACE property '{prop.name}' deleted.")
+    return redirect(url_for("admin.bace_properties"))
+
+
+@bp.route("/festivals", methods=["GET", "POST"])
+@login_required
+def festivals():
+    if request.method == "POST":
+        if current_user.role != "admin":
+            flash("That action requires an administrator account.")
+            return redirect(url_for("admin.festivals"))
+        name = request.form.get("name", "").strip()
+        if not name:
+            flash("Festival name can't be blank.")
+            return redirect(url_for("admin.festivals"))
+        if Festival.query.filter_by(name=name).first():
+            flash(f"A festival named '{name}' already exists.")
+            return redirect(url_for("admin.festivals"))
+        event_date_str = request.form.get("event_date")
+        try:
+            event_date = datetime.datetime.strptime(event_date_str, "%Y-%m-%d").date() if event_date_str else None
+        except ValueError:
+            flash("That date doesn't look right.")
+            return redirect(url_for("admin.festivals"))
+        db.session.add(Festival(name=name, event_date=event_date))
+        db.session.commit()
+        flash(f"Festival '{name}' added.")
+        return redirect(url_for("admin.festivals"))
+
+    festival_list = Festival.query.order_by(Festival.event_date.is_(None), Festival.event_date, Festival.name).all()
+    return render_template("admin/festivals.html", festivals=festival_list)
+
+
+@bp.route("/festivals/<int:festival_id>/toggle", methods=["POST"])
+@login_required
+@admin_role_required
+def toggle_festival(festival_id):
+    festival = Festival.query.get_or_404(festival_id)
+    festival.is_active = not festival.is_active
+    db.session.commit()
+    return redirect(url_for("admin.festivals"))
+
+
+@bp.route("/festivals/<int:festival_id>/edit", methods=["GET", "POST"])
+@login_required
+@admin_role_required
+def festival_edit(festival_id):
+    festival = Festival.query.get_or_404(festival_id)
+    if request.method == "POST":
+        new_name = request.form.get("name", "").strip()
+        if not new_name:
+            flash("Festival name can't be blank.")
+            return redirect(url_for("admin.festival_edit", festival_id=festival_id))
+        existing = Festival.query.filter(Festival.name == new_name, Festival.id != festival.id).first()
+        if existing:
+            flash(f"Another festival is already named '{new_name}'.")
+            return redirect(url_for("admin.festival_edit", festival_id=festival_id))
+
+        event_date_str = request.form.get("event_date")
+        try:
+            event_date = datetime.datetime.strptime(event_date_str, "%Y-%m-%d").date() if event_date_str else None
+        except ValueError:
+            flash("That date doesn't look right.")
+            return redirect(url_for("admin.festival_edit", festival_id=festival_id))
+
+        festival.name = new_name
+        festival.event_date = event_date
+        db.session.commit()
+        flash(f"Festival '{festival.name}' updated.")
+        return redirect(url_for("admin.festivals"))
+
+    return render_template("admin/festival_edit.html", festival=festival)
+
+
+@bp.route("/festivals/<int:festival_id>/delete", methods=["POST"])
+@login_required
+@admin_role_required
+def festival_delete(festival_id):
+    festival = Festival.query.get_or_404(festival_id)
+    has_donations = Donation.query.filter_by(festival_id=festival.id).first() is not None
+    if has_donations:
+        flash(
+            f"Can't delete '{festival.name}' -- it has donations recorded against it. "
+            "Deactivate it instead to hide it from the Festival Seva form."
+        )
+        return redirect(url_for("admin.festivals"))
+
+    db.session.delete(festival)
+    db.session.commit()
+    flash(f"Festival '{festival.name}' deleted.")
+    return redirect(url_for("admin.festivals"))
+
+
+@bp.route("/seva-types", methods=["GET", "POST"])
+@login_required
+def seva_types():
+    if request.method == "POST":
+        if current_user.role != "admin":
+            flash("That action requires an administrator account.")
+            return redirect(url_for("admin.seva_types"))
+        name = request.form.get("name", "").strip()
+        if not name:
+            flash("Seva type name can't be blank.")
+            return redirect(url_for("admin.seva_types"))
+        if SevaType.query.filter_by(name=name).first():
+            flash(f"A seva type named '{name}' already exists.")
+            return redirect(url_for("admin.seva_types"))
+        suggested_amount = float(request.form["suggested_amount"]) if request.form.get("suggested_amount") else None
+        db.session.add(SevaType(name=name, suggested_amount=suggested_amount))
+        db.session.commit()
+        flash(f"Seva type '{name}' added.")
+        return redirect(url_for("admin.seva_types"))
+
+    seva_type_list = SevaType.query.order_by(SevaType.name).all()
+    return render_template("admin/seva_types.html", seva_types=seva_type_list)
+
+
+@bp.route("/seva-types/<int:seva_type_id>/toggle", methods=["POST"])
+@login_required
+@admin_role_required
+def toggle_seva_type(seva_type_id):
+    seva_type = SevaType.query.get_or_404(seva_type_id)
+    seva_type.is_active = not seva_type.is_active
+    db.session.commit()
+    return redirect(url_for("admin.seva_types"))
+
+
+@bp.route("/seva-types/<int:seva_type_id>/edit", methods=["GET", "POST"])
+@login_required
+@admin_role_required
+def seva_type_edit(seva_type_id):
+    seva_type = SevaType.query.get_or_404(seva_type_id)
+    if request.method == "POST":
+        new_name = request.form.get("name", "").strip()
+        if not new_name:
+            flash("Seva type name can't be blank.")
+            return redirect(url_for("admin.seva_type_edit", seva_type_id=seva_type_id))
+        existing = SevaType.query.filter(SevaType.name == new_name, SevaType.id != seva_type.id).first()
+        if existing:
+            flash(f"Another seva type is already named '{new_name}'.")
+            return redirect(url_for("admin.seva_type_edit", seva_type_id=seva_type_id))
+
+        seva_type.name = new_name
+        seva_type.suggested_amount = (
+            float(request.form["suggested_amount"]) if request.form.get("suggested_amount") else None
+        )
+        db.session.commit()
+        flash(f"Seva type '{seva_type.name}' updated.")
+        return redirect(url_for("admin.seva_types"))
+
+    return render_template("admin/seva_type_edit.html", seva_type=seva_type)
+
+
+@bp.route("/seva-types/<int:seva_type_id>/delete", methods=["POST"])
+@login_required
+@admin_role_required
+def seva_type_delete(seva_type_id):
+    seva_type = SevaType.query.get_or_404(seva_type_id)
+    has_donations = Donation.query.filter_by(seva_type_id=seva_type.id).first() is not None
+    if has_donations:
+        flash(
+            f"Can't delete '{seva_type.name}' -- it has donations recorded against it. "
+            "Deactivate it instead to hide it from the Festival Seva form."
+        )
+        return redirect(url_for("admin.seva_types"))
+
+    db.session.delete(seva_type)
+    db.session.commit()
+    flash(f"Seva type '{seva_type.name}' deleted.")
+    return redirect(url_for("admin.seva_types"))
 
 
 @bp.route("/export/10bd")

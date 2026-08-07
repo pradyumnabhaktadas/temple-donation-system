@@ -259,7 +259,8 @@ body {
 .donation-hero {
   position:relative; isolation:isolate; overflow:hidden; border-radius:1.5rem;
   min-height: 318px; padding: 3.6rem 4rem; display:flex; align-items:center;
-  background: linear-gradient(118deg, #4f0b1d 0%, #79182f 55%, #a03442 100%);
+  background: linear-gradient(118deg, rgba(79,11,29,.93) 0%, rgba(121,24,47,.90) 55%, rgba(160,52,66,.82) 100%),
+              url('images/temple/front-view.jpg') center 32%/cover no-repeat;
   color:#fff; box-shadow: 0 18px 38px rgba(72, 15, 29, .15);
 }
 .donation-hero:before { content:""; position:absolute; inset:0; z-index:-1; background:radial-gradient(circle at 78% 38%, rgba(239,185,88,.32), transparent 18%), radial-gradient(circle at 98% 98%, rgba(255,255,255,.1), transparent 38%); }
@@ -274,6 +275,49 @@ body {
 .lotus-glow { position:absolute; inset:23px; border-radius:50%; display:grid; place-items:center; background:rgba(249,219,154,.18); color:#ffe8b3; font-size:3.8rem; box-shadow:0 0 0 23px rgba(255,255,255,.04),0 0 0 48px rgba(255,255,255,.025); }
 .hero-lotus i { position:absolute; display:block; width:68px; height:118px; left:59px; top:31px; border-radius:100% 0 100% 0; background:linear-gradient(140deg,#f3c872,#d78a52); opacity:.92; transform-origin:50% 100%; }
 .hero-lotus i:nth-of-type(1){transform:rotate(0deg)} .hero-lotus i:nth-of-type(2){transform:rotate(90deg)} .hero-lotus i:nth-of-type(3){transform:rotate(180deg)} .hero-lotus i:nth-of-type(4){transform:rotate(270deg)}
+/* Photo gallery -- real temple render photos. */
+.photo-gallery { margin: 3.2rem 0 2.6rem; }
+.photo-gallery-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:1rem; }
+.photo-gallery-grid.cols-5 { grid-template-columns:repeat(5,1fr); }
+.photo-gallery-grid.cols-5 .photo-card { aspect-ratio:4/3; }
+.photo-card {
+  position:relative; aspect-ratio:4/5; border-radius:1rem; overflow:hidden;
+  display:flex; align-items:flex-end; box-shadow:0 10px 24px rgba(62,28,19,.14);
+  background:linear-gradient(150deg,var(--maroon) 0%,#a03442 100%);
+}
+.photo-card img {
+  position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
+  transition:.35s ease;
+}
+.photo-card:hover img { transform:scale(1.05); }
+.photo-card .photo-card-icon {
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-58%);
+  font-size:2.4rem; opacity:.85; color:#fff;
+}
+.photo-card-caption {
+  position:relative; z-index:1; width:100%; padding:.9rem .85rem .8rem;
+  background:linear-gradient(0deg, rgba(20,8,4,.72) 0%, transparent 100%);
+  color:#fff; font-size:.78rem; font-weight:700; letter-spacing:.01em;
+}
+
+/* "Ways to give" hub cards -- links out to the dedicated Festival Seva /
+   BACE Contribution forms so they're discoverable from the homepage. */
+.ways-to-give { margin: 0 0 2.8rem; }
+.ways-to-give-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; }
+.give-way-card {
+  display:block; text-decoration:none; background:#fffdfa; border:1px solid rgba(100,47,30,.11);
+  border-radius:1rem; padding:1.4rem 1.3rem; box-shadow:0 8px 20px rgba(62,28,19,.08);
+  transition:.18s ease; height:100%;
+}
+.give-way-card:hover { transform:translateY(-3px); box-shadow:0 14px 28px rgba(62,28,19,.15); border-color:rgba(122,23,48,.25); }
+.give-way-card .give-way-icon {
+  display:grid; place-items:center; width:44px; height:44px; margin-bottom:.75rem;
+  background:var(--cream-alt); color:var(--maroon); border-radius:50%; font-size:1.3rem;
+}
+.give-way-card h3 { font-size:1.08rem; margin:0 0 .35rem; letter-spacing:-.02em; color:var(--maroon-dark); }
+.give-way-card p { margin:0; color:#756453; font-size:.82rem; line-height:1.5; }
+.give-way-card .give-way-arrow { display:inline-block; margin-top:.6rem; color:var(--saffron-dark); font-weight:700; font-size:.82rem; }
+
 .donation-layout { margin-top:-2.9rem; position:relative; z-index:2; }
 .donation-card { background:#fffdfa; border:1px solid rgba(100,47,30,.11); border-radius:1.25rem; padding:2rem; box-shadow:0 18px 42px rgba(62,28,19,.13); }
 .donation-card-head { display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; padding-bottom:1.35rem; border-bottom:1px solid #eee4d6; }
@@ -296,4 +340,5 @@ body {
   .site-nav { min-height:67px; }.site-brand .brand-font { font-size:.79rem; }.brand-kicker { font-size:.5rem; }.brand-mark{width:34px;height:34px;font-size:1.1rem}.site-account-link{font-size:.72rem;padding:.46rem .55rem}
   .site-main{padding-top:1rem!important}.donation-hero{border-radius:1rem;padding:2.6rem 1.5rem;min-height:360px;align-items:flex-start}.donation-hero h1{font-size:3rem}.hero-lede{font-size:.93rem;max-width:340px}.hero-trust-row{gap:.7rem;font-size:.69rem}.hero-lotus{right:-18px;bottom:-40px;top:auto;transform:none;opacity:.74}
   .donation-layout{margin-top:-1.6rem}.donation-card{padding:1.3rem;border-radius:1rem}.donation-card-head{padding-bottom:1rem}.donation-card h2{font-size:1.55rem}.secure-pill{font-size:.61rem;padding:.35rem .48rem}.form-section{padding:1.15rem 0}.amount-picker{grid-template-columns:repeat(2,1fr)}.consent-box{margin:1.1rem 0 .9rem;padding:.8rem}.success-card{margin-top:2.2rem;padding:2rem 1.25rem!important}.account-intro{margin-top:1.7rem}
+  .photo-gallery-grid{grid-template-columns:repeat(2,1fr)}.photo-gallery-grid.cols-5{grid-template-columns:repeat(2,1fr)}.ways-to-give-grid{grid-template-columns:1fr}
 }

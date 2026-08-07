@@ -35,7 +35,7 @@ from flask import (
 )
 
 from extensions import db, csrf, limiter
-from models import Donor, Campaign, Donation, ReceiptCounter
+from models import Donor, Campaign, Donation, ReceiptCounter, BaceProperty, Festival, SevaType
 from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email
 from utils import is_valid_pan
@@ -63,6 +63,32 @@ def _org_cfg():
         "ORG_BRANCH_TYPE": cfg.get("ORG_BRANCH_TYPE", ""),
         "ORG_LOGO_PATH": cfg.get("ORG_LOGO_PATH", ""),
     }
+
+
+class _InvalidFkError(Exception):
+    """Raised by _validated_fk_id() -- caught in create_order() and turned
+    into a normal 400 JSON error rather than propagating as a 500."""
+
+
+_FK_LABELS = {"bace_property_id": "BACE property", "festival_id": "festival", "seva_type_id": "seva type"}
+
+
+def _validated_fk_id(data, key, model):
+    """Reads an optional integer id out of a JSON request body and checks
+    it actually exists in `model`. Used for the BACE property / festival /
+    seva type pickers on their respective dedicated forms -- all optional,
+    all foreign keys a client could otherwise send a bogus value for."""
+    raw = data.get(key)
+    if not raw:
+        return None
+    label = _FK_LABELS.get(key, key)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise _InvalidFkError(f"Invalid {label}.")
+    if not model.query.get(value):
+        raise _InvalidFkError(f"Invalid {label}.")
+    return value
 
 
 def find_or_create_donor(data):
@@ -124,6 +150,56 @@ def donate_form():
     )
 
 
+@bp.route("/bace-rent")
+def bace_rent_form():
+    """Dedicated collection form for BACE property contributions -- same
+    underlying donation pipeline as the main form (create-order/webhook/
+    polling/receipt), just fixed to the "BACE Contribution" campaign with
+    an added "which property" field instead of a general campaign picker.
+    The property list is managed at Admin -> BACE Properties."""
+    campaign = Campaign.query.filter_by(name="BACE Contribution").first()
+    if campaign is None or not campaign.is_active:
+        flash("The BACE Contribution campaign isn't set up yet -- please contact the office.")
+        return redirect(url_for("public.donate_form"))
+
+    properties = BaceProperty.query.filter_by(is_active=True).order_by(BaceProperty.name).all()
+    return render_template(
+        "bace_rent.html",
+        campaign=campaign,
+        properties=properties,
+        razorpay_enabled=current_app.config["RAZORPAY_ENABLED"],
+        razorpay_key_id=current_app.config["RAZORPAY_KEY_ID"],
+        org_name=current_app.config["ORG_NAME"],
+    )
+
+
+@bp.route("/festival-seva")
+def festival_seva_form():
+    """Dedicated collection form for festival donations -- same underlying
+    donation pipeline as the main form, fixed to the "Festivals" campaign,
+    with an occasion picker (Festival) and an optional seva/sponsorship
+    tier picker (SevaType, which pre-fills a suggested amount). Both lists
+    are managed at Admin -> Festivals / Admin -> Seva Types."""
+    campaign = Campaign.query.filter_by(name="Festivals").first()
+    if campaign is None or not campaign.is_active:
+        flash("The Festivals campaign isn't set up yet -- please contact the office.")
+        return redirect(url_for("public.donate_form"))
+
+    festivals = Festival.query.filter_by(is_active=True).order_by(
+        Festival.event_date.is_(None), Festival.event_date, Festival.name
+    ).all()
+    seva_types = SevaType.query.filter_by(is_active=True).order_by(SevaType.name).all()
+    return render_template(
+        "festival_seva.html",
+        campaign=campaign,
+        festivals=festivals,
+        seva_types=seva_types,
+        razorpay_enabled=current_app.config["RAZORPAY_ENABLED"],
+        razorpay_key_id=current_app.config["RAZORPAY_KEY_ID"],
+        org_name=current_app.config["ORG_NAME"],
+    )
+
+
 @bp.route("/api/create-order", methods=["POST"])
 @limiter.limit("30 per hour")
 def create_order():
@@ -148,6 +224,19 @@ def create_order():
     if pan and not is_valid_pan(pan):
         return jsonify({"error": "That PAN doesn't look right. It should be 10 characters like ABCDE1234F."}), 400
 
+    # Optional fields only meaningful for the dedicated BACE Contribution /
+    # Festival Seva forms -- which campaign a request claims to be for is
+    # incidental (any campaign_id could technically send one), so validate
+    # each against the database rather than trust the caller.
+    try:
+        bace_property_id = _validated_fk_id(data, "bace_property_id", BaceProperty)
+        festival_id = _validated_fk_id(data, "festival_id", Festival)
+        seva_type_id = _validated_fk_id(data, "seva_type_id", SevaType)
+    except _InvalidFkError as e:
+        return jsonify({"error": str(e)}), 400
+
+    remarks = (data.get("remarks") or "").strip()[:300] or None
+
     donor = find_or_create_donor(data)
 
     donation = Donation(
@@ -157,6 +246,10 @@ def create_order():
         payment_mode="online",
         status="pending",
         recorded_by="online",
+        bace_property_id=bace_property_id,
+        festival_id=festival_id,
+        seva_type_id=seva_type_id,
+        remarks=remarks,
         consent_given=True,
         consent_at=datetime.datetime.utcnow(),
         consent_version=current_app.config.get("CONSENT_VERSION"),

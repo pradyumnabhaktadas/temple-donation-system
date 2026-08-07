@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% block title %}BACE Contribution - {{ org_name }}{% endblock %}
+{% block content %}
+<section class="donation-hero">
+  <div class="donation-hero-copy">
+    <p class="hero-eyebrow">BACE property collections</p>
+    <h1>BACE <em>Contribution</em></h1>
+    <p class="hero-lede">Contribute towards a BACE property directly online -- a receipt is generated automatically after payment.</p>
+  </div>
+  <div class="hero-lotus" aria-hidden="true"><div class="lotus-glow">ॐ</div><i></i><i></i><i></i><i></i></div>
+</section>
+
+<div class="row justify-content-center donation-layout">
+  <div class="col-xl-8 col-lg-9">
+    {% if not razorpay_enabled %}
+      <div class="alert alert-warning py-2 text-center">Demo mode: live Razorpay keys are not configured, so payment will be simulated. See README to go live.</div>
+    {% endif %}
+    {% if not properties %}
+      <div class="alert alert-warning py-2 text-center">No BACE properties are configured yet. An admin can add them under Admin -&gt; BACE Properties.</div>
+    {% endif %}
+
+    <form id="bace-rent-form" class="donation-card">
+      <div class="donation-card-head">
+        <div><span class="section-kicker">BACE Contribution</span><h2>Property contribution payment</h2></div>
+        <span class="secure-pill">⌁ Secure payment</span>
+      </div>
+
+      <input type="hidden" name="campaign_id" value="{{ campaign.id }}">
+
+      <div class="form-section">
+        <label class="form-label" for="bace_property_id">BACE Property</label>
+        <select class="form-select" name="bace_property_id" id="bace_property_id" required {% if not properties %}disabled{% endif %}>
+          <option value="" disabled selected>-- Select a property --</option>
+          {% for p in properties %}
+            <option value="{{ p.id }}">{{ p.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-section">
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Full Name</label>
+          <input type="text" class="form-control" name="full_name" required>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Phone</label>
+          <input type="tel" class="form-control" name="phone" required>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-6 mb-0">
+          <label class="form-label">Email <span class="text-muted">(optional -- your receipt will be sent here)</span></label>
+          <input type="email" class="form-control" name="email">
+        </div>
+      </div>
+      </div>
+
+      <div class="form-section">
+        <div class="d-flex justify-content-between align-items-center"><label class="form-label mb-0" for="amount">Amount</label></div>
+        <div class="currency-input"><span>₹</span><input type="number" min="1" step="1" class="form-control" name="amount" id="amount" placeholder="Enter an amount" required></div>
+      </div>
+
+      <div class="form-section mb-0">
+        <label class="form-label">Remarks <span class="text-muted">(optional)</span></label>
+        <input type="text" class="form-control" name="remarks" maxlength="300" placeholder="e.g. month covered by this payment">
+      </div>
+
+      <div class="consent-box form-check">
+        <input class="form-check-input" type="checkbox" name="consent" id="consent" required>
+        <label class="form-check-label small text-muted" for="consent">
+          I agree that {{ org_name }} may store my name and contact details to process this payment and issue a receipt.
+          This information will not be shared for any other purpose.
+        </label>
+      </div>
+
+      <button type="submit" class="btn btn-gold donation-submit w-100" id="pay-btn" {% if not properties %}disabled{% endif %}>
+        {% if razorpay_enabled %}<span>Continue to secure payment</span><span>→</span>{% else %}<span>Simulate payment success</span><span>→</span>{% endif %}
+      </button>
+      <p class="donation-reassurance">Your payment is handled securely. A receipt is generated after successful payment.</p>
+      <p class="donation-reassurance" id="status-note" style="display:none;"></p>
+    </form>
+  </div>
+</div>
+
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script>
+(function () {
+  const form = document.getElementById('bace-rent-form');
+  const payBtn = document.getElementById('pay-btn');
+  const statusNote = document.getElementById('status-note');
+  const razorpayEnabled = {{ razorpay_enabled | tojson }};
+  const orgName = {{ org_name | tojson }};
+  const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+
+  // -- Small fetch helper ---------------------------------------------
+  async function postJSON(url, body) {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify(body),
+    });
+    let data = {};
+    try { data = await resp.json(); } catch (err) { /* non-JSON error page */ }
+    return { ok: resp.ok, data };
+  }
+
+  function goToReceipt(donationId) {
+    window.location.href = `/donate/success/${donationId}`;
+  }
+
+  function showStatusNote(text) {
+    statusNote.textContent = text;
+    statusNote.style.display = '';
+  }
+
+  // -- Payment confirmation --------------------------------------------
+  // Same design as the main donation form (see donate.html / public.py):
+  // the webhook is the reliable source of truth, `handler` is a fast path,
+  // and polling is the fallback that doesn't depend on any particular
+  // browser behavior.
+  function pollDonationStatus(donationId, { attempts, intervalMs, quiet, onGiveUp }) {
+    let count = 0;
+    if (!quiet) showStatusNote('Confirming your payment... this can take up to a minute. Please don\'t close this page.');
+    const timer = setInterval(async () => {
+      count += 1;
+      if (count > attempts) {
+        clearInterval(timer);
+        if (onGiveUp) onGiveUp();
+        return;
+      }
+      try {
+        const resp = await fetch(`/api/donation-status/${donationId}`);
+        const status = await resp.json();
+        if (status.status === 'success') {
+          clearInterval(timer);
+          goToReceipt(donationId);
+        }
+      } catch (err) {
+        // Transient network hiccup -- just try again on the next tick.
+      }
+    }, intervalMs);
+  }
+
+  function launchRazorpayCheckout(order, donorInput) {
+    const options = {
+      key: order.key_id,
+      amount: Math.round(order.amount * 100),
+      currency: 'INR',
+      name: orgName,
+      description: 'BACE Contribution',
+      order_id: order.order_id,
+      handler: async function (response) {
+        const { ok } = await postJSON('/api/verify-payment', {
+          donation_id: order.donation_id,
+          razorpay_order_id: response.razorpay_order_id,
+          razorpay_payment_id: response.razorpay_payment_id,
+          razorpay_signature: response.razorpay_signature,
+        });
+        if (ok) {
+          goToReceipt(order.donation_id);
+        } else {
+          pollDonationStatus(order.donation_id, {
+            attempts: 40, intervalMs: 3000, quiet: false,
+            onGiveUp: () => showStatusNote(
+              'Still waiting on confirmation from the payment gateway. If money was deducted, your ' +
+              'receipt will appear in "My Donations" shortly, or contact the temple office.'
+            ),
+          });
+        }
+      },
+      modal: {
+        ondismiss: function () {
+          payBtn.disabled = false;
+          pollDonationStatus(order.donation_id, { attempts: 5, intervalMs: 3000, quiet: true });
+        },
+      },
+      prefill: {
+        name: donorInput.full_name,
+        email: donorInput.email,
+        contact: donorInput.phone,
+      },
+      theme: { color: '#7a1730' },
+    };
+    const rzp = new Razorpay(options);
+    rzp.on('payment.failed', function () { payBtn.disabled = false; });
+    rzp.open();
+  }
+
+  // -- Form submit ------------------------------------------------------
+  form.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    payBtn.disabled = true;
+    statusNote.style.display = 'none';
+
+    const donorInput = Object.fromEntries(new FormData(form).entries());
+    const { ok, data: order } = await postJSON('/api/create-order', donorInput);
+
+    if (!ok) {
+      alert(order.error || 'Something went wrong');
+      payBtn.disabled = false;
+      return;
+    }
+
+    if (razorpayEnabled) {
+      launchRazorpayCheckout(order, donorInput);
+    } else {
+      const { ok: simOk } = await postJSON('/api/simulate-payment', { donation_id: order.donation_id });
+      if (simOk) {
+        goToReceipt(order.donation_id);
+      } else {
+        alert('Simulation failed');
+        payBtn.disabled = false;
+      }
+    }
+  });
+})();
+</script>
+{% endblock %}

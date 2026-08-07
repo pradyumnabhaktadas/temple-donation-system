@@ -9,10 +9,16 @@
         <span class="section-kicker">Offering received</span>
         <h3 class="mt-2">Thank you for your seva.</h3>
         <p>Your donation of <strong>Rs. {{ donation.amount | inr(2) }}</strong> for
-          <strong>{{ donation.campaign.name }}</strong> was received successfully.</p>
+          <strong>{{ donation.campaign.name }}{% if donation.bace_property %} -- {{ donation.bace_property.name }}{% endif %}{% if donation.festival %} -- {{ donation.festival.name }}{% endif %}{% if donation.seva_type %} ({{ donation.seva_type.name }}){% endif %}</strong> was received successfully.</p>
         <p class="receipt-reference">Receipt No: <strong>{{ donation.receipt_number }}</strong></p>
         <a class="btn btn-gold success-action mb-2" href="{{ url_for('public.download_receipt', donation_id=donation.id) }}">Download receipt <span>↓</span></a>
+        {% if donation.bace_property %}
+        <a class="btn btn-link" href="{{ url_for('public.bace_rent_form') }}">Make another payment</a>
+        {% elif donation.festival %}
+        <a class="btn btn-link" href="{{ url_for('public.festival_seva_form') }}">Offer another seva</a>
+        {% else %}
         <a class="btn btn-link" href="{{ url_for('public.donate_form') }}">Make another offering</a>
+        {% endif %}
       {% else %}
         <span style="font-size:2.5rem;">⏳</span>
         <h3 class="mt-2" style="color: var(--saffron-dark);">Payment Pending</h3>

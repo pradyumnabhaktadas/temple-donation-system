@@ -1,0 +1,18 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Edit Seva Type{% endblock %}
+{% block content %}
+<a href="{{ url_for('admin.seva_types') }}">&larr; Back to Seva Types</a>
+<h3 class="mt-2 mb-3">✏️ Edit Seva Type</h3>
+<form method="post" class="card card-body shadow-sm p-4" style="max-width:500px">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="mb-2">
+    <label class="form-label">Name</label>
+    <input type="text" class="form-control" name="name" value="{{ seva_type.name }}" required>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Suggested Amount (optional)</label>
+    <input type="number" class="form-control" name="suggested_amount" value="{{ seva_type.suggested_amount or '' }}">
+  </div>
+  <button class="btn btn-gold">Save Changes</button>
+</form>
+{% endblock %}

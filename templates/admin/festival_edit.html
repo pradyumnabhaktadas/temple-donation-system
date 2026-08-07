@@ -1,0 +1,18 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Edit Festival{% endblock %}
+{% block content %}
+<a href="{{ url_for('admin.festivals') }}">&larr; Back to Festivals</a>
+<h3 class="mt-2 mb-3">✏️ Edit Festival</h3>
+<form method="post" class="card card-body shadow-sm p-4" style="max-width:500px">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="mb-2">
+    <label class="form-label">Name</label>
+    <input type="text" class="form-control" name="name" value="{{ festival.name }}" required>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Date (optional)</label>
+    <input type="date" class="form-control" name="event_date" value="{{ festival.event_date.isoformat() if festival.event_date else '' }}">
+  </div>
+  <button class="btn btn-gold">Save Changes</button>
+</form>
+{% endblock %}

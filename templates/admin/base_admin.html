@@ -15,6 +15,9 @@
         <a class="nav-link {% if request.endpoint == 'admin.donations' %}active{% endif %}" href="{{ url_for('admin.donations') }}">Donations</a>
         <a class="nav-link {% if request.endpoint == 'admin.manual_donation' %}active{% endif %}" href="{{ url_for('admin.manual_donation') }}">Log Offline Donation</a>
         <a class="nav-link {% if request.endpoint == 'admin.campaigns' %}active{% endif %}" href="{{ url_for('admin.campaigns') }}">Campaigns</a>
+        <a class="nav-link {% if request.endpoint == 'admin.bace_properties' %}active{% endif %}" href="{{ url_for('admin.bace_properties') }}">BACE Properties</a>
+        <a class="nav-link {% if request.endpoint == 'admin.festivals' %}active{% endif %}" href="{{ url_for('admin.festivals') }}">Festivals</a>
+        <a class="nav-link {% if request.endpoint == 'admin.seva_types' %}active{% endif %}" href="{{ url_for('admin.seva_types') }}">Seva Types</a>
         <a class="nav-link {% if request.endpoint == 'admin.lapsed_donors' %}active{% endif %}" href="{{ url_for('admin.lapsed_donors') }}">Lapsed Donors</a>
         {% if current_user.is_authenticated %}
           <a class="nav-link {% if request.endpoint == 'admin.change_password' %}active{% endif %}" href="{{ url_for('admin.change_password') }}">Account</a>
