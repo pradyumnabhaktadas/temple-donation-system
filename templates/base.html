@@ -22,7 +22,10 @@
         </span>
         <span><span class="brand-kicker">ISKCON DWARKA</span><span class="brand-font d-block">{{ org_name or 'Temple Donations' }}</span></span>
       </a>
-      <nav class="site-nav-links d-flex align-items-center gap-3">
+      <button class="site-nav-toggle d-lg-none" type="button" data-bs-toggle="collapse" data-bs-target="#siteNavLinks" aria-controls="siteNavLinks" aria-expanded="false" aria-label="Toggle navigation">
+        <span></span><span></span><span></span>
+      </button>
+      <nav class="site-nav-links collapse d-lg-flex align-items-center gap-3" id="siteNavLinks">
         <a href="{{ url_for('public.donate_form') }}" class="text-decoration-none {% if request.endpoint == 'public.donate_form' %}fw-bold{% endif %}">Donate</a>
         <a href="{{ url_for('public.festival_seva_form') }}" class="text-decoration-none {% if request.endpoint == 'public.festival_seva_form' %}fw-bold{% endif %}">Festival Seva</a>
         <a href="{{ url_for('public.bace_rent_form') }}" class="text-decoration-none {% if request.endpoint == 'public.bace_rent_form' %}fw-bold{% endif %}">BACE Contribution</a>

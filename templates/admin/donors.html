@@ -5,6 +5,7 @@
 <form class="mb-3" method="get">
   <input type="text" name="q" value="{{ q }}" class="form-control" style="max-width:400px" placeholder="Search by name, phone, email, or PAN">
 </form>
+<div class="table-responsive">
 <table class="table table-sm table-hover bg-white shadow-sm">
   <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>PAN</th><th class="text-end"># Donations</th><th class="text-end">Total</th></tr></thead>
   <tbody>
@@ -23,5 +24,6 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% include "admin/_pagination.html" %}
 {% endblock %}

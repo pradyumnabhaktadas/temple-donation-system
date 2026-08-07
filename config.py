@@ -161,6 +161,35 @@ class Config:
     MAIL_FROM_ADDRESS = os.environ.get("MAIL_FROM_ADDRESS", "")
     MAIL_FROM_NAME = os.environ.get("MAIL_FROM_NAME", "")
 
+    # --- Receipt delivery over WhatsApp (Airtel IQ WhatsApp Business API) ---
+    # Leave WHATSAPP_AIRTEL_USERNAME/PASSWORD blank to run in DEMO MODE:
+    # receipts are still generated and emailed/downloadable as before, just
+    # not sent over WhatsApp. See README "Sending receipts via WhatsApp" and
+    # whatsapp_utils.py for the full explanation.
+    #
+    # Secrets -- never hardcode real values here (this file is committed to
+    # git); set them in .env locally / the host's Environment tab in
+    # production, same as RAZORPAY_KEY_SECRET etc. requests' own
+    # auth=(username, password) builds the "Basic ..." header from these --
+    # no base64 encoding to do by hand.
+    WHATSAPP_AIRTEL_USERNAME = os.environ.get("WHATSAPP_AIRTEL_USERNAME", "")
+    WHATSAPP_AIRTEL_PASSWORD = os.environ.get("WHATSAPP_AIRTEL_PASSWORD", "")
+    # Not secret (a WhatsApp Business number is donor-facing by design, and
+    # a template ID just names an approved message) -- defaults match the
+    # temple's actual Airtel account so a fresh checkout of this repo Just
+    # Works once WHATSAPP_AIRTEL_USERNAME/PASSWORD above are filled in.
+    WHATSAPP_FROM_NUMBER = os.environ.get("WHATSAPP_FROM_NUMBER", "918178798462")
+    WHATSAPP_TEMPLATE_ID = os.environ.get("WHATSAPP_TEMPLATE_ID", "01kzdy128ke65be98yhg9fjazx")
+    WHATSAPP_AIRTEL_BASE_URL = os.environ.get("WHATSAPP_AIRTEL_BASE_URL", "")  # has a working default in whatsapp_utils.py
+    # See the ⚠️ note in whatsapp_utils.py before setting this -- likely a
+    # session-scoped value, not a stable API credential. Leave blank unless
+    # Airtel/your team confirms it's actually required.
+    WHATSAPP_AIRTEL_COOKIE = os.environ.get("WHATSAPP_AIRTEL_COOKIE", "")
+    # The site's own public URL, used to build the receipt link Airtel's
+    # servers fetch the PDF from (see whatsapp_utils.py) -- also handy as a
+    # single place to change if the domain ever changes.
+    PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "https://givetokrishna.com")
+
     # --- Donor OTP login ---
     # No SMS provider is wired up yet (see sms_utils.py) -- OTPs are shown
     # directly on the verify page instead of texted, clearly marked "Demo

@@ -9,6 +9,7 @@ Flask-Login==0.6.3
 Flask-WTF==1.2.1
 Flask-Migrate==4.0.7
 razorpay==1.4.2
+requests==2.32.3   # also used directly by whatsapp_utils.py (Meta WhatsApp Cloud API calls)
 reportlab==4.2.2
 python-dotenv==1.0.1
 pytest==8.3.3

@@ -18,7 +18,10 @@ receipts, a live collection dashboard, and admin tooling to manage it all.
 - **Automatic PDF receipts**, sequentially numbered with the temple's own
   scheme: one running counter shared by every donation, starting at
   `032511/ISK500000` and counting up by 1 (`032511/ISK500001`, ...)
-  regardless of 80G status or financial year.
+  regardless of 80G status or financial year. Emailed automatically, and
+  sent over **WhatsApp** automatically once configured (see "Sending
+  receipts via WhatsApp" below) -- both are additive on top of the
+  always-available download link, never a replacement for it.
 - **Admin panel**: dashboard (today/month/year, campaign and payment-mode
   breakdowns, 6-month trend, campaign progress bars), donor search &
   history, donation log, manual entry for offline (cash/cheque/bank
@@ -139,6 +142,11 @@ Receiver in System Settings.
 | `SENTRY_DSN` | Leave blank to run without error monitoring (default). Set to a Sentry DSN to start reporting unhandled exceptions -- see "Known gaps" below. |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_USE_TLS` | Leave `SMTP_HOST` blank to run without emailing receipts (default). Fill these in to email the receipt PDF to the donor automatically -- see "Emailing receipts" below. |
 | `MAIL_FROM_ADDRESS` / `MAIL_FROM_NAME` | "From" address/name on receipt emails. `MAIL_FROM_ADDRESS` falls back to `SMTP_USERNAME` if left blank. |
+| `WHATSAPP_AIRTEL_USERNAME` / `WHATSAPP_AIRTEL_PASSWORD` | Leave blank to run without sending receipts over WhatsApp (default). Fill in with the HTTP Basic auth credentials Airtel issued for the account, to send the receipt PDF over WhatsApp automatically -- see "Sending receipts via WhatsApp" below. Secrets -- set via `.env`/host Environment tab only, never commit real values. |
+| `WHATSAPP_FROM_NUMBER` / `WHATSAPP_TEMPLATE_ID` | The temple's registered WhatsApp Business number and the approved template's ID from Airtel's WhatsApp Manager. Not secret -- already defaulted in `config.py` to the temple's real values. |
+| `WHATSAPP_AIRTEL_BASE_URL` | Airtel's send endpoint. Has a working default in `whatsapp_utils.py` -- only set this if Airtel ever changes it. |
+| `WHATSAPP_AIRTEL_COOKIE` | Optional. See the ⚠️ note in `whatsapp_utils.py` before setting this -- looked like a session-scoped value in the example this was built from, not a stable credential; confirm with Airtel/your team whether it's actually required before relying on it. |
+| `PUBLIC_BASE_URL` | The site's own public URL (`https://givetokrishna.com`). Used to build the receipt link Airtel's servers fetch the PDF from -- see "Sending receipts via WhatsApp" below. |
 
 ## Going live with Razorpay
 
@@ -288,6 +296,73 @@ No new pip package is required — this uses only Python's built-in
 now. A failed or unconfigured send never blocks the donation or receipt PDF
 itself (the error is logged, not raised) — email is strictly additive on
 top of the always-available PDF download.
+
+## Sending receipts via WhatsApp
+
+Every successful donation can also send the receipt PDF to the donor over
+WhatsApp, to `Donor.whatsapp_or_phone` (their dedicated WhatsApp number if
+they gave one, otherwise their regular phone). **Live** once
+`WHATSAPP_AIRTEL_USERNAME`/`WHATSAPP_AIRTEL_PASSWORD` are set (see below) — until then
+`whatsapp_utils.py` runs in demo mode; nothing breaks either way, the PDF is
+still generated, emailed, and downloadable as always.
+
+This uses the **Airtel IQ WhatsApp Business API**
+(iqwhatsapp.airtel.in) — the account this temple actually has. Unlike
+Meta's own Cloud API (which needs the PDF uploaded as "media" first, then
+referenced by ID in a separate call), Airtel's endpoint just wants a
+publicly-fetchable URL to the file and downloads it themselves — which is
+exactly what the existing `/receipt/<id>` route already serves (same route
+donors' own "Download receipt" links use). `PUBLIC_BASE_URL` plus that
+route path is all it takes; no separate upload step. If you ever switch
+providers again, only `whatsapp_utils.py` needs to change (swap its
+implementation for the new provider's API call, same as swapping
+`sms_utils.send_otp()`'s provider) — nothing else in the app does.
+
+Required env vars:
+```
+WHATSAPP_AIRTEL_USERNAME=...            # secret -- HTTP Basic auth username from Airtel
+WHATSAPP_AIRTEL_PASSWORD=...            # secret -- HTTP Basic auth password from Airtel
+WHATSAPP_FROM_NUMBER=918178798462       # already defaulted in config.py
+WHATSAPP_TEMPLATE_ID=01kzdy128ke65be98yhg9fjazx   # already defaulted in config.py
+PUBLIC_BASE_URL=https://givetokrishna.com          # already defaulted in config.py
+```
+The username/password are the only ones that actually need setting per
+environment (local `.env` / the host's Environment tab) — the other three
+already match the temple's real account and domain as defaults in
+`config.py`, so they're only worth overriding if any of them change later.
+`requests`' own `auth=(username, password)` builds the "Basic ..." header
+from these two at send time, so there's no base64 token to generate or
+store separately.
+
+The approved message template (already set up, ID above) is a **Utility**
+category template with a **Document** header (for the PDF) and exactly 3
+body placeholders in this order — donor name, amount, org name:
+> Dear {{1}}, thank you for your generous donation of Rs. {{2}} to {{3}}.
+> Your receipt is attached as a PDF. This is a computer-generated message
+> and does not require a signature.
+>
+> Hare Krishna!
+
+⚠️ Two things worth confirming with Airtel/whoever manages that account,
+since they couldn't be verified against Airtel's own docs from here — see
+the fuller note in `whatsapp_utils.py`:
+- The exact format Airtel expects for the `X-Date` request header (this
+  guesses the standard HTTP-date format) — worth checking first if sends
+  start failing with an auth/date-looking error.
+- Whether a `Cookie` header is genuinely required for production API calls,
+  or was just an artifact of a browser/Postman testing session — this
+  integration doesn't send one unless `WHATSAPP_AIRTEL_COOKIE` is
+  explicitly set.
+
+**Cost:** Airtel bills per message sent, in the same ballpark as Meta's own
+direct utility-category rate (roughly Rs. 0.13–0.15 in India) — check your
+account's actual rate card for the exact figure.
+
+Same failure policy as email: a bad token, unreachable receipt URL, or
+network hiccup is logged and swallowed, never raised into the donation flow
+— the receipt PDF is already saved to the database and downloadable
+regardless of whether either send succeeds. Donors with no phone/WhatsApp
+number on file are silently skipped, same as donors with no email.
 
 ## Receipt storage
 
@@ -466,11 +541,11 @@ donation traffic issuing legal 80G receipts.
   above. The login flow itself is real (hashed codes, expiry, attempt
   limits, rate limiting); only the SMS delivery is a demo-mode stand-in
   until you wire up a provider.
-- **No automated SMS/WhatsApp follow-ups** — the lapsed-donor report
-  identifies who to contact, and the receipt now captures a distinct
-  WhatsApp number where donors give one (see "WhatsApp number" below), but
-  nothing texts them yet — that's still a manual step for staff. (Email
-  receipts are automated now — see "Resolved" below.)
+- **No automated lapsed-donor follow-ups** — the lapsed-donor report
+  identifies who to contact, but nothing texts or WhatsApps them
+  automatically yet — that's still a manual step for staff. (Receipts
+  themselves are now automated over both email and WhatsApp — see
+  "Resolved" below.)
 - **No "invite an admin user" screen** — new staff/admin accounts need to
   be created directly in the database for now.
 - **Single-server SQLite by default** — fine for one temple's traffic; see
@@ -509,6 +584,10 @@ donation traffic issuing legal 80G receipts.
 - **Receipts are now emailed to donors automatically** on every successful
   donation (online and manual), off by default until `SMTP_HOST` is set —
   see "Emailing receipts" above.
+- **Receipts are now sent over WhatsApp automatically** too, on every
+  successful donation (online and manual), off by default until
+  `WHATSAPP_AIRTEL_USERNAME`/`WHATSAPP_AIRTEL_PASSWORD` are set — see "Sending receipts via WhatsApp"
+  above. Uses the Airtel IQ WhatsApp Business API.
 - **The public donation API is now rate-limited** (`/api/create-order`,
   `/api/verify-payment`, `/api/simulate-payment` — 30 requests/hour per IP),
   via Flask-Limiter, guarded the same way as Flask-Migrate/Sentry so the app
@@ -559,6 +638,8 @@ temple-donation-system/
 ├── admin.py                        # admin login, dashboard, donors, campaigns, exports
 ├── donor_portal.py                  # donor OTP login, account page, statements
 ├── sms_utils.py                       # OTP generation + SMS delivery (demo mode)
+├── email_utils.py                       # receipt emailing (SMTP, demo mode)
+├── whatsapp_utils.py                      # receipt delivery over WhatsApp (Meta Cloud API, demo mode)
 ├── pdf_utils.py                       # receipt PDF generation
 ├── utils.py                            # financial-year calc, amount-in-words, INR formatting, PAN validation
 ├── seed.py                              # sample campaigns + default admin user

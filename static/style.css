@@ -260,6 +260,34 @@ body {
 .site-account-link:hover { background:var(--maroon); border-color:var(--maroon); color:#fff; }
 .site-main { min-height: calc(100vh - 148px); }
 
+/* Mobile nav toggle -- hidden at lg+ (see .d-lg-none on the button and
+   .d-lg-flex on .site-nav-links in base.html), shown as a hamburger below
+   that so the 4 nav links + donor-login pill don't overflow a phone-width
+   header. */
+.site-nav-toggle {
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;
+  width:40px; height:40px; flex:0 0 auto; background:#fff;
+  border:1px solid rgba(29,59,109,.2); border-radius:.6rem; padding:0;
+}
+.site-nav-toggle span { display:block; width:18px; height:2px; background:var(--maroon-dark); border-radius:2px; }
+.site-nav-toggle[aria-expanded="true"] span:nth-child(1) { transform:translateY(6px) rotate(45deg); }
+.site-nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity:0; }
+.site-nav-toggle[aria-expanded="true"] span:nth-child(3) { transform:translateY(-6px) rotate(-45deg); }
+
+@media (max-width: 991.98px) {
+  .site-nav-links {
+    position:absolute; top:100%; left:0; right:0; z-index:10;
+    flex-direction:column; align-items:stretch; gap:0;
+    background:#fffdf8; padding:.3rem 1.25rem 1.1rem;
+    box-shadow:0 14px 30px rgba(15,36,68,.14);
+    border-bottom:1px solid rgba(15,36,68,.08);
+    border-radius:0 0 1rem 1rem;
+  }
+  .site-nav-links.show { display:flex !important; }
+  .site-nav-links a { padding:.75rem .1rem; border-bottom:1px solid rgba(15,36,68,.07); border-radius:0; width:100%; }
+  .site-nav-links .site-account-link { margin-top:.6rem; border-radius:.6rem; text-align:center; justify-content:center; display:flex; border-bottom:1px solid rgba(29,59,109,.15); }
+}
+
 .donation-hero {
   position:relative; isolation:isolate; overflow:hidden; border-radius:1.5rem;
   min-height: 318px; padding: 3.6rem 4rem; display:flex; align-items:center;

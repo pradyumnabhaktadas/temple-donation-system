@@ -3,6 +3,7 @@
 {% block content %}
 <h3 class="mb-3">📞 Recurring Donors Who May Need Follow-Up</h3>
 <p class="text-muted">Donors who gave in each of the 3 months before last month, but not last month.</p>
+<div class="table-responsive">
 <table class="table table-sm bg-white shadow-sm">
   <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Last Donation</th></tr></thead>
   <tbody>
@@ -18,4 +19,5 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% endblock %}

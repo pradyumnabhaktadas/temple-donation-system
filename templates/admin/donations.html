@@ -21,6 +21,7 @@
   </div>
 </form>
 
+<div class="table-responsive">
 <table class="table table-sm bg-white shadow-sm">
   <thead><tr><th>Date</th><th>Donor</th><th>Campaign</th><th>Amount</th><th>Mode</th><th>Receipt</th></tr></thead>
   <tbody>
@@ -38,5 +39,6 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% include "admin/_pagination.html" %}
 {% endblock %}

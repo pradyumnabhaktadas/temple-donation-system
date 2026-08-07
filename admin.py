@@ -18,6 +18,7 @@ from models import (
 from utils import get_financial_year, is_valid_pan
 from pdf_utils import generate_receipt_pdf
 from email_utils import send_receipt_email
+from whatsapp_utils import send_receipt_whatsapp
 from public import find_or_create_donor, _org_cfg
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -450,6 +451,7 @@ def manual_donation():
         donation.receipt_pdf = pdf_bytes
         db.session.commit()
         send_receipt_email(donation, donor, _org_cfg(), pdf_bytes)
+        send_receipt_whatsapp(donation, donor, _org_cfg(), pdf_bytes)
 
         flash(f"Donation recorded. Receipt {receipt_number} generated.")
         return redirect(url_for("admin.donor_detail", donor_id=donor.id))

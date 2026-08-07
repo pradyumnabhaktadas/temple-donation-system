@@ -37,6 +37,7 @@
 </div>
 {% endif %}
 
+<div class="table-responsive">
 <table class="table table-sm bg-white shadow-sm">
   <thead><tr><th>Date</th><th>Campaign</th><th>Amount</th><th>Mode</th><th>Transaction ID</th><th>Receipt</th><th>Status</th><th></th></tr></thead>
   <tbody>
@@ -66,6 +67,7 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
 
 {% for d in donations %}
 {% if d.razorpay_payment_id %}
@@ -77,6 +79,7 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
+        <div class="table-responsive">
         <table class="table table-sm mb-3">
           <tbody>
             <tr><th class="text-muted" style="width:40%">Payment ID</th><td>{{ d.razorpay_payment_id }}</td></tr>
@@ -103,6 +106,7 @@
             <tr><th class="text-muted">Last modified</th><td>{{ d.updated_at.strftime('%d-%b-%Y %H:%M') if d.updated_at else '-' }}</td></tr>
           </tbody>
         </table>
+        </div>
         {% if d.razorpay_raw_payload %}
         <details>
           <summary class="text-muted small">Full raw payload from Razorpay</summary>

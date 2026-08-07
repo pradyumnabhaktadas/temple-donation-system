@@ -38,6 +38,7 @@ from extensions import db, csrf, limiter
 from models import Donor, Campaign, Donation, ReceiptCounter, BaceProperty, Festival, SevaType, LiveToGivePurpose
 from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email
+from whatsapp_utils import send_receipt_whatsapp
 from utils import is_valid_pan
 
 bp = Blueprint("public", __name__)
@@ -349,11 +350,13 @@ def create_order():
     )
 
 
-def _send_receipt_email_background(app, donation_id, pdf_bytes):
+def _send_receipt_notifications_background(app, donation_id, pdf_bytes):
     """Runs in a background thread -- see the comment in _finalize_success()
     for why. Needs its own app context (and its own DB session, which a
     fresh app context gives it) since it's not running inside the request
-    that spawned it anymore."""
+    that spawned it anymore. Sends both email and WhatsApp -- each is
+    independently demo-mode-guarded and independently try/excepted, so one
+    failing (or not being configured) never blocks the other."""
     with app.app_context():
         donation = Donation.query.get(donation_id)
         if donation is not None:
@@ -361,6 +364,10 @@ def _send_receipt_email_background(app, donation_id, pdf_bytes):
                 send_receipt_email(donation, donation.donor, _org_cfg(), pdf_bytes)
             except Exception:
                 app.logger.exception("Background receipt email failed for donation %s", donation_id)
+            try:
+                send_receipt_whatsapp(donation, donation.donor, _org_cfg(), pdf_bytes)
+            except Exception:
+                app.logger.exception("Background receipt WhatsApp send failed for donation %s", donation_id)
 
 
 def _finalize_success(donation):
@@ -390,21 +397,22 @@ def _finalize_success(donation):
     donation.receipt_pdf = pdf_bytes
     db.session.commit()
 
-    # Email in a background thread rather than blocking the request on it.
-    # A slow/hanging SMTP connection stacking on top of PDF generation can
-    # blow past gunicorn's worker timeout, which kills the whole worker
-    # mid-response -- not a clean error, just the connection dropping
-    # outright. The receipt is already saved to the database at this point
-    # regardless of whether the email send succeeds.
+    # Email + WhatsApp in a background thread rather than blocking the
+    # request on them. A slow/hanging SMTP connection or WhatsApp API call
+    # stacking on top of PDF generation can blow past gunicorn's worker
+    # timeout, which kills the whole worker mid-response -- not a clean
+    # error, just the connection dropping outright. The receipt is already
+    # saved to the database at this point regardless of whether either send
+    # succeeds.
     #
     # Synchronous under TESTING so the test suite can assert on the send
     # deterministically instead of racing a background thread.
     app = current_app._get_current_object()
     if app.config.get("TESTING"):
-        _send_receipt_email_background(app, donation.id, pdf_bytes)
+        _send_receipt_notifications_background(app, donation.id, pdf_bytes)
     else:
         threading.Thread(
-            target=_send_receipt_email_background, args=(app, donation.id, pdf_bytes), daemon=True
+            target=_send_receipt_notifications_background, args=(app, donation.id, pdf_bytes), daemon=True
         ).start()
 
 

@@ -52,6 +52,16 @@ services:
         sync: false
       - key: SMTP_PASSWORD
         sync: false
+      - key: WHATSAPP_AIRTEL_USERNAME
+        sync: false
+      - key: WHATSAPP_AIRTEL_PASSWORD
+        sync: false
+      - key: WHATSAPP_FROM_NUMBER
+        sync: false
+      - key: WHATSAPP_TEMPLATE_ID
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
       - key: SENTRY_DSN
         sync: false
 
