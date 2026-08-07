@@ -259,16 +259,16 @@ body {
 .donation-hero {
   position:relative; isolation:isolate; overflow:hidden; border-radius:1.5rem;
   min-height: 318px; padding: 3.6rem 4rem; display:flex; align-items:center;
-  background: linear-gradient(118deg, rgba(79,11,29,.93) 0%, rgba(121,24,47,.90) 55%, rgba(160,52,66,.82) 100%),
-              url('images/temple/front-view.jpg') center 32%/cover no-repeat;
+  background: linear-gradient(90deg, rgba(48,7,17,.86) 0%, rgba(63,10,23,.68) 32%, rgba(80,15,30,.38) 58%, rgba(90,20,34,.18) 78%, rgba(90,20,34,.12) 100%),
+              url('images/temple/front-view.jpg') center 30%/cover no-repeat;
   color:#fff; box-shadow: 0 18px 38px rgba(72, 15, 29, .15);
 }
 .donation-hero:before { content:""; position:absolute; inset:0; z-index:-1; background:radial-gradient(circle at 78% 38%, rgba(239,185,88,.32), transparent 18%), radial-gradient(circle at 98% 98%, rgba(255,255,255,.1), transparent 38%); }
 .donation-hero-copy { max-width:610px; }
 .hero-eyebrow, .section-kicker { color:#edc56f; font-size:.67rem; letter-spacing:.14em; font-weight:700; text-transform:uppercase; margin:0 0 .7rem; }
-.donation-hero h1 { color:#fff; margin:0; max-width:565px; font-size:clamp(2.75rem,5vw,4.2rem); line-height:.98; letter-spacing:-.06em; }
+.donation-hero h1 { color:#fff; margin:0; max-width:565px; font-size:clamp(2.75rem,5vw,4.2rem); line-height:.98; letter-spacing:-.06em; text-shadow:0 2px 18px rgba(20,3,8,.45); }
 .donation-hero h1 em { color:#f5ca75; font-style:italic; }
-.hero-lede { max-width:505px; margin:1.15rem 0 1.45rem; color:#f6dcb0; font-size:1.02rem; line-height:1.6; }
+.hero-lede { max-width:505px; margin:1.15rem 0 1.45rem; color:#f6dcb0; font-size:1.02rem; line-height:1.6; text-shadow:0 1px 10px rgba(20,3,8,.4); }
 .hero-trust-row { display:flex; gap:1.35rem; flex-wrap:wrap; color:#f7e8ce; font-size:.76rem; }
 .hero-trust-row span { display:flex; gap:.35rem; align-items:center; }.hero-trust-row b { color:#f6ca70; font-size:.85rem; }
 .hero-lotus { position:absolute; right:8.5%; top:50%; transform:translateY(-50%); width:185px; height:185px; z-index:-1; }
