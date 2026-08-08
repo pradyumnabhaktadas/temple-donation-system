@@ -446,9 +446,29 @@ body {
 .site-footer-note .footer-logo { height:18px; width:auto; vertical-align:-4px; margin-right:.35rem; }
 .site-footer-note .footer-admin-link { color:#b4a897; font-size:.75rem; margin:0 0 0 .35rem; }.site-footer-note .footer-admin-link a { color:#b4a897; text-decoration:underline; text-decoration-color:rgba(180,168,151,.5); }.site-footer-note .footer-admin-link a:hover { color:var(--maroon); }
 
+/* ---------- Public site footer: About Us / Located On / Contact Us ---------- */
+.site-footer { background:var(--maroon-dark); margin-top:3rem; }
+.footer-grid { display:grid; grid-template-columns:1.4fr 1fr 1fr; gap:2.2rem; padding:2.8rem 1rem 2.2rem; }
+.footer-brand { display:flex; align-items:center; gap:.7rem; margin-bottom:.85rem; }
+.footer-brand-logo { height:40px; width:auto; flex:0 0 auto; }
+.footer-brand-name { font-family:'Playfair Display',serif; font-weight:700; color:#fff; font-size:1.05rem; line-height:1.25; }
+.footer-brand-sub { color:var(--saffron-light); font-size:.72rem; font-weight:600; letter-spacing:.02em; margin-top:.15rem; }
+.footer-about-text { font-size:.82rem; line-height:1.6; color:rgba(255,255,255,.72); margin:0; }
+.footer-heading { color:var(--saffron-light); font-size:.76rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em; margin:0 0 .7rem; }
+.footer-text { font-size:.82rem; line-height:1.6; color:rgba(255,255,255,.78); margin:0 0 .5rem; }
+.footer-text a { color:#fff; text-decoration:underline; text-decoration-color:rgba(255,255,255,.4); }
+.footer-text a:hover { color:var(--saffron-light); }
+.footer-text-note { font-size:.74rem; line-height:1.55; color:rgba(255,255,255,.58); margin:0; }
+.site-footer .site-footer-note { border-top:1px solid rgba(255,255,255,.12); padding:1.2rem 1rem; margin:0; color:rgba(255,255,255,.6); }
+.site-footer .site-footer-note span { color:rgba(255,255,255,.6); }
+.site-footer .site-footer-note .footer-admin-link,
+.site-footer .site-footer-note .footer-admin-link a { color:rgba(255,255,255,.55); }
+.site-footer .site-footer-note .footer-admin-link a:hover { color:var(--saffron-light); }
+
 @media (max-width: 767.98px) {
   .site-nav { min-height:67px; }.brand-caption { font-size:.62rem; }.brand-logo-main{height:34px}.brand-logo-iyf{width:27px;height:27px}.site-account-link{font-size:.72rem;padding:.46rem .55rem}
   .site-main{padding-top:1rem!important}.donation-hero{border-radius:1rem;padding:2.6rem 1.5rem;min-height:360px;align-items:flex-start}.donation-hero h1{font-size:3rem}.hero-lede{font-size:.93rem;max-width:340px}.hero-trust-row{gap:.7rem;font-size:.69rem}.hero-lotus{right:-18px;bottom:-40px;top:auto;transform:none;opacity:.74}
   .donation-layout{margin-top:-1.6rem}.donation-card{padding:1.3rem;border-radius:1rem}.donation-card-head{padding-bottom:1rem}.donation-card h2{font-size:1.55rem}.secure-pill{font-size:.61rem;padding:.35rem .48rem}.form-section{padding:1.15rem 0}.amount-picker{grid-template-columns:repeat(2,1fr)}.consent-box{margin:1.1rem 0 .9rem;padding:.8rem}.success-card{margin-top:2.2rem;padding:2rem 1.25rem!important}.account-intro{margin-top:1.7rem}
   .photo-gallery-grid{grid-template-columns:repeat(2,1fr)}.photo-gallery-grid.cols-5{grid-template-columns:repeat(2,1fr)}.ways-to-give-grid{grid-template-columns:1fr}
+  .footer-grid { grid-template-columns:1fr; gap:1.7rem; padding:2.2rem 1rem 1.6rem; }
 }

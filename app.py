@@ -143,9 +143,15 @@ def create_app(test_config=None):
 
     @app.context_processor
     def inject_org():
-        # Makes org_name available in every template (e.g. the shared
-        # header in base.html) without each view needing to pass it.
-        return {"org_name": app.config["ORG_NAME"]}
+        # Makes org_name and the public-facing About Us/contact footer
+        # details available in every template (e.g. the shared header/
+        # footer in base.html) without each view needing to pass them.
+        return {
+            "org_name": app.config["ORG_NAME"],
+            "org_about_text": app.config["ORG_ABOUT_TEXT"],
+            "org_contact_address": app.config["ORG_CONTACT_ADDRESS"],
+            "org_contact_email": app.config["ORG_CONTACT_EMAIL"],
+        }
 
     @app.errorhandler(CSRFError)
     def handle_csrf_error(e):

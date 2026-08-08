@@ -92,6 +92,22 @@ class Config:
         "and be happy.",
     )
 
+    # --- Public site footer: About Us / Contact / Location ---
+    # Deliberately separate from ORG_ADDRESS/ORG_EMAIL above -- those feed
+    # the legal 80G receipt text and shouldn't change casually. These are
+    # just what's shown to visitors in the website footer.
+    ORG_ABOUT_TEXT = os.environ.get(
+        "ORG_ABOUT_TEXT",
+        "ISKCON Dwarka Delhi Temple is an initiative of ISKCON Youth Forum (IYF), Dwarka Delhi, "
+        "dedicated to spreading Krishna consciousness through devotional service, festivals, and "
+        "community seva.",
+    )
+    ORG_CONTACT_ADDRESS = os.environ.get(
+        "ORG_CONTACT_ADDRESS",
+        "Plot No.-4, Sub-City Level, Dwarka Sector-13, Behind Radisson Blue Hotel, Delhi-110075",
+    )
+    ORG_CONTACT_EMAIL = os.environ.get("ORG_CONTACT_EMAIL", "livetogive.dwarka@gmail.com")
+
     # Applies to both admin sessions (Flask-Login) and donor OTP-login
     # sessions -- Flask's session lifetime is app-wide, not per-login-type.
     PERMANENT_SESSION_LIFETIME = timedelta(hours=8)

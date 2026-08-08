@@ -17,7 +17,7 @@
         <a class="nav-link {% if request.endpoint == 'admin.analytics' %}active{% endif %}" href="{{ url_for('admin.analytics') }}">Analytics</a>
 
         <div class="nav-item dropdown">
-          <a class="nav-link dropdown-toggle {% if request.endpoint in donations_endpoints %}active{% endif %}" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">Donations</a>
+          <a class="nav-link dropdown-toggle {% if request.endpoint in donations_endpoints %}active{% endif %}" href="#" role="button" aria-expanded="false">Donations</a>
           <ul class="dropdown-menu dropdown-menu-end">
             <li><a class="dropdown-item {% if request.endpoint == 'admin.donations' %}active{% endif %}" href="{{ url_for('admin.donations') }}">Donations Log</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.manual_donation' %}active{% endif %}" href="{{ url_for('admin.manual_donation') }}">Log Offline Donation</a></li>
@@ -30,7 +30,7 @@
         </div>
 
         <div class="nav-item dropdown">
-          <a class="nav-link dropdown-toggle {% if request.endpoint in donors_endpoints %}active{% endif %}" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">Donors</a>
+          <a class="nav-link dropdown-toggle {% if request.endpoint in donors_endpoints %}active{% endif %}" href="#" role="button" aria-expanded="false">Donors</a>
           <ul class="dropdown-menu dropdown-menu-end">
             <li><a class="dropdown-item {% if request.endpoint == 'admin.donors' %}active{% endif %}" href="{{ url_for('admin.donors') }}">Donors</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.donor_insights' %}active{% endif %}" href="{{ url_for('admin.donor_insights') }}">Donor Insights</a></li>
@@ -43,7 +43,7 @@
         </div>
 
         <div class="nav-item dropdown">
-          <a class="nav-link dropdown-toggle {% if request.endpoint in settings_endpoints %}active{% endif %}" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">Settings</a>
+          <a class="nav-link dropdown-toggle {% if request.endpoint in settings_endpoints %}active{% endif %}" href="#" role="button" aria-expanded="false">Settings</a>
           <ul class="dropdown-menu dropdown-menu-end">
             <li><a class="dropdown-item {% if request.endpoint == 'admin.campaigns' %}active{% endif %}" href="{{ url_for('admin.campaigns') }}">Campaigns</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.bace_properties' %}active{% endif %}" href="{{ url_for('admin.bace_properties') }}">BACE</a></li>
@@ -56,7 +56,7 @@
 
         {% if current_user.is_authenticated %}
         <div class="nav-item dropdown">
-          <a class="nav-link dropdown-toggle {% if request.endpoint == 'admin.change_password' %}active{% endif %}" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">{{ current_user.username }}</a>
+          <a class="nav-link dropdown-toggle {% if request.endpoint == 'admin.change_password' %}active{% endif %}" href="#" role="button" aria-expanded="false">{{ current_user.username }}</a>
           <ul class="dropdown-menu dropdown-menu-end">
             <li><a class="dropdown-item {% if request.endpoint == 'admin.change_password' %}active{% endif %}" href="{{ url_for('admin.change_password') }}">Account</a></li>
             <li><a class="dropdown-item" href="{{ url_for('admin.logout') }}">Logout</a></li>
@@ -78,4 +78,37 @@
   {% block content %}{% endblock %}
 </div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// Manual dropdown toggling for the admin nav -- deliberately NOT relying on
+// Bootstrap's data-bs-toggle="dropdown" plugin (which needs its JS to have
+// initialized cleanly against these exact elements). This just flips the
+// same ".show" class Bootstrap's own CSS already knows how to display, so
+// it works regardless of Popper/init timing.
+(function () {
+  var toggles = document.querySelectorAll('.admin-navbar .dropdown-toggle');
+  function closeAll(except) {
+    document.querySelectorAll('.admin-navbar .dropdown-menu.show').forEach(function (menu) {
+      if (menu !== except) {
+        menu.classList.remove('show');
+        var t = menu.previousElementSibling;
+        if (t) t.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
+  toggles.forEach(function (toggle) {
+    toggle.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var menu = toggle.nextElementSibling;
+      if (!menu) return;
+      var isOpen = menu.classList.contains('show');
+      closeAll(isOpen ? null : menu);
+      menu.classList.toggle('show', !isOpen);
+      toggle.setAttribute('aria-expanded', String(!isOpen));
+    });
+  });
+  document.addEventListener('click', function () { closeAll(null); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeAll(null); });
+})();
+</script>
 {% endblock %}
