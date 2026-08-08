@@ -1490,6 +1490,82 @@ def export_collections():
     )
 
 
+@bp.route("/export/donations")
+@login_required
+def export_donations():
+    """CSV export of the Donations Log, honoring whatever campaign/mode/
+    status filters are currently applied on that page -- unlike the
+    on-screen table (paginated to DONATIONS_PER_PAGE rows), this exports
+    every matching row. Carries the same full detail set as the Donations
+    Log's "Full details" modal (donor contact info, PAN, address, payment
+    reference, campaign-specific purpose, 80G status, who recorded it, and
+    cancellation info where relevant) so this file alone answers "what did
+    this donor actually enter" without having to click into each row.
+    """
+    status = request.args.get("status", "success")
+    query = Donation.query
+    if status != "all":
+        query = query.filter_by(status=status)
+    campaign_id = request.args.get("campaign_id", type=int)
+    mode = request.args.get("mode")
+    if campaign_id:
+        query = query.filter_by(campaign_id=campaign_id)
+    if mode:
+        query = query.filter_by(payment_mode=mode)
+
+    rows = query.order_by(Donation.donation_date.desc()).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Receipt No", "Date", "Status", "Donor Name", "Phone", "WhatsApp", "Email", "PAN",
+        "Address", "City", "State", "Pincode",
+        "Amount", "Payment Mode", "Reference", "Campaign", "Specific Purpose", "80G Eligible",
+        "Recorded By", "Remarks", "Cancelled At", "Cancelled By", "Cancellation Reason",
+    ])
+    for d in rows:
+        donor = d.donor
+        specific_purpose = (
+            (d.bace_property.name if d.bace_property else None)
+            or (d.festival.name if d.festival else None)
+            or (d.seva_type.name if d.seva_type else None)
+            or (d.live_to_give_purpose.name if d.live_to_give_purpose else None)
+            or ""
+        )
+        writer.writerow([
+            d.receipt_number or "",
+            d.donation_date.strftime("%d-%m-%Y"),
+            d.status,
+            donor.full_name,
+            donor.phone or "",
+            donor.whatsapp_number or "",
+            donor.email or "",
+            donor.pan or "",
+            donor.address or "",
+            donor.city or "",
+            donor.state or "",
+            donor.pincode or "",
+            float(d.amount),
+            d.payment_mode,
+            d.reference_display or "",
+            d.campaign.name,
+            specific_purpose,
+            "Yes" if d.effective_is_80g else "No",
+            d.recorded_by or "",
+            d.remarks or "",
+            d.cancelled_at.strftime("%d-%m-%Y %H:%M") if d.cancelled_at else "",
+            d.cancelled_by or "",
+            d.cancellation_reason or "",
+        ])
+
+    filename_status = status if status != "all" else "all-statuses"
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment;filename=Donations_{filename_status}.csv"},
+    )
+
+
 @bp.route("/export/monthly")
 @login_required
 def export_monthly_report():

@@ -1,7 +1,11 @@
 {% extends "admin/base_admin.html" %}
 {% block title %}Donations{% endblock %}
 {% block content %}
-<h3 class="mb-3">🧾 Donations Log</h3>
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h3 class="mb-0">🧾 Donations Log</h3>
+  {% set export_args = request.args.to_dict() %}
+  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.export_donations', **export_args) }}">⬇ Export CSV (all filtered rows)</a>
+</div>
 <form class="row g-2 mb-3">
   <div class="col-auto">
     <select name="campaign_id" class="form-select" onchange="this.form.submit()">
@@ -32,7 +36,7 @@
 
 <div class="table-responsive">
 <table class="table table-sm bg-white shadow-sm">
-  <thead><tr><th>Date</th><th>Donor</th><th>Campaign</th><th>Amount</th><th>Mode</th><th>Status</th><th>Receipt</th></tr></thead>
+  <thead><tr><th>Date</th><th>Donor</th><th>Campaign</th><th>Amount</th><th>Mode</th><th>Reference</th><th>Status</th><th>Receipt</th><th></th>{% if current_user.role == 'admin' %}<th></th>{% endif %}</tr></thead>
   <tbody>
     {% for d in donations %}
     <tr>
@@ -40,7 +44,8 @@
       <td><a href="{{ url_for('admin.donor_detail', donor_id=d.donor.id) }}">{{ d.donor.full_name }}</a></td>
       <td>{{ d.campaign.name }}</td>
       <td>Rs. {{ d.amount | inr }}</td>
-      <td>{{ d.payment_mode.replace('_',' ').title() }}</td>
+      <td>{{ d.payment_mode.replace('_',' ').title() }}{% if d.razorpay_method %} ({{ d.razorpay_method.upper() }}){% endif %}</td>
+      <td class="small text-muted">{{ d.reference_display or '-' }}</td>
       <td>
         {% if d.status == 'success' %}<span class="badge bg-success">Success</span>
         {% elif d.status == 'pending' %}<span class="badge bg-warning">Pending</span>
@@ -50,16 +55,118 @@
       <td>
         {% if d.status == 'success' %}
         <a href="{{ url_for('public.download_receipt', donation_id=d.id) }}">{{ d.receipt_number }}</a>
-        {% else %}
-        <a href="{{ url_for('admin.donor_detail', donor_id=d.donor.id) }}" class="small text-muted">View donor &rarr;</a>
+        {% else %}-{% endif %}
+      </td>
+      <td>
+        <a href="#" data-bs-toggle="modal" data-bs-target="#donationDetails{{ d.id }}" class="small">Full details</a>
+      </td>
+      {% if current_user.role == 'admin' %}
+      <td>
+        {% if d.status == 'success' %}
+        <a href="#" data-bs-toggle="modal" data-bs-target="#cancelDonation{{ d.id }}" class="small text-danger">Cancel</a>
+        {% elif d.status == 'cancelled' %}
+        <form method="post" action="{{ url_for('admin.restore_donation', donation_id=d.id) }}" class="d-inline"
+              onsubmit="return confirm('Restore this donation to Success? It will count towards totals and receipts again.');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-link btn-sm p-0 small">Restore</button>
+        </form>
         {% endif %}
       </td>
+      {% endif %}
     </tr>
     {% else %}
-    <tr><td colspan="7" class="text-muted">No donations found.</td></tr>
+    <tr><td colspan="10" class="text-muted">No donations found.</td></tr>
     {% endfor %}
   </tbody>
 </table>
 </div>
 {% include "admin/_pagination.html" %}
+
+{% for d in donations %}
+<div class="modal fade" id="donationDetails{{ d.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">Donation details -- {{ d.receipt_number or ('#' ~ d.id) }}</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="table-responsive">
+        <table class="table table-sm mb-3">
+          <tbody>
+            <tr><th class="text-muted" style="width:40%">Donor Name</th><td><a href="{{ url_for('admin.donor_detail', donor_id=d.donor.id) }}">{{ d.donor.full_name }}</a></td></tr>
+            <tr><th class="text-muted">Phone</th><td>{{ d.donor.phone or '-' }}</td></tr>
+            <tr><th class="text-muted">WhatsApp</th><td>{{ d.donor.whatsapp_number or '-' }}</td></tr>
+            <tr><th class="text-muted">Email</th><td>{{ d.donor.email or '-' }}</td></tr>
+            <tr><th class="text-muted">PAN</th><td>{{ d.donor.pan or 'Not Provided' }}</td></tr>
+            <tr><th class="text-muted">Address</th><td>{{ d.donor.address or '-' }}</td></tr>
+            <tr><th class="text-muted">City / State / Pincode</th><td>{{ [d.donor.city, d.donor.state, d.donor.pincode] | select | join(', ') or '-' }}</td></tr>
+            <tr><th class="text-muted">Campaign</th><td>{{ d.campaign.name }}</td></tr>
+            {% if d.bace_property %}<tr><th class="text-muted">BACE Property</th><td>{{ d.bace_property.name }}</td></tr>{% endif %}
+            {% if d.festival %}<tr><th class="text-muted">Festival</th><td>{{ d.festival.name }}</td></tr>{% endif %}
+            {% if d.seva_type %}<tr><th class="text-muted">Seva Type</th><td>{{ d.seva_type.name }}</td></tr>{% endif %}
+            {% if d.live_to_give_purpose %}<tr><th class="text-muted">Donation Purpose</th><td>{{ d.live_to_give_purpose.name }}</td></tr>{% endif %}
+            <tr><th class="text-muted">Amount</th><td>Rs. {{ d.amount | inr }}</td></tr>
+            <tr><th class="text-muted">Payment Mode</th><td>{{ d.payment_mode.replace('_',' ').title() }}</td></tr>
+            <tr><th class="text-muted">Reference</th><td>{{ d.reference_display or '-' }}</td></tr>
+            <tr><th class="text-muted">80G Eligible</th><td>{{ 'Yes' if d.effective_is_80g else 'No' }}</td></tr>
+            <tr><th class="text-muted">Status</th><td>{{ d.status.title() }}</td></tr>
+            <tr><th class="text-muted">Recorded By</th><td>{{ d.recorded_by or '-' }}</td></tr>
+            <tr><th class="text-muted">Remarks</th><td>{{ d.remarks or '-' }}</td></tr>
+            <tr><th class="text-muted">Donation Date</th><td>{{ d.donation_date.strftime('%d-%b-%Y') }}</td></tr>
+            {% if d.status == 'cancelled' %}
+            <tr><th class="text-muted">Cancelled</th><td>{{ d.cancelled_at.strftime('%d-%b-%Y %H:%M') if d.cancelled_at else '-' }} by {{ d.cancelled_by or '-' }}<br><span class="small text-muted">{{ d.cancellation_reason or '' }}</span></td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+        </div>
+        {% if d.razorpay_payment_id %}
+        <div class="small fw-bold mb-2">Online payment details</div>
+        <div class="table-responsive">
+        <table class="table table-sm mb-3">
+          <tbody>
+            <tr><th class="text-muted" style="width:40%">Payment ID</th><td>{{ d.razorpay_payment_id }}</td></tr>
+            <tr><th class="text-muted">Order ID</th><td>{{ d.razorpay_order_id or '-' }}</td></tr>
+            <tr><th class="text-muted">Payment status</th><td>{{ (d.razorpay_status or '-').title() }}</td></tr>
+            <tr><th class="text-muted">Method</th><td>{{ (d.razorpay_method or '-').upper() }}</td></tr>
+            <tr><th class="text-muted">Bank UTR / reference no.</th><td>{{ d.razorpay_utr or '-' }}</td></tr>
+            <tr><th class="text-muted">Razorpay fee</th><td>{{ 'Rs. ' ~ (d.razorpay_fee | inr) if d.razorpay_fee is not none else '-' }}</td></tr>
+            <tr><th class="text-muted">Checkout email</th><td>{{ d.razorpay_email or '-' }}</td></tr>
+            <tr><th class="text-muted">Checkout contact</th><td>{{ d.razorpay_contact or '-' }}</td></tr>
+            <tr><th class="text-muted">Donor IP address</th><td>{{ d.donor_ip_address or '-' }}</td></tr>
+          </tbody>
+        </table>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% if d.status == 'success' and current_user.role == 'admin' %}
+<div class="modal fade" id="cancelDonation{{ d.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('admin.cancel_donation', donation_id=d.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="modal-header">
+          <h6 class="modal-title">Cancel donation {{ d.receipt_number or ('#' ~ d.id) }}?</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted small">This won't delete the donation or alter the issued receipt PDF, but it will
+            be excluded from totals, statements and reports, and its receipt will no longer be downloadable. This
+            can be undone later from the Restore action.</p>
+          <label class="form-label">Reason for cancellation</label>
+          <textarea class="form-control" name="cancellation_reason" rows="2" required></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Never mind</button>
+          <button type="submit" class="btn btn-danger">Cancel Donation</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endfor %}
 {% endblock %}
