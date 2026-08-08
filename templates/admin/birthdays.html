@@ -1,0 +1,74 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Birthdays{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+  <h3 class="mb-0">🎂 Birthdays</h3>
+  <a href="{{ url_for('admin.donor_insights') }}" class="small">Family birthdays &amp; anniversaries &rarr;</a>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-4">
+    <div class="stat-card text-center">
+      <div class="stat-label">🎂 Today</div>
+      <div class="stat-value">{{ birthdays_today | length }}</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="stat-card text-center">
+      <div class="stat-label">📅 Upcoming (next {{ window_days }} days)</div>
+      <div class="stat-value">{{ birthdays_upcoming | length }}</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="stat-card text-center">
+      <div class="stat-label">🙏 Donors With DOB on File</div>
+      <div class="stat-value">{{ donors_with_dob_count }} / {{ total_donors }}</div>
+    </div>
+  </div>
+</div>
+
+{% if birthdays_today %}
+<div class="alert alert-info d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+  <div>
+    🎂 <strong>Birthday today:</strong>
+    {% for u in birthdays_today %}
+      <a href="{{ url_for('admin.donor_detail', donor_id=u.donor.id) }}">{{ u.donor.full_name }}</a>{% if not loop.last %}, {% endif %}
+    {% endfor %}
+    -- don't forget to wish them! 🙏
+  </div>
+</div>
+{% endif %}
+
+<div class="card card-body shadow-sm">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <h6 class="mb-0">Upcoming Birthdays</h6>
+    <form method="get" class="d-flex align-items-center gap-2">
+      <label class="small text-muted mb-0" for="days">Window</label>
+      <select name="days" id="days" class="form-select form-select-sm" onchange="this.form.submit()">
+        <option value="7" {% if window_days == 7 %}selected{% endif %}>Next 7 days</option>
+        <option value="30" {% if window_days == 30 %}selected{% endif %}>Next 30 days</option>
+        <option value="60" {% if window_days == 60 %}selected{% endif %}>Next 60 days</option>
+        <option value="90" {% if window_days == 90 %}selected{% endif %}>Next 90 days</option>
+        <option value="365" {% if window_days == 365 %}selected{% endif %}>Full year</option>
+      </select>
+    </form>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0">
+      <thead><tr><th>Donor</th><th>Phone</th><th>Date</th><th class="text-end">In</th></tr></thead>
+      <tbody>
+        {% for u in birthdays_upcoming %}
+        <tr>
+          <td><a href="{{ url_for('admin.donor_detail', donor_id=u.donor.id) }}">{{ u.donor.full_name }}</a></td>
+          <td>{{ u.donor.phone or '-' }}</td>
+          <td>{{ u.date.strftime('%d-%b-%Y') }}</td>
+          <td class="text-end">{{ u.days_until }} day{{ 's' if u.days_until != 1 else '' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="text-muted text-center py-3">No birthdays in this window.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

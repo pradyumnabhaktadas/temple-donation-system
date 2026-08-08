@@ -10,7 +10,7 @@
     </button>
     <div class="collapse navbar-collapse" id="adminNav">
       {% set offline_donation_endpoints = ['admin.manual_donation', 'admin.bulk_import_donations'] %}
-      {% set donors_endpoints = ['admin.donors', 'admin.donor_insights', 'admin.lapsed_donors', 'admin.import_donors'] %}
+      {% set donors_endpoints = ['admin.donors', 'admin.birthdays', 'admin.donor_insights', 'admin.lapsed_donors', 'admin.import_donors'] %}
       {% set settings_endpoints = ['admin.campaigns', 'admin.bace_properties', 'admin.festivals', 'admin.seva_types', 'admin.live_to_give_purposes', 'admin.preachers', 'admin.data_backup'] %}
       <div class="navbar-nav ms-auto flex-wrap">
         <a class="nav-link {% if request.endpoint == 'admin.dashboard' %}active{% endif %}" href="{{ url_for('admin.dashboard') }}">Dashboard</a>
@@ -25,6 +25,7 @@
           <a class="nav-link dropdown-toggle {% if request.endpoint in donors_endpoints %}active{% endif %}" href="#" role="button" aria-expanded="false">Donors</a>
           <ul class="dropdown-menu dropdown-menu-end">
             <li><a class="dropdown-item {% if request.endpoint == 'admin.donors' %}active{% endif %}" href="{{ url_for('admin.donors') }}">Donors</a></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'admin.birthdays' %}active{% endif %}" href="{{ url_for('admin.birthdays') }}">Birthdays</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.donor_insights' %}active{% endif %}" href="{{ url_for('admin.donor_insights') }}">Donor Insights</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.lapsed_donors' %}active{% endif %}" href="{{ url_for('admin.lapsed_donors') }}">Lapsed Donors</a></li>
             {% if current_user.is_authenticated and current_user.role == 'admin' %}

@@ -188,17 +188,16 @@ def dashboard():
         days_left = (deadline - today).days
         form_10bd_reminder = {"filing_fy": filing_fy, "days_left": days_left, "overdue": days_left < 0}
 
-    # Birthday reminder -- donor's own DOB only (family DOBs/anniversaries
-    # get the fuller treatment on Donor Insights); next 7 days, today's
-    # first. Reuses the same Feb-29/year-wraparound-safe date math as
-    # Donor Insights and Analytics (_next_occurrence, defined below).
-    birthday_upcoming = []
+    # Birthday reminder banner -- today's only; the full calendar with
+    # upcoming birthdays lives on its own page (Admin -> Donors -> Birthdays,
+    # see the birthdays() route below). Reuses the same Feb-29/year-
+    # wraparound-safe date math as Donor Insights and Analytics
+    # (_next_occurrence, defined further down in this file).
+    birthdays_today = []
     for donor in Donor.query.filter(Donor.dob.isnot(None)).all():
-        days_until, occurrence_date = _next_occurrence(donor.dob, today)
-        if days_until is not None and days_until <= 7:
-            birthday_upcoming.append({"donor": donor, "days_until": days_until, "date": occurrence_date})
-    birthday_upcoming.sort(key=lambda u: u["days_until"])
-    birthdays_today = [u for u in birthday_upcoming if u["days_until"] == 0]
+        days_until, _occurrence_date = _next_occurrence(donor.dob, today)
+        if days_until == 0:
+            birthdays_today.append({"donor": donor})
 
     return render_template(
         "admin/dashboard.html",
@@ -213,7 +212,6 @@ def dashboard():
         fy=fy,
         form_10bd_reminder=form_10bd_reminder,
         birthdays_today=birthdays_today,
-        birthday_upcoming=birthday_upcoming,
         today=today,
     )
 
@@ -2455,6 +2453,38 @@ def donor_insights():
         frequency_counts=frequency_counts, donation_frequency_labels=DONATION_FREQUENCY_LABELS,
         donation_frequencies=DONATION_FREQUENCIES,
         upcoming=upcoming, upcoming_days=upcoming_days,
+    )
+
+
+@bp.route("/birthdays")
+@login_required
+def birthdays():
+    """Dedicated birthday calendar -- donor's own DOB only (family DOBs /
+    marriage anniversaries get the fuller treatment on Donor Insights,
+    which covers a wider set of relationship-building dates). Today's
+    birthdays are broken out separately; everything else within the
+    selected window is listed soonest-first."""
+    today = datetime.date.today()
+    window_days = request.args.get("days", 60, type=int)
+
+    donors_with_dob = Donor.query.filter(Donor.dob.isnot(None)).all()
+
+    all_birthdays = []
+    for donor in donors_with_dob:
+        days_until, occurrence_date = _next_occurrence(donor.dob, today)
+        all_birthdays.append({"donor": donor, "days_until": days_until, "date": occurrence_date})
+    all_birthdays.sort(key=lambda u: u["days_until"])
+
+    birthdays_today = [u for u in all_birthdays if u["days_until"] == 0]
+    birthdays_upcoming = [u for u in all_birthdays if 0 < u["days_until"] <= window_days]
+
+    return render_template(
+        "admin/birthdays.html",
+        birthdays_today=birthdays_today,
+        birthdays_upcoming=birthdays_upcoming,
+        window_days=window_days,
+        donors_with_dob_count=len(donors_with_dob),
+        total_donors=Donor.query.count(),
     )
 
 

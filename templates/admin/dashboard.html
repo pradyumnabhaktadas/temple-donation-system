@@ -12,29 +12,7 @@
     {% endfor %}
     -- don't forget to wish them! 🙏
   </div>
-</div>
-{% endif %}
-
-{% if birthday_upcoming %}
-<div class="card card-body shadow-sm mb-4">
-  <div class="d-flex justify-content-between align-items-center mb-2">
-    <h6 class="mb-0">🎂 Birthday Reminder <small class="text-muted fw-normal">next 7 days</small></h6>
-    <a href="{{ url_for('admin.donor_insights') }}" class="small">View all birthdays &amp; anniversaries &rarr;</a>
-  </div>
-  <div class="table-responsive">
-  <table class="table table-sm mb-0">
-    <thead><tr><th>Donor</th><th>Date</th><th class="text-end">In</th></tr></thead>
-    <tbody>
-      {% for u in birthday_upcoming %}
-      <tr>
-        <td><a href="{{ url_for('admin.donor_detail', donor_id=u.donor.id) }}">{{ u.donor.full_name }}</a></td>
-        <td>{{ u.date.strftime('%d-%b') }}</td>
-        <td class="text-end">{{ 'Today' if u.days_until == 0 else (u.days_until ~ ' day' ~ ('s' if u.days_until != 1 else '')) }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
+  <a href="{{ url_for('admin.birthdays') }}" class="btn btn-sm btn-outline-secondary">View Birthdays</a>
 </div>
 {% endif %}
 
