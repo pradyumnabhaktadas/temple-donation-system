@@ -24,13 +24,13 @@
           <span></span><span></span><span></span>
         </button>
         <nav class="site-nav-links collapse d-lg-flex align-items-center gap-3" id="siteNavLinks">
-          <a href="{{ url_for('public.donate_form') }}" class="text-decoration-none {% if request.endpoint == 'public.donate_form' %}fw-bold{% endif %}">Donate</a>
           <a href="{{ url_for('public.festival_seva_form') }}" class="text-decoration-none {% if request.endpoint == 'public.festival_seva_form' %}fw-bold{% endif %}">Festival Seva</a>
           <a href="{{ url_for('public.bace_rent_form') }}" class="text-decoration-none {% if request.endpoint == 'public.bace_rent_form' %}fw-bold{% endif %}">BACE Contribution</a>
           <a href="{{ url_for('donor_portal.account') if session.get('donor_id') else url_for('donor_portal.login') }}"
              class="site-account-link text-decoration-none">
-            <span aria-hidden="true">◌</span> {{ 'My donations' if session.get('donor_id') else 'Donor login' }}
+            <span aria-hidden="true">◌</span> {{ 'My Seva' if session.get('donor_id') else 'My Seva Login' }}
           </a>
+          <a href="{{ url_for('public.donate_form') }}#donation-card" class="nav-give-btn text-decoration-none">🪷 Give Now</a>
         </nav>
         <img src="{{ url_for('static', filename='branding/iyf_logo.png') }}" alt="ISKCON Youth Forum Dwarka Delhi" class="brand-logo-iyf">
       </div>

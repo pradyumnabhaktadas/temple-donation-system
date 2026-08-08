@@ -3,17 +3,17 @@
 {% block content %}
 <section class="donation-hero">
   <div class="donation-hero-copy">
-    <p class="hero-eyebrow">An initiative for Nitya Seva</p>
+    <p class="hero-eyebrow">{{ org_name or 'ISKCON Dwarka Delhi' }}</p>
     <h1>Live to <em>Give</em>.</h1>
-    <p class="hero-lede">Choose a purpose and contribute directly online -- a receipt is generated automatically after payment.</p>
+    <p class="hero-lede">Offer your contribution in the service of Sri Krishna -- a receipt is generated automatically after payment.</p>
     <div class="hero-trust-row">
-      <span><b>100%</b> secure payment</span><span><b>80G</b> optional</span><span><b>∞</b> gratitude</span>
+      <span>🔒 Secure Payment</span><span>🧾 80G Receipt</span><span>🙏 Thank You for Your Seva</span>
     </div>
   </div>
   <div class="hero-lotus" aria-hidden="true"><div class="lotus-glow"><img src="{{ url_for('static', filename='branding/iskcon_dwarka_logo.png') }}" alt="" class="lotus-glow-logo"></div><i></i><i></i><i></i><i></i></div>
 </section>
 
-<div class="row justify-content-center donation-layout">
+<div class="row justify-content-center donation-layout" id="donation-card">
   <div class="col-xl-8 col-lg-9">
     {% if not razorpay_enabled %}
       <div class="alert alert-warning py-2 text-center">Demo mode: live Razorpay keys are not configured, so payment will be simulated. See README to go live.</div>
@@ -83,7 +83,13 @@
 
       <div class="form-section">
         <div class="d-flex justify-content-between align-items-center"><label class="form-label mb-0" for="amount">Contribution amount</label><span class="field-note">Minimum Rs. 101</span></div>
-        <div class="currency-input"><span>₹</span><input type="number" min="101" step="1" class="form-control" name="amount" id="amount" placeholder="Enter an amount" required></div>
+        <div class="amount-picker" id="amount-picker" role="group" aria-label="Preset donation amounts">
+          <button type="button" class="amount-option" data-amount="501">₹501</button>
+          <button type="button" class="amount-option" data-amount="1001">₹1,001</button>
+          <button type="button" class="amount-option" data-amount="2501">₹2,501</button>
+          <button type="button" class="amount-option" data-amount="5001">₹5,001</button>
+        </div>
+        <div class="currency-input"><span>₹</span><input type="number" min="101" step="1" class="form-control" name="amount" id="amount" placeholder="Or enter a custom amount" required></div>
       </div>
 
       <div class="form-section">
@@ -161,11 +167,16 @@
     </a>
     <a href="{{ url_for('donor_portal.login') }}" class="give-way-card">
       <div class="give-way-icon">📄</div>
-      <h3>Your Giving History</h3>
+      <h3>My Seva</h3>
       <p>Log in with your phone number to view past donations and download receipts or annual statements.</p>
-      <span class="give-way-arrow">View my donations →</span>
+      <span class="give-way-arrow">View my Seva →</span>
     </a>
   </div>
+</section>
+
+<section class="devotional-quote">
+  <p class="quote-text">"Whatever you do, whatever you eat, whatever you offer or give away..."</p>
+  <p class="quote-source">— Bhagavad-gītā 9.27</p>
 </section>
 
 <section class="photo-gallery">
@@ -216,6 +227,29 @@
   </div>
 </section>
 
+<section class="trust-strip">
+  <div class="trust-strip-item">
+    <div class="trust-icon">🔒</div>
+    <h4>Secure Payments</h4>
+    <p>Safe and reliable payment processing.</p>
+  </div>
+  <div class="trust-strip-item">
+    <div class="trust-icon">🧾</div>
+    <h4>80G Receipt</h4>
+    <p>Receive your donation receipt instantly.</p>
+  </div>
+  <div class="trust-strip-item">
+    <div class="trust-icon">📱</div>
+    <h4>Instant Confirmation</h4>
+    <p>Get confirmation right after your contribution.</p>
+  </div>
+</section>
+
+<section class="final-cta-banner">
+  <h3>Ready to Make Your Offering?</h3>
+  <a href="#donation-card" class="btn btn-gold">Give Now →</a>
+</section>
+
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <script>
 (function () {
@@ -237,6 +271,22 @@
   }
   firstNameInput.addEventListener('input', syncFullName);
   lastNameInput.addEventListener('input', syncFullName);
+
+  // Preset amount chips fill the amount field and show which one is
+  // selected; typing a custom amount that doesn't match any chip just
+  // clears the highlight rather than fighting the donor's input.
+  const amountInput = document.getElementById('amount');
+  const amountOptions = document.querySelectorAll('#amount-picker .amount-option');
+  amountOptions.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      amountInput.value = btn.dataset.amount;
+      amountOptions.forEach((b) => b.classList.toggle('active', b === btn));
+      amountInput.focus();
+    });
+  });
+  amountInput.addEventListener('input', () => {
+    amountOptions.forEach((b) => b.classList.toggle('active', b.dataset.amount === amountInput.value));
+  });
 
   // Choosing "80G" makes PAN required (needed to actually claim the tax
   // benefit); "Non 80G" leaves it optional, same as every other form.
