@@ -301,8 +301,9 @@ body {
   background: rgba(255, 253, 248, 0.9);
   border-bottom: 1px solid rgba(15,36,68,0.1);
   backdrop-filter: blur(12px);
-  position: relative;
-  z-index: 3;
+  position: sticky;
+  top: 0;
+  z-index: 30;
 }
 .site-nav { min-height: 76px; }
 .site-brand { color: var(--maroon-dark); max-width: min(58vw, 430px); }
