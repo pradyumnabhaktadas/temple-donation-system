@@ -253,6 +253,15 @@ a:hover {
   }
 }
 
+/* ---------- Offline Donation page tabs (Single Entry / Bulk Upload) ---------- */
+.offline-tabs { display:flex; gap:.5rem; border-bottom:1px solid rgba(15,36,68,.12); }
+.offline-tab-btn {
+  border:none; background:none; padding:.65rem 1.1rem; font-size:.92rem; font-weight:600;
+  color: var(--muted); border-bottom:3px solid transparent; margin-bottom:-1px; transition:.15s ease;
+}
+.offline-tab-btn:hover { color: var(--maroon-dark); }
+.offline-tab-btn.active { color: var(--maroon-dark); border-bottom-color: var(--saffron); }
+
 /* ---------- Tables ---------- */
 .table {
   --bs-table-bg: transparent;

@@ -82,6 +82,49 @@ def send_receipt_email(donation, donor, org_cfg, pdf_bytes):
         return False
 
 
+def send_backup_email(cfg, to_email, filename, zip_bytes):
+    """Emails a weekly data backup ZIP (see backup_utils.build_backup_zip)
+    to `to_email`. Same demo-mode/never-raises contract as
+    send_receipt_email above -- an unconfigured or failing SMTP send just
+    means the backup file itself (already saved to disk by the caller)
+    is the only copy, not a hard failure of the backup run."""
+    if not to_email:
+        return False
+
+    smtp_host = cfg.get("SMTP_HOST")
+    if not smtp_host:
+        return False  # DEMO MODE: nothing was actually sent
+
+    try:
+        msg = EmailMessage()
+        msg["Subject"] = f"Weekly data backup - {filename}"
+        msg["From"] = _from_header(cfg)
+        msg["To"] = to_email
+        msg.set_content(
+            "Attached is this week's full data backup (donors, donations, and lookup lists) "
+            "as a ZIP of CSV files.\n\n"
+            "This is a computer-generated email and does not require a signature."
+        )
+        msg.add_attachment(zip_bytes, maintype="application", subtype="zip", filename=filename)
+
+        smtp_port = int(cfg.get("SMTP_PORT", 587))
+        use_tls = cfg.get("SMTP_USE_TLS", True)
+        username = cfg.get("SMTP_USERNAME")
+        password = cfg.get("SMTP_PASSWORD")
+
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
+            if use_tls:
+                server.starttls(context=ssl.create_default_context())
+            if username:
+                server.login(username, password)
+            server.send_message(msg)
+
+        return True
+    except Exception:
+        current_app.logger.exception("Failed to email data backup %s to %s", filename, to_email)
+        return False
+
+
 def _from_header(cfg):
     from_addr = cfg.get("MAIL_FROM_ADDRESS") or cfg.get("SMTP_USERNAME") or ""
     from_name = cfg.get("MAIL_FROM_NAME")

@@ -177,6 +177,16 @@ class Config:
     MAIL_FROM_ADDRESS = os.environ.get("MAIL_FROM_ADDRESS", "")
     MAIL_FROM_NAME = os.environ.get("MAIL_FROM_NAME", "")
 
+    # --- Weekly data backup (backup_data.py) ---
+    # Where the weekly backup ZIP (donors/donations/lookup lists as CSV --
+    # see backup_utils.py) gets emailed, in addition to being saved under
+    # instance/backups/. Falls back to ORG_CONTACT_EMAIL if left blank, since
+    # that inbox is already checked regularly.
+    BACKUP_EMAIL = os.environ.get("BACKUP_EMAIL", "")
+    # How many backups to keep on disk before pruning the oldest -- default
+    # 12 covers ~3 months of weekly backups.
+    BACKUP_RETENTION_COUNT = int(os.environ.get("BACKUP_RETENTION_COUNT", 12))
+
     # --- Receipt delivery over WhatsApp (Airtel IQ WhatsApp Business API) ---
     # Leave WHATSAPP_AIRTEL_USERNAME/PASSWORD blank to run in DEMO MODE:
     # receipts are still generated and emailed/downloadable as before, just

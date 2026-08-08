@@ -9,25 +9,17 @@
       <span class="navbar-toggler-icon"></span>
     </button>
     <div class="collapse navbar-collapse" id="adminNav">
-      {% set donations_endpoints = ['admin.donations', 'admin.manual_donation', 'admin.bulk_import_donations', 'admin.import_legacy_donations'] %}
+      {% set offline_donation_endpoints = ['admin.manual_donation', 'admin.bulk_import_donations'] %}
       {% set donors_endpoints = ['admin.donors', 'admin.donor_insights', 'admin.lapsed_donors', 'admin.import_donors'] %}
-      {% set settings_endpoints = ['admin.campaigns', 'admin.bace_properties', 'admin.festivals', 'admin.seva_types', 'admin.live_to_give_purposes', 'admin.preachers'] %}
+      {% set settings_endpoints = ['admin.campaigns', 'admin.bace_properties', 'admin.festivals', 'admin.seva_types', 'admin.live_to_give_purposes', 'admin.preachers', 'admin.data_backup'] %}
       <div class="navbar-nav ms-auto flex-wrap">
         <a class="nav-link {% if request.endpoint == 'admin.dashboard' %}active{% endif %}" href="{{ url_for('admin.dashboard') }}">Dashboard</a>
         <a class="nav-link {% if request.endpoint == 'admin.analytics' %}active{% endif %}" href="{{ url_for('admin.analytics') }}">Analytics</a>
-
-        <div class="nav-item dropdown">
-          <a class="nav-link dropdown-toggle {% if request.endpoint in donations_endpoints %}active{% endif %}" href="#" role="button" aria-expanded="false">Donations</a>
-          <ul class="dropdown-menu dropdown-menu-end">
-            <li><a class="dropdown-item {% if request.endpoint == 'admin.donations' %}active{% endif %}" href="{{ url_for('admin.donations') }}">Donations Log</a></li>
-            <li><a class="dropdown-item {% if request.endpoint == 'admin.manual_donation' %}active{% endif %}" href="{{ url_for('admin.manual_donation') }}">Log Offline Donation</a></li>
-            {% if current_user.is_authenticated and current_user.role == 'admin' %}
-            <li><hr class="dropdown-divider"></li>
-            <li><a class="dropdown-item {% if request.endpoint == 'admin.bulk_import_donations' %}active{% endif %}" href="{{ url_for('admin.bulk_import_donations') }}">Bulk Import</a></li>
-            <li><a class="dropdown-item {% if request.endpoint == 'admin.import_legacy_donations' %}active{% endif %}" href="{{ url_for('admin.import_legacy_donations') }}">Import Historical Data</a></li>
-            {% endif %}
-          </ul>
-        </div>
+        <a class="nav-link {% if request.endpoint == 'admin.donations' %}active{% endif %}" href="{{ url_for('admin.donations') }}">Donations</a>
+        <a class="nav-link {% if request.endpoint in offline_donation_endpoints %}active{% endif %}" href="{{ url_for('admin.manual_donation') }}">Offline Donation</a>
+        {% if current_user.is_authenticated and current_user.role == 'admin' %}
+        <a class="nav-link {% if request.endpoint == 'admin.import_legacy_donations' %}active{% endif %}" href="{{ url_for('admin.import_legacy_donations') }}">Import Historical Data</a>
+        {% endif %}
 
         <div class="nav-item dropdown">
           <a class="nav-link dropdown-toggle {% if request.endpoint in donors_endpoints %}active{% endif %}" href="#" role="button" aria-expanded="false">Donors</a>
@@ -51,12 +43,16 @@
             <li><a class="dropdown-item {% if request.endpoint == 'admin.seva_types' %}active{% endif %}" href="{{ url_for('admin.seva_types') }}">Seva Types</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.live_to_give_purposes' %}active{% endif %}" href="{{ url_for('admin.live_to_give_purposes') }}">Live To Give Purposes</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.preachers' %}active{% endif %}" href="{{ url_for('admin.preachers') }}">Preachers</a></li>
+            {% if current_user.is_authenticated and current_user.role == 'admin' %}
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'admin.data_backup' %}active{% endif %}" href="{{ url_for('admin.data_backup') }}">Data Backup</a></li>
+            {% endif %}
           </ul>
         </div>
 
         {% if current_user.is_authenticated %}
         <div class="nav-item dropdown">
-          <a class="nav-link dropdown-toggle {% if request.endpoint == 'admin.change_password' %}active{% endif %}" href="#" role="button" aria-expanded="false">{{ current_user.username }}</a>
+          <a class="nav-link dropdown-toggle {% if request.endpoint == 'admin.change_password' %}active{% endif %}" href="#" role="button" aria-expanded="false">{{ current_user.username | capitalize }}</a>
           <ul class="dropdown-menu dropdown-menu-end">
             <li><a class="dropdown-item {% if request.endpoint == 'admin.change_password' %}active{% endif %}" href="{{ url_for('admin.change_password') }}">Account</a></li>
             <li><a class="dropdown-item" href="{{ url_for('admin.logout') }}">Logout</a></li>

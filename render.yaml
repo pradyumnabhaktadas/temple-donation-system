@@ -64,6 +64,46 @@ services:
         sync: false
       - key: SENTRY_DSN
         sync: false
+      - key: BACKUP_EMAIL
+        sync: false
+
+  # Runs backup_data.py weekly -- exports donors/donations/lookup lists to
+  # a CSV zip and emails it to BACKUP_EMAIL (or ORG_CONTACT_EMAIL) if SMTP
+  # is set up. This is a separate Render service from the web app with its
+  # own (ephemeral, no `disk:`) filesystem -- a Render persistent disk can
+  # only be attached to one service, so it can't share the web service's
+  # instance/backups/ folder. Email is therefore the durable copy for the
+  # automatic weekly run; use the "Download Backup Now" button in
+  # Admin -> Settings -> Data Backup (or run `python backup_data.py` from
+  # the web service's own Render Shell) if you also want a copy that
+  # persists on the web service's disk.
+  # NOTE: Cron Job services require a Render plan that supports them --
+  # if yours doesn't, delete this block and instead run
+  # `python backup_data.py` weekly from any external scheduler pointed at
+  # this same repo (a free cron-job.org trigger, your own crontab, etc.).
+  - type: cron
+    name: temple-weekly-backup
+    runtime: python
+    schedule: "0 2 * * 0"   # every Sunday, 2 AM UTC
+    buildCommand: pip install -r requirements.txt
+    startCommand: python backup_data.py --dest /tmp/temple-backups
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: temple-donation-db
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false   # same value as the web service's SECRET_KEY
+      - key: ORG_CONTACT_EMAIL
+        sync: false
+      - key: BACKUP_EMAIL
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
 
 databases:
   - name: temple-donation-db

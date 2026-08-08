@@ -1,5 +1,6 @@
 import csv
 import io
+import os
 import datetime
 from functools import wraps
 
@@ -21,6 +22,7 @@ from pdf_utils import generate_receipt_pdf
 from email_utils import send_receipt_email
 from whatsapp_utils import send_receipt_whatsapp
 from public import find_or_create_donor, _org_cfg
+from backup_utils import build_backup_zip
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -1029,14 +1031,24 @@ def _validated_id_from_form(form, key, model, label):
     return value, None
 
 
+def _offline_donation_form_context():
+    """Dropdown data the Single Entry tab needs -- shared between
+    manual_donation() and bulk_import_donations() since both routes can
+    render the merged offline_donation.html page (Single Entry + Bulk
+    Upload live on one page/one nav tab now)."""
+    return {
+        "campaigns": Campaign.query.filter_by(is_active=True).order_by(Campaign.name).all(),
+        "bace_properties": BaceProperty.query.filter_by(is_active=True).order_by(BaceProperty.name).all(),
+        "festivals": Festival.query.filter_by(is_active=True).order_by(Festival.name).all(),
+        "seva_types": SevaType.query.filter_by(is_active=True).order_by(SevaType.name).all(),
+        "live_to_give_purposes": LiveToGivePurpose.query.filter_by(is_active=True).order_by(LiveToGivePurpose.name).all(),
+        "today": datetime.date.today(),
+    }
+
+
 @bp.route("/donations/manual", methods=["GET", "POST"])
 @login_required
 def manual_donation():
-    campaigns = Campaign.query.filter_by(is_active=True).order_by(Campaign.name).all()
-    bace_properties = BaceProperty.query.filter_by(is_active=True).order_by(BaceProperty.name).all()
-    festivals = Festival.query.filter_by(is_active=True).order_by(Festival.name).all()
-    seva_types = SevaType.query.filter_by(is_active=True).order_by(SevaType.name).all()
-    live_to_give_purposes = LiveToGivePurpose.query.filter_by(is_active=True).order_by(LiveToGivePurpose.name).all()
     if request.method == "POST":
         form = request.form
 
@@ -1139,10 +1151,11 @@ def manual_donation():
         flash(f"Donation recorded. Receipt {receipt_number} generated.")
         return redirect(url_for("admin.donor_detail", donor_id=donor.id))
 
+    active_tab = "bulk" if request.args.get("tab") == "bulk" else "single"
     return render_template(
-        "admin/manual_donation.html", campaigns=campaigns, bace_properties=bace_properties,
-        festivals=festivals, seva_types=seva_types, live_to_give_purposes=live_to_give_purposes,
-        today=datetime.date.today(),
+        "admin/offline_donation.html", active_tab=active_tab,
+        bulk_results=None, bulk_created=None, bulk_skipped=None,
+        **_offline_donation_form_context(),
     )
 
 
@@ -1246,12 +1259,16 @@ def bulk_import_donations():
     arriving" today.
     """
     if request.method == "GET":
-        return render_template("admin/bulk_import_donations.html", results=None)
+        # Single Entry and Bulk Upload live on one merged page/nav tab now
+        # (offline_donation.html, served by manual_donation()) -- this
+        # route still owns the actual upload processing (POST below), but
+        # a direct GET here just lands on that page with Bulk selected.
+        return redirect(url_for("admin.manual_donation", tab="bulk"))
 
     file = request.files.get("csv_file")
     if not file or not file.filename:
         flash("Please choose a CSV file to upload.")
-        return redirect(url_for("admin.bulk_import_donations"))
+        return redirect(url_for("admin.manual_donation", tab="bulk"))
 
     send_notifications = request.form.get("send_notifications") == "yes"
 
@@ -1261,7 +1278,7 @@ def bulk_import_donations():
         fieldnames = {(f or "").strip() for f in (reader.fieldnames or [])}
     except Exception:
         flash("Couldn't read that file -- please upload a CSV (comma-separated) file.")
-        return redirect(url_for("admin.bulk_import_donations"))
+        return redirect(url_for("admin.manual_donation", tab="bulk"))
 
     missing = [c for c in BULK_IMPORT_REQUIRED_COLUMNS if c not in fieldnames]
     if missing:
@@ -1269,7 +1286,7 @@ def bulk_import_donations():
             "That CSV is missing required column(s): " + ", ".join(missing)
             + ". Download the demo file below for the full column list."
         )
-        return redirect(url_for("admin.bulk_import_donations"))
+        return redirect(url_for("admin.manual_donation", tab="bulk"))
 
     campaigns_by_name = {c.name.strip().lower(): c for c in Campaign.query.all()}
     bace_by_name = {b.name.strip().lower(): b for b in BaceProperty.query.all()}
@@ -1389,7 +1406,11 @@ def bulk_import_donations():
 
     skipped = len(results) - created
     flash(f"Bulk import finished: {created} donation(s) created, {skipped} skipped.")
-    return render_template("admin/bulk_import_donations.html", results=results, created=created, skipped=skipped)
+    return render_template(
+        "admin/offline_donation.html", active_tab="bulk",
+        bulk_results=results, bulk_created=created, bulk_skipped=skipped,
+        **_offline_donation_form_context(),
+    )
 
 
 # Same idea as BULK_IMPORT_* above, but for migrating history from before
@@ -2420,6 +2441,40 @@ def donor_insights():
         frequency_counts=frequency_counts, donation_frequency_labels=DONATION_FREQUENCY_LABELS,
         donation_frequencies=DONATION_FREQUENCIES,
         upcoming=upcoming, upcoming_days=upcoming_days,
+    )
+
+
+@bp.route("/settings/backup")
+@login_required
+@admin_role_required
+def data_backup():
+    """On-demand full data backup (donors/donations/lookup lists as CSV,
+    zipped -- see backup_utils.build_backup_zip). Complements
+    backup_data.py, which is meant to run automatically on a weekly
+    schedule (Render Cron Job or any external scheduler) -- this page is
+    for "I want one right now" without waiting for that."""
+    backups_dir = os.path.join(current_app.root_path, "instance", "backups")
+    recent_backups = []
+    if os.path.isdir(backups_dir):
+        recent_backups = sorted(
+            (f for f in os.listdir(backups_dir) if f.startswith("temple_data_backup_") and f.endswith(".zip")),
+            reverse=True,
+        )[:10]
+    return render_template(
+        "admin/data_backup.html", recent_backups=recent_backups,
+        backup_email=current_app.config.get("BACKUP_EMAIL") or current_app.config.get("ORG_CONTACT_EMAIL"),
+        smtp_configured=bool(current_app.config.get("SMTP_HOST")),
+    )
+
+
+@bp.route("/settings/backup/download")
+@login_required
+@admin_role_required
+def download_backup():
+    filename, zip_bytes = build_backup_zip()
+    return Response(
+        zip_bytes, mimetype="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
 

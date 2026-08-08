@@ -1,0 +1,55 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Data Backup{% endblock %}
+{% block content %}
+<h3 class="mb-3">🗄️ Data Backup</h3>
+
+<div class="card card-body shadow-sm p-4 mb-4" style="max-width:760px">
+  <p class="text-muted small mb-3">
+    A full backup of donor records, donation history, and every admin-editable lookup list (Campaigns,
+    BACE, Festivals, Seva Types, Live To Give Purposes, Preachers), exported as a ZIP of CSV files.
+    Admin login credentials and stored receipt PDFs are deliberately left out -- receipt PDFs can always
+    be regenerated from a donation's own data, and login credentials shouldn't leave the database.
+  </p>
+  <p class="mb-0">
+    <a href="{{ url_for('admin.download_backup') }}" class="btn btn-gold">⬇ Download Backup Now</a>
+  </p>
+</div>
+
+<div class="card card-body shadow-sm p-4 mb-4" style="max-width:760px">
+  <h6 class="mb-3">Automatic Weekly Backup</h6>
+  {% if smtp_configured and backup_email %}
+  <p class="mb-1">✅ Configured to email a fresh backup to <strong>{{ backup_email }}</strong> whenever the
+    weekly job runs.</p>
+  {% elif smtp_configured %}
+  <p class="mb-1">⚠️ SMTP is configured but no <code>BACKUP_EMAIL</code> (or <code>ORG_CONTACT_EMAIL</code>)
+    is set -- the weekly job will still save a copy to disk, but won't email anyone.</p>
+  {% else %}
+  <p class="mb-1">⚠️ SMTP isn't configured -- the weekly job will still save a copy to disk, but backups
+    won't be emailed anywhere. Set <code>SMTP_HOST</code> (see README "Emailing receipts") plus
+    <code>BACKUP_EMAIL</code> to enable that.</p>
+  {% endif %}
+  <p class="text-muted small mb-0">
+    The actual weekly run is <code>backup_data.py</code>, scheduled via the <code>temple-weekly-backup</code>
+    Cron Job in <code>render.yaml</code> (Sundays, 2 AM UTC). That's a separate Render service with its own
+    filesystem -- email is the durable copy of that automatic run (a Render disk can only be attached to one
+    service, so it can't write into this web app's own storage). If your Render plan doesn't support Cron
+    Jobs, run <code>python backup_data.py</code> weekly from any external scheduler instead (e.g. a free
+    cron-job.org trigger, or your own machine's crontab).
+  </p>
+</div>
+
+{% if recent_backups %}
+<div class="card card-body shadow-sm p-4" style="max-width:760px">
+  <h6 class="mb-3">Recent Backups on This Server's Disk</h6>
+  <p class="text-muted small mb-2">From <code>python backup_data.py</code> having been run directly on this
+    web service (e.g. via Render Shell) -- the automatic weekly Cron Job run is a separate service and
+    delivers its copy by email instead. "Download Backup Now" above always generates a fresh one on the spot
+    regardless of this list.</p>
+  <ul class="mb-0">
+    {% for b in recent_backups %}
+    <li class="small">{{ b }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endblock %}
