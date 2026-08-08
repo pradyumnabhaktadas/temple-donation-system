@@ -1,0 +1,106 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Donor Insights{% endblock %}
+{% block content %}
+<h3 class="mb-3">📊 Donor Insights</h3>
+<p class="text-muted">Reports built from the Donor Type, Connected Preacher, Donation Frequency, and family-date
+  fields on each donor's Edit page. A donor won't appear in a breakdown here until those fields are filled in.</p>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="card card-body shadow-sm p-3 h-100">
+      <h6 class="mb-3">Donors by Type</h6>
+      <table class="table table-sm mb-0">
+        <thead><tr><th>Type</th><th class="text-end"># Donors</th><th class="text-end">Total Donated</th></tr></thead>
+        <tbody>
+          {% for t in donor_types %}
+          <tr>
+            <td><a href="{{ url_for('admin.donors', donor_type=t) }}">{{ donor_type_labels[t] }}</a></td>
+            <td class="text-end">{{ donor_type_counts[t] }}</td>
+            <td class="text-end">Rs. {{ donor_type_totals[t] | inr }}</td>
+          </tr>
+          {% endfor %}
+          <tr>
+            <td class="text-muted">Not categorised</td>
+            <td class="text-end text-muted">{{ donor_type_counts['_uncategorised'] }}</td>
+            <td class="text-end text-muted">-</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card card-body shadow-sm p-3 h-100">
+      <h6 class="mb-3">Donors by Donation Frequency</h6>
+      <table class="table table-sm mb-0">
+        <thead><tr><th>Frequency</th><th class="text-end"># Donors</th></tr></thead>
+        <tbody>
+          {% for f in donation_frequencies %}
+          <tr>
+            <td><a href="{{ url_for('admin.donors', donation_frequency=f) }}">{{ donation_frequency_labels[f] }}</a></td>
+            <td class="text-end">{{ frequency_counts[f] }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card card-body shadow-sm p-3 mb-4">
+  <h6 class="mb-3">Donors by Preacher</h6>
+  <div class="table-responsive">
+  <table class="table table-sm mb-0">
+    <thead><tr><th>Preacher</th><th class="text-end"># Donors</th><th class="text-end">Total Donated</th><th></th></tr></thead>
+    <tbody>
+      {% for p in preacher_stats %}
+      <tr>
+        <td>{{ p.name }}</td>
+        <td class="text-end">{{ p.donor_count }}</td>
+        <td class="text-end">Rs. {{ p.total | inr }}</td>
+        <td><a href="{{ url_for('admin.donors', preacher_id=p.id) }}" class="small">View donors &rarr;</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="text-muted">No donors have a connected preacher yet.</td></tr>
+      {% endfor %}
+      <tr>
+        <td class="text-muted">Not Assigned</td>
+        <td class="text-end text-muted">{{ unassigned_count }}</td>
+        <td class="text-end text-muted">-</td>
+        <td><a href="{{ url_for('admin.donors', preacher_id='none') }}" class="small">View donors &rarr;</a></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div class="card card-body shadow-sm p-3">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <h6 class="mb-0">🎂 Upcoming Birthdays &amp; Anniversaries</h6>
+    <form method="get" class="d-flex gap-2 align-items-center">
+      <label class="form-label mb-0 small text-muted">Within</label>
+      <select name="days" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+        {% for d in [7, 30, 60, 90] %}
+        <option value="{{ d }}" {% if upcoming_days == d %}selected{% endif %}>{{ d }} days</option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+  <div class="table-responsive">
+  <table class="table table-sm mb-0">
+    <thead><tr><th>Donor</th><th>Occasion</th><th>Date</th><th class="text-end">In</th></tr></thead>
+    <tbody>
+      {% for u in upcoming %}
+      <tr>
+        <td><a href="{{ url_for('admin.donor_detail', donor_id=u.donor.id) }}">{{ u.donor.full_name }}</a></td>
+        <td>{{ u.label }}</td>
+        <td>{{ u.date.strftime('%d-%b') }}</td>
+        <td class="text-end">{{ 'Today' if u.days_until == 0 else (u.days_until ~ ' day' ~ ('s' if u.days_until != 1 else '')) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="text-muted">Nothing in the next {{ upcoming_days }} days.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

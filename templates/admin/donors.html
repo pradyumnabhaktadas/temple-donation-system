@@ -2,12 +2,42 @@
 {% block title %}Donors{% endblock %}
 {% block content %}
 <h3 class="mb-3">🙏 Donor Database</h3>
-<form class="mb-3" method="get">
-  <input type="text" name="q" value="{{ q }}" class="form-control" style="max-width:400px" placeholder="Search by name, phone, email, or PAN">
+<form class="row g-2 mb-3" method="get">
+  <div class="col-auto">
+    <input type="text" name="q" value="{{ q }}" class="form-control" style="min-width:280px" placeholder="Search by name, phone, email, or PAN">
+  </div>
+  <div class="col-auto">
+    <select name="donor_type" class="form-select" onchange="this.form.submit()">
+      <option value="">All Donor Types</option>
+      {% for t in donor_types %}
+      <option value="{{ t }}" {% if donor_type == t %}selected{% endif %}>{{ donor_type_labels[t] }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <select name="preacher_id" class="form-select" onchange="this.form.submit()">
+      <option value="">All Preachers</option>
+      <option value="none" {% if preacher_id == 'none' %}selected{% endif %}>Not Assigned</option>
+      {% for p in preachers %}
+      <option value="{{ p.id }}" {% if preacher_id == p.id|string %}selected{% endif %}>{{ p.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <select name="donation_frequency" class="form-select" onchange="this.form.submit()">
+      <option value="">All Frequencies</option>
+      {% for f in donation_frequencies %}
+      <option value="{{ f }}" {% if donation_frequency == f %}selected{% endif %}>{{ donation_frequency_labels[f] }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-outline-secondary">Search / Filter</button>
+  </div>
 </form>
 <div class="table-responsive">
 <table class="table table-sm table-hover bg-white shadow-sm">
-  <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>PAN</th><th class="text-end"># Donations</th><th class="text-end">Total</th></tr></thead>
+  <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>PAN</th><th>Donor Type</th><th>Preacher</th><th class="text-end"># Donations</th><th class="text-end">Total</th></tr></thead>
   <tbody>
     {% for d in donors %}
     {% set t = totals.get(d.id, (0, 0)) %}
@@ -16,11 +46,13 @@
       <td>{{ d.phone or '-' }}</td>
       <td>{{ d.email or '-' }}</td>
       <td>{{ d.pan or '-' }}</td>
+      <td>{{ donor_type_labels.get(d.donor_type, '-') if d.donor_type else '-' }}</td>
+      <td>{{ d.connected_preacher.name if d.connected_preacher else '-' }}</td>
       <td class="text-end">{{ t[1] }}</td>
       <td class="text-end">Rs. {{ t[0] | inr }}</td>
     </tr>
     {% else %}
-    <tr><td colspan="6" class="text-muted">No donors found.</td></tr>
+    <tr><td colspan="8" class="text-muted">No donors found.</td></tr>
     {% endfor %}
   </tbody>
 </table>

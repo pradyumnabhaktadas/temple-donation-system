@@ -6,6 +6,47 @@ from extensions import db
 from utils import get_financial_year
 
 
+class Preacher(db.Model):
+    """A preacher/devotee who maintains a personal relationship with
+    specific donors, so the office can track and report on who's
+    following up with whom -- e.g. total donors/donation amount per
+    preacher, or "which of my donors haven't been assigned to anyone
+    yet". Same admin-editable-lookup-list pattern as BaceProperty/
+    Festival/SevaType/LiveToGivePurpose, editable from Admin -> Preachers.
+    A donor with no `connected_preacher_id` set just means "not yet
+    assigned" -- there's no special "Unassigned" row here, blank/NULL
+    already means that."""
+
+    __tablename__ = "preachers"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False, unique=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    donors = db.relationship("Donor", backref="connected_preacher", lazy="dynamic")
+
+    def __repr__(self):
+        return f"<Preacher {self.name}>"
+
+
+# Donor.donor_type values -- an IYF (ISKCON Youth Forum) donor vs. a
+# Live To Give (Nitya Seva) donor. Kept as a plain string rather than a
+# separate lookup table since this is a fixed, small, code-meaningful set
+# (unlike Preacher, which is an open-ended list office staff maintain).
+DONOR_TYPES = ["iyf", "live_to_give"]
+DONOR_TYPE_LABELS = {"iyf": "IYF", "live_to_give": "Live To Give"}
+
+# Donor.donation_frequency values -- how often this donor typically gives,
+# as characterized by office staff (not auto-computed from donation
+# history, since a donor might be "usually monthly" even between gifts).
+DONATION_FREQUENCIES = ["one_time", "monthly", "quarterly", "yearly", "occasional"]
+DONATION_FREQUENCY_LABELS = {
+    "one_time": "One-time", "monthly": "Monthly", "quarterly": "Quarterly",
+    "yearly": "Yearly", "occasional": "Occasional",
+}
+
+
 class Donor(db.Model):
     __tablename__ = "donors"
 
@@ -26,6 +67,22 @@ class Donor(db.Model):
     state = db.Column(db.String(100))
     pincode = db.Column(db.String(10))
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    # -- Relationship-management fields (Admin -> Donors -> Edit only; not
+    # collected on any public donation form -- these are gathered by
+    # temple staff over time as a relationship develops, not something a
+    # donor fills in while paying). See DONOR_TYPES/DONATION_FREQUENCIES
+    # above for the fixed option sets.
+    donor_type = db.Column(db.String(20))  # "iyf" / "live_to_give", blank = not categorised yet
+    connected_preacher_id = db.Column(db.Integer, db.ForeignKey("preachers.id"), nullable=True)
+    donation_frequency = db.Column(db.String(20))
+    gifts = db.Column(db.String(500))  # free text -- gifts given to/received from this donor
+    dob = db.Column(db.Date)
+    father_dob = db.Column(db.Date)
+    mother_dob = db.Column(db.Date)
+    wife_dob = db.Column(db.Date)
+    marriage_anniversary = db.Column(db.Date)
+    additional_info = db.Column(db.Text)  # notes, preferences, family details, follow-ups, etc.
 
     donations = db.relationship("Donation", backref="donor", lazy="dynamic")
 

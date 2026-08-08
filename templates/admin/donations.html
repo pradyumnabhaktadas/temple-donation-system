@@ -1,5 +1,20 @@
 {% extends "admin/base_admin.html" %}
 {% block title %}Donations{% endblock %}
+
+{% macro sort_th(key, label, default_dir='asc') %}
+  {% set current_key = sort.lstrip('-') if sort else '' %}
+  {% set current_dir = 'desc' if sort and sort.startswith('-') else 'asc' %}
+  {% set is_active = current_key == key %}
+  {% set new_dir = ('asc' if current_dir == 'desc' else 'desc') if is_active else default_dir %}
+  {% set new_sort = ('-' ~ key) if new_dir == 'desc' else key %}
+  {% set sort_args = request.args.to_dict() %}
+  {% set _ = sort_args.update({'sort': new_sort}) %}
+  {% set _ = sort_args.pop('page', None) %}
+  <a href="{{ url_for('admin.donations', **sort_args) }}" class="text-decoration-none text-dark d-inline-flex align-items-center gap-1">
+    <span>{{ label }}</span>{% if is_active %}<span class="small">{{ '▲' if current_dir == 'asc' else '▼' }}</span>{% endif %}
+  </a>
+{% endmacro %}
+
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
   <h3 class="mb-0">🧾 Donations Log</h3>
@@ -32,15 +47,37 @@
       <option value="all" {% if status == 'all' %}selected{% endif %}>All Statuses</option>
     </select>
   </div>
+  <div class="col-auto">
+    <input type="date" name="date_from" class="form-control" value="{{ date_from }}" aria-label="From date">
+  </div>
+  <div class="col-auto">
+    <input type="date" name="date_to" class="form-control" value="{{ date_to }}" aria-label="To date">
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-outline-secondary">Filter</button>
+    {% if date_from or date_to %}
+    <a href="{{ url_for('admin.donations', status=status, campaign_id=campaign_id, mode=mode) }}" class="btn btn-link btn-sm">Clear dates</a>
+    {% endif %}
+  </div>
 </form>
 
 <div class="table-responsive">
 <table class="table table-sm bg-white shadow-sm">
-  <thead><tr><th>Date</th><th>Donor</th><th>Campaign</th><th>Amount</th><th>Mode</th><th>Reference</th><th>Status</th><th>Receipt</th><th></th>{% if current_user.role == 'admin' %}<th></th>{% endif %}</tr></thead>
+  <thead><tr>
+    <th>{{ sort_th('date', 'Date', 'desc') }}</th>
+    <th>{{ sort_th('donor', 'Donor', 'asc') }}</th>
+    <th>{{ sort_th('campaign', 'Campaign', 'asc') }}</th>
+    <th>{{ sort_th('amount', 'Amount', 'desc') }}</th>
+    <th>Mode</th>
+    <th>Reference</th>
+    <th>{{ sort_th('status', 'Status', 'asc') }}</th>
+    <th>Receipt</th>
+    <th></th>{% if current_user.role == 'admin' %}<th></th>{% endif %}
+  </tr></thead>
   <tbody>
     {% for d in donations %}
     <tr>
-      <td>{{ d.donation_date.strftime('%d-%b-%Y') }}</td>
+      <td>{{ d.donation_date.strftime('%d-%b-%Y %H:%M') if d.payment_mode == 'online' else d.donation_date.strftime('%d-%b-%Y') }}</td>
       <td><a href="{{ url_for('admin.donor_detail', donor_id=d.donor.id) }}">{{ d.donor.full_name }}</a></td>
       <td>{{ d.campaign.name }}</td>
       <td>Rs. {{ d.amount | inr }}</td>
@@ -113,7 +150,7 @@
             <tr><th class="text-muted">Status</th><td>{{ d.status.title() }}</td></tr>
             <tr><th class="text-muted">Recorded By</th><td>{{ d.recorded_by or '-' }}</td></tr>
             <tr><th class="text-muted">Remarks</th><td>{{ d.remarks or '-' }}</td></tr>
-            <tr><th class="text-muted">Donation Date</th><td>{{ d.donation_date.strftime('%d-%b-%Y') }}</td></tr>
+            <tr><th class="text-muted">Donation Date</th><td>{{ d.donation_date.strftime('%d-%b-%Y %H:%M') if d.payment_mode == 'online' else d.donation_date.strftime('%d-%b-%Y') }}</td></tr>
             {% if d.status == 'cancelled' %}
             <tr><th class="text-muted">Cancelled</th><td>{{ d.cancelled_at.strftime('%d-%b-%Y %H:%M') if d.cancelled_at else '-' }} by {{ d.cancelled_by or '-' }}<br><span class="small text-muted">{{ d.cancellation_reason or '' }}</span></td></tr>
             {% endif %}

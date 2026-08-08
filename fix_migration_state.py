@@ -26,7 +26,7 @@ from app import create_app
 from extensions import db
 from sqlalchemy import inspect, text
 
-HEAD_REVISION = "a7c31f9e2b04"
+HEAD_REVISION = "c4d68b1e9a52"
 
 app = create_app()
 
@@ -37,6 +37,9 @@ with app.app_context():
 
     def donation_columns():
         return {c["name"] for c in inspect(db.engine).get_columns("donations")}
+
+    def donor_columns():
+        return {c["name"] for c in inspect(db.engine).get_columns("donors")}
 
     tables = existing_tables()
     print("Existing tables:", sorted(tables))
@@ -198,6 +201,54 @@ with app.app_context():
         print("Added donations.cancellation_reason")
     else:
         print("donations.cancellation_reason already exists -- skipping")
+
+    # --- preachers + donor relationship/family fields ---
+    if "preachers" not in tables:
+        db.session.execute(text("""
+            CREATE TABLE preachers (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(150) NOT NULL UNIQUE,
+                is_active BOOLEAN NOT NULL,
+                created_at TIMESTAMP
+            )
+        """))
+        db.session.commit()
+        print("Created preachers")
+    else:
+        print("preachers already exists -- skipping")
+
+    _donor_text_columns = {
+        "donor_type": "VARCHAR(20)",
+        "donation_frequency": "VARCHAR(20)",
+        "gifts": "VARCHAR(500)",
+        "additional_info": "TEXT",
+    }
+    for col_name, col_type in _donor_text_columns.items():
+        if col_name not in donor_columns():
+            db.session.execute(text(f"ALTER TABLE donors ADD COLUMN {col_name} {col_type}"))
+            db.session.commit()
+            print(f"Added donors.{col_name}")
+        else:
+            print(f"donors.{col_name} already exists -- skipping")
+
+    for col_name in ["dob", "father_dob", "mother_dob", "wife_dob", "marriage_anniversary"]:
+        if col_name not in donor_columns():
+            db.session.execute(text(f"ALTER TABLE donors ADD COLUMN {col_name} DATE"))
+            db.session.commit()
+            print(f"Added donors.{col_name}")
+        else:
+            print(f"donors.{col_name} already exists -- skipping")
+
+    if "connected_preacher_id" not in donor_columns():
+        db.session.execute(text("ALTER TABLE donors ADD COLUMN connected_preacher_id INTEGER"))
+        db.session.execute(text(
+            "ALTER TABLE donors ADD CONSTRAINT fk_donors_connected_preacher_id "
+            "FOREIGN KEY (connected_preacher_id) REFERENCES preachers(id)"
+        ))
+        db.session.commit()
+        print("Added donors.connected_preacher_id + FK")
+    else:
+        print("donors.connected_preacher_id already exists -- skipping")
 
     # Reconcile Alembic's bookkeeping so `flask db upgrade` behaves normally
     # (reports "already up to date") the next time it's run.

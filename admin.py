@@ -13,7 +13,8 @@ from sqlalchemy import func, extract
 from extensions import db
 from models import (
     Donor, Campaign, Donation, AdminUser, ReceiptCounter, BaceProperty, Festival, SevaType,
-    LiveToGivePurpose,
+    LiveToGivePurpose, Preacher, DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES,
+    DONATION_FREQUENCY_LABELS,
 )
 from utils import get_financial_year, is_valid_pan
 from pdf_utils import generate_receipt_pdf
@@ -209,6 +210,11 @@ DONATIONS_PER_PAGE = 50
 @login_required
 def donors():
     q = request.args.get("q", "").strip()
+    donor_type = request.args.get("donor_type", "")
+    # "none" is a sentinel meaning "no preacher assigned" (connected_preacher_id
+    # IS NULL) -- distinct from a blank/absent param, which means "any".
+    preacher_id = request.args.get("preacher_id", "")
+    donation_frequency = request.args.get("donation_frequency", "")
     page = request.args.get("page", 1, type=int)
     query = Donor.query
     if q:
@@ -219,6 +225,17 @@ def donors():
             | (Donor.email.ilike(like))
             | (Donor.pan.ilike(like))
         )
+    if donor_type:
+        query = query.filter(Donor.donor_type == donor_type)
+    if preacher_id == "none":
+        query = query.filter(Donor.connected_preacher_id.is_(None))
+    elif preacher_id:
+        try:
+            query = query.filter(Donor.connected_preacher_id == int(preacher_id))
+        except ValueError:
+            pass
+    if donation_frequency:
+        query = query.filter(Donor.donation_frequency == donation_frequency)
     pagination = db.paginate(
         query.order_by(Donor.full_name), page=page, per_page=DONORS_PER_PAGE, error_out=False
     )
@@ -241,8 +258,12 @@ def donors():
         )
         totals = {donor_id: (float(total), count) for donor_id, total, count in rows}
 
+    preachers_list = Preacher.query.order_by(Preacher.name).all()
     return render_template(
-        "admin/donors.html", donors=pagination.items, pagination=pagination, totals=totals, q=q
+        "admin/donors.html", donors=pagination.items, pagination=pagination, totals=totals, q=q,
+        donor_type=donor_type, preacher_id=preacher_id, donation_frequency=donation_frequency,
+        preachers=preachers_list, donor_types=DONOR_TYPES, donor_type_labels=DONOR_TYPE_LABELS,
+        donation_frequencies=DONATION_FREQUENCIES, donation_frequency_labels=DONATION_FREQUENCY_LABELS,
     )
 
 
@@ -253,8 +274,24 @@ def donor_detail(donor_id):
     donations = donor.donations.order_by(Donation.donation_date.desc()).all()
     available_fys = sorted({d.financial_year for d in donations if d.financial_year and d.status == "success"}, reverse=True)
     return render_template(
-        "admin/donor_detail.html", donor=donor, donations=donations, available_fys=available_fys
+        "admin/donor_detail.html", donor=donor, donations=donations, available_fys=available_fys,
+        donor_type_labels=DONOR_TYPE_LABELS, donation_frequency_labels=DONATION_FREQUENCY_LABELS,
     )
+
+
+def _parse_optional_date(form, key):
+    """Parses an optional <input type=date> field (YYYY-MM-DD). Returns
+    None for blank or malformed input rather than raising -- these are
+    all "nice to have" relationship-building fields (DOB, anniversary,
+    etc.), not required data, so a typo'd date shouldn't block saving the
+    rest of the donor's details."""
+    raw = (form.get(key) or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError:
+        return None
 
 
 @bp.route("/donors/<int:donor_id>/edit", methods=["GET", "POST"])
@@ -277,10 +314,48 @@ def donor_edit(donor_id):
         donor.city = form.get("city", "").strip() or None
         donor.state = form.get("state", "").strip() or None
         donor.pincode = form.get("pincode", "").strip() or None
+
+        # -- Relationship-management fields --
+        donor_type = form.get("donor_type") or ""
+        donor.donor_type = donor_type if donor_type in DONOR_TYPES else None
+
+        donation_frequency = form.get("donation_frequency") or ""
+        donor.donation_frequency = donation_frequency if donation_frequency in DONATION_FREQUENCIES else None
+
+        preacher_id = None
+        raw_preacher_id = form.get("connected_preacher_id")
+        if raw_preacher_id:
+            try:
+                candidate = int(raw_preacher_id)
+                if Preacher.query.get(candidate):
+                    preacher_id = candidate
+            except ValueError:
+                pass
+        donor.connected_preacher_id = preacher_id
+
+        donor.gifts = (form.get("gifts") or "").strip()[:500] or None
+        donor.additional_info = (form.get("additional_info") or "").strip() or None
+        donor.dob = _parse_optional_date(form, "dob")
+        donor.father_dob = _parse_optional_date(form, "father_dob")
+        donor.mother_dob = _parse_optional_date(form, "mother_dob")
+        donor.wife_dob = _parse_optional_date(form, "wife_dob")
+        donor.marriage_anniversary = _parse_optional_date(form, "marriage_anniversary")
+
         db.session.commit()
         flash("Donor details updated.")
         return redirect(url_for("admin.donor_detail", donor_id=donor.id))
-    return render_template("admin/donor_edit.html", donor=donor)
+
+    preachers_list = Preacher.query.filter_by(is_active=True).order_by(Preacher.name).all()
+    if donor.connected_preacher and not donor.connected_preacher.is_active:
+        # Keep the currently-assigned preacher selectable even if they've
+        # since been deactivated -- otherwise saving this form with no
+        # other changes would silently clear the assignment.
+        preachers_list = sorted(preachers_list + [donor.connected_preacher], key=lambda p: p.name)
+    return render_template(
+        "admin/donor_edit.html", donor=donor, preachers=preachers_list,
+        donor_types=DONOR_TYPES, donor_type_labels=DONOR_TYPE_LABELS,
+        donation_frequencies=DONATION_FREQUENCIES, donation_frequency_labels=DONATION_FREQUENCY_LABELS,
+    )
 
 
 @bp.route("/donors/<int:donor_id>/merge", methods=["POST"])
@@ -324,32 +399,102 @@ def donor_merge(donor_id):
     return redirect(url_for("admin.donor_detail", donor_id=donor_id))
 
 
-@bp.route("/donations")
-@login_required
-def donations():
+def _apply_donations_filters(query):
+    """Shared campaign/mode/status/date-range filtering for the Donations
+    Log page and its CSV export, kept in one place so the export can never
+    drift out of sync with what's actually on screen (it's meant to be
+    "everything currently filtered", just without pagination).
+
+    Returns (query, filters) where filters is a dict of the resolved
+    values, ready to splice straight into the template context.
+    """
     # Defaults to "success" (the historical behaviour every other caller of
     # this route already relies on) but a status=... query param lets staff
     # pull up cancelled donations too, or "all" to see everything mixed
     # together -- otherwise a cancelled donation would just silently vanish
     # from this list with no way to find it again.
     status = request.args.get("status", "success")
-    query = Donation.query
     if status != "all":
         query = query.filter_by(status=status)
+
     campaign_id = request.args.get("campaign_id", type=int)
-    mode = request.args.get("mode")
-    page = request.args.get("page", 1, type=int)
     if campaign_id:
         query = query.filter_by(campaign_id=campaign_id)
+
+    mode = request.args.get("mode")
     if mode:
         query = query.filter_by(payment_mode=mode)
-    pagination = db.paginate(
-        query.order_by(Donation.donation_date.desc()), page=page, per_page=DONATIONS_PER_PAGE, error_out=False
-    )
+
+    date_from_raw = request.args.get("date_from") or ""
+    date_to_raw = request.args.get("date_to") or ""
+    try:
+        if date_from_raw:
+            date_from = datetime.datetime.strptime(date_from_raw, "%Y-%m-%d")
+            query = query.filter(Donation.donation_date >= date_from)
+        if date_to_raw:
+            date_to = datetime.datetime.strptime(date_to_raw, "%Y-%m-%d")
+            # donation_date carries a real time-of-day for online donations
+            # (see below), so a plain <= comparison against midnight of the
+            # "to" date would silently exclude every online donation made
+            # later that same day. Push the upper bound to the start of the
+            # next day instead.
+            query = query.filter(Donation.donation_date < date_to + datetime.timedelta(days=1))
+    except ValueError:
+        date_from_raw = date_to_raw = ""
+
+    return query, {
+        "status": status, "campaign_id": campaign_id, "mode": mode,
+        "date_from": date_from_raw, "date_to": date_to_raw,
+    }
+
+
+# Column-header sorting for the Donations Log. Sort key is a plain column
+# name ("amount") for ascending, or the same name prefixed with "-" for
+# descending ("-amount") -- mirrors the convention already used by
+# Django/DRF-style APIs so it reads naturally in a URL. Donor/Campaign
+# sort by the related table's name rather than the foreign key id, which
+# needs a join.
+_DONATIONS_SORT_COLUMNS = {"date", "donor", "campaign", "amount", "status"}
+
+
+def _sorted_donations_query(query, sort_key):
+    descending = sort_key.startswith("-")
+    key = sort_key[1:] if descending else sort_key
+
+    if key not in _DONATIONS_SORT_COLUMNS:
+        # Unrecognised/typo'd sort param -- fall back to the historical
+        # default rather than erroring the page out.
+        key, descending = "date", True
+
+    if key == "donor":
+        query = query.join(Donor, Donation.donor_id == Donor.id)
+        column = Donor.full_name
+    elif key == "campaign":
+        query = query.join(Campaign, Donation.campaign_id == Campaign.id)
+        column = Campaign.name
+    elif key == "amount":
+        column = Donation.amount
+    elif key == "status":
+        column = Donation.status
+    else:
+        column = Donation.donation_date
+
+    query = query.order_by(column.desc() if descending else column.asc())
+    resolved_sort = ("-" if descending else "") + key
+    return query, resolved_sort
+
+
+@bp.route("/donations")
+@login_required
+def donations():
+    query, filters = _apply_donations_filters(Donation.query)
+    query, sort = _sorted_donations_query(query, request.args.get("sort", "-date"))
+    page = request.args.get("page", 1, type=int)
+    pagination = db.paginate(query, page=page, per_page=DONATIONS_PER_PAGE, error_out=False)
     campaigns = Campaign.query.order_by(Campaign.name).all()
     return render_template(
         "admin/donations.html", donations=pagination.items, pagination=pagination, campaigns=campaigns,
-        campaign_id=campaign_id, mode=mode, status=status,
+        sort=sort, **filters,
     )
 
 
@@ -1404,6 +1549,188 @@ def live_to_give_purpose_delete(purpose_id):
     return redirect(url_for("admin.live_to_give_purposes"))
 
 
+@bp.route("/preachers", methods=["GET", "POST"])
+@login_required
+def preachers():
+    if request.method == "POST":
+        if current_user.role != "admin":
+            flash("That action requires an administrator account.")
+            return redirect(url_for("admin.preachers"))
+        name = request.form.get("name", "").strip()
+        if not name:
+            flash("Preacher name can't be blank.")
+            return redirect(url_for("admin.preachers"))
+        if Preacher.query.filter_by(name=name).first():
+            flash(f"A preacher named '{name}' already exists.")
+            return redirect(url_for("admin.preachers"))
+        db.session.add(Preacher(name=name))
+        db.session.commit()
+        flash(f"Preacher '{name}' added.")
+        return redirect(url_for("admin.preachers"))
+
+    preacher_list = Preacher.query.order_by(Preacher.name).all()
+    return render_template("admin/preachers.html", preachers=preacher_list)
+
+
+@bp.route("/preachers/<int:preacher_id>/toggle", methods=["POST"])
+@login_required
+@admin_role_required
+def toggle_preacher(preacher_id):
+    preacher = Preacher.query.get_or_404(preacher_id)
+    preacher.is_active = not preacher.is_active
+    db.session.commit()
+    return redirect(url_for("admin.preachers"))
+
+
+@bp.route("/preachers/<int:preacher_id>/edit", methods=["GET", "POST"])
+@login_required
+@admin_role_required
+def preacher_edit(preacher_id):
+    preacher = Preacher.query.get_or_404(preacher_id)
+    if request.method == "POST":
+        new_name = request.form.get("name", "").strip()
+        if not new_name:
+            flash("Preacher name can't be blank.")
+            return redirect(url_for("admin.preacher_edit", preacher_id=preacher_id))
+        existing = Preacher.query.filter(Preacher.name == new_name, Preacher.id != preacher.id).first()
+        if existing:
+            flash(f"Another preacher is already named '{new_name}'.")
+            return redirect(url_for("admin.preacher_edit", preacher_id=preacher_id))
+
+        preacher.name = new_name
+        db.session.commit()
+        flash(f"Preacher renamed to '{preacher.name}'.")
+        return redirect(url_for("admin.preachers"))
+
+    return render_template("admin/preacher_edit.html", preacher=preacher)
+
+
+@bp.route("/preachers/<int:preacher_id>/delete", methods=["POST"])
+@login_required
+@admin_role_required
+def preacher_delete(preacher_id):
+    preacher = Preacher.query.get_or_404(preacher_id)
+    has_donors = Donor.query.filter_by(connected_preacher_id=preacher.id).first() is not None
+    if has_donors:
+        flash(
+            f"Can't delete '{preacher.name}' -- donors are still connected to them. "
+            "Deactivate instead to hide them from the Connected Preacher dropdown, "
+            "or reassign those donors first."
+        )
+        return redirect(url_for("admin.preachers"))
+
+    db.session.delete(preacher)
+    db.session.commit()
+    flash(f"Preacher '{preacher.name}' deleted.")
+    return redirect(url_for("admin.preachers"))
+
+
+def _next_occurrence(date_value, today):
+    """Days until the next anniversary of date_value's month/day, ignoring
+    the year -- handles the year-boundary wraparound (e.g. today is Dec
+    25, the event is Jan 3) by trying this year first and rolling over to
+    next year if that's already passed. A Feb 29 birthday in a non-leap
+    target year is treated as Feb 28 rather than raising."""
+    for year in (today.year, today.year + 1):
+        try:
+            candidate = date_value.replace(year=year)
+        except ValueError:
+            candidate = date_value.replace(year=year, day=28)
+        if candidate >= today:
+            return (candidate - today).days, candidate
+    return None, None  # unreachable -- the year+1 branch always satisfies candidate >= today
+
+
+@bp.route("/donor-insights")
+@login_required
+def donor_insights():
+    """Aggregate reports over the relationship-management fields on Donor
+    (donor type, connected preacher, donation frequency, family DOBs /
+    anniversary) -- totals by type and by preacher, an unassigned-donors
+    count, a donation-frequency breakdown, and an upcoming birthdays/
+    anniversaries list for relationship building.
+    """
+    # --- donors + donation totals by donor type ---
+    donor_type_counts = {t: 0 for t in DONOR_TYPES}
+    donor_type_counts["_uncategorised"] = 0
+    for donor_type, count in db.session.query(Donor.donor_type, func.count(Donor.id)).group_by(Donor.donor_type).all():
+        if donor_type in donor_type_counts:
+            donor_type_counts[donor_type] = count
+        else:
+            donor_type_counts["_uncategorised"] += count
+
+    donor_type_totals = {t: 0.0 for t in DONOR_TYPES}
+    rows = (
+        db.session.query(Donor.donor_type, func.coalesce(func.sum(Donation.amount), 0))
+        .join(Donation, Donation.donor_id == Donor.id)
+        .filter(Donation.status == "success")
+        .group_by(Donor.donor_type)
+        .all()
+    )
+    for donor_type, total in rows:
+        if donor_type in donor_type_totals:
+            donor_type_totals[donor_type] = float(total)
+
+    # --- donors + donation totals by preacher ---
+    preacher_rows = (
+        db.session.query(
+            Preacher.id, Preacher.name,
+            func.count(func.distinct(Donor.id)),
+            func.coalesce(func.sum(Donation.amount), 0),
+        )
+        .join(Donor, Donor.connected_preacher_id == Preacher.id)
+        .outerjoin(Donation, (Donation.donor_id == Donor.id) & (Donation.status == "success"))
+        .group_by(Preacher.id, Preacher.name)
+        .order_by(Preacher.name)
+        .all()
+    )
+    preacher_stats = [
+        {"id": pid, "name": name, "donor_count": donor_count, "total": float(total)}
+        for pid, name, donor_count, total in preacher_rows
+    ]
+    unassigned_count = Donor.query.filter(Donor.connected_preacher_id.is_(None)).count()
+
+    # --- donation frequency breakdown ---
+    frequency_counts = {f: 0 for f in DONATION_FREQUENCIES}
+    for freq, count in db.session.query(Donor.donation_frequency, func.count(Donor.id)).group_by(Donor.donation_frequency).all():
+        if freq in frequency_counts:
+            frequency_counts[freq] = count
+
+    # --- upcoming birthdays / anniversaries ---
+    upcoming_days = request.args.get("days", 30, type=int)
+    today = datetime.date.today()
+    donors_with_dates = Donor.query.filter(
+        db.or_(
+            Donor.dob.isnot(None), Donor.father_dob.isnot(None), Donor.mother_dob.isnot(None),
+            Donor.wife_dob.isnot(None), Donor.marriage_anniversary.isnot(None),
+        )
+    ).all()
+
+    upcoming = []
+    for donor in donors_with_dates:
+        for label, date_value in [
+            ("Donor's Birthday", donor.dob), ("Marriage Anniversary", donor.marriage_anniversary),
+            ("Father's Birthday", donor.father_dob), ("Mother's Birthday", donor.mother_dob),
+            ("Wife's Birthday", donor.wife_dob),
+        ]:
+            if not date_value:
+                continue
+            days_until, occurrence_date = _next_occurrence(date_value, today)
+            if days_until is not None and days_until <= upcoming_days:
+                upcoming.append({"donor": donor, "label": label, "days_until": days_until, "date": occurrence_date})
+    upcoming.sort(key=lambda u: u["days_until"])
+
+    return render_template(
+        "admin/donor_insights.html",
+        donor_type_counts=donor_type_counts, donor_type_totals=donor_type_totals,
+        donor_type_labels=DONOR_TYPE_LABELS, donor_types=DONOR_TYPES,
+        preacher_stats=preacher_stats, unassigned_count=unassigned_count,
+        frequency_counts=frequency_counts, donation_frequency_labels=DONATION_FREQUENCY_LABELS,
+        donation_frequencies=DONATION_FREQUENCIES,
+        upcoming=upcoming, upcoming_days=upcoming_days,
+    )
+
+
 @bp.route("/export/10bd")
 @login_required
 def export_10bd():
@@ -1502,18 +1829,11 @@ def export_donations():
     cancellation info where relevant) so this file alone answers "what did
     this donor actually enter" without having to click into each row.
     """
-    status = request.args.get("status", "success")
-    query = Donation.query
-    if status != "all":
-        query = query.filter_by(status=status)
-    campaign_id = request.args.get("campaign_id", type=int)
-    mode = request.args.get("mode")
-    if campaign_id:
-        query = query.filter_by(campaign_id=campaign_id)
-    if mode:
-        query = query.filter_by(payment_mode=mode)
+    query, filters = _apply_donations_filters(Donation.query)
+    status = filters["status"]
+    query, _sort = _sorted_donations_query(query, request.args.get("sort", "-date"))
 
-    rows = query.order_by(Donation.donation_date.desc()).all()
+    rows = query.all()
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -1532,9 +1852,19 @@ def export_donations():
             or (d.live_to_give_purpose.name if d.live_to_give_purpose else None)
             or ""
         )
+        # Online donations carry a real time-of-day (set the instant the
+        # payment was confirmed); offline entries are always saved at
+        # midnight since only a date is captured for those, so a time
+        # component would be misleading noise -- see the same convention
+        # in the Donations Log table and detail modal.
+        date_str = (
+            d.donation_date.strftime("%d-%m-%Y %H:%M")
+            if d.payment_mode == "online"
+            else d.donation_date.strftime("%d-%m-%Y")
+        )
         writer.writerow([
             d.receipt_number or "",
-            d.donation_date.strftime("%d-%m-%Y"),
+            date_str,
             d.status,
             donor.full_name,
             donor.phone or "",

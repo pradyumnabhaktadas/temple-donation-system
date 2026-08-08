@@ -1,0 +1,56 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Preachers{% endblock %}
+{% block content %}
+<h3 class="mb-3">🙏 Preachers</h3>
+<p class="text-muted">This list populates the "Connected Preacher" dropdown on a donor's Edit page, so the office
+  can track which preacher maintains the relationship with each donor. Donors already connected to a preacher are
+  unaffected by renaming them.</p>
+
+<div class="row">
+  {% if current_user.role == 'admin' %}
+  <div class="col-md-5">
+    <div class="card card-body shadow-sm mb-3 p-4">
+      <h6 class="mb-3">New Preacher</h6>
+      <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-2">
+          <label class="form-label">Name</label>
+          <input type="text" class="form-control" name="name" placeholder="e.g. HG Example Das" required>
+        </div>
+        <button class="btn btn-gold btn-sm">Add</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+  <div class="{% if current_user.role == 'admin' %}col-md-7{% else %}col-12{% endif %}">
+    {% for p in preachers %}
+    <div class="card card-body shadow-sm mb-3 p-3">
+      <div class="d-flex justify-content-between align-items-center">
+        <div>
+          <div class="fw-bold">{{ p.name }}</div>
+          <div class="text-muted small">
+            {% if p.is_active %}<span class="badge bg-success">Active</span>{% else %}<span class="badge bg-secondary">Inactive</span>{% endif %}
+          </div>
+        </div>
+        {% if current_user.role == 'admin' %}
+        <div class="d-flex gap-2">
+          <form method="post" action="{{ url_for('admin.toggle_preacher', preacher_id=p.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-outline-secondary">{{ 'Deactivate' if p.is_active else 'Activate' }}</button>
+          </form>
+          <a href="{{ url_for('admin.preacher_edit', preacher_id=p.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+          <form method="post" action="{{ url_for('admin.preacher_delete', preacher_id=p.id) }}"
+                onsubmit="return confirm('Delete preacher \'{{ p.name }}\'? Only possible if no donors are connected to them.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-outline-danger">Delete</button>
+          </form>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% else %}
+    <p class="text-muted">No preachers yet.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

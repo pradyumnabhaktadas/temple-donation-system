@@ -23,6 +23,41 @@
   </div>
 </div>
 
+{% if donor.donor_type or donor.connected_preacher_id or donor.donation_frequency or donor.gifts or donor.dob or donor.father_dob or donor.mother_dob or donor.wife_dob or donor.marriage_anniversary or donor.additional_info %}
+<div class="card card-body shadow-sm p-3 mb-3">
+  <div class="small fw-bold mb-2" style="color: var(--maroon-dark);">🙏 Relationship &amp; Family</div>
+  <div class="row small">
+    <div class="col-md-6">
+      <table class="table table-sm mb-0">
+        <tbody>
+          <tr><th class="text-muted" style="width:45%">Donor Type</th><td>{{ donor_type_labels.get(donor.donor_type, '-') if donor.donor_type else '-' }}</td></tr>
+          <tr><th class="text-muted">Connected Preacher</th><td>{{ donor.connected_preacher.name if donor.connected_preacher else 'Not assigned' }}</td></tr>
+          <tr><th class="text-muted">Donation Frequency</th><td>{{ donation_frequency_labels.get(donor.donation_frequency, '-') if donor.donation_frequency else '-' }}</td></tr>
+          <tr><th class="text-muted">Gifts</th><td>{{ donor.gifts or '-' }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="col-md-6">
+      <table class="table table-sm mb-0">
+        <tbody>
+          <tr><th class="text-muted" style="width:45%">Donor DOB</th><td>{{ donor.dob.strftime('%d-%b') if donor.dob else '-' }}</td></tr>
+          <tr><th class="text-muted">Marriage Anniversary</th><td>{{ donor.marriage_anniversary.strftime('%d-%b') if donor.marriage_anniversary else '-' }}</td></tr>
+          <tr><th class="text-muted">Father DOB</th><td>{{ donor.father_dob.strftime('%d-%b') if donor.father_dob else '-' }}</td></tr>
+          <tr><th class="text-muted">Mother DOB</th><td>{{ donor.mother_dob.strftime('%d-%b') if donor.mother_dob else '-' }}</td></tr>
+          <tr><th class="text-muted">Wife DOB</th><td>{{ donor.wife_dob.strftime('%d-%b') if donor.wife_dob else '-' }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+    {% if donor.additional_info %}
+    <div class="col-12 mt-2">
+      <div class="text-muted small fw-bold">Additional Information</div>
+      <div class="small" style="white-space:pre-wrap;">{{ donor.additional_info }}</div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
 {% if available_fys %}
 <div class="card card-body shadow-sm p-3 mb-3" style="max-width:400px">
   <div class="small fw-bold mb-2" style="color: var(--maroon-dark);">📄 Annual Statement</div>

@@ -37,6 +37,75 @@
     <div class="col-md-4 mb-3"><label class="form-label">State</label><input type="text" class="form-control" name="state" value="{{ donor.state or '' }}"></div>
     <div class="col-md-4 mb-3"><label class="form-label">Pincode</label><input type="text" class="form-control" name="pincode" value="{{ donor.pincode or '' }}"></div>
   </div>
+
+  <hr class="my-4">
+  <h6 class="mb-3">Relationship &amp; Follow-up</h6>
+  <p class="text-muted small mb-3">Not shown to the donor anywhere -- for the office's own tracking and reports.</p>
+  <div class="row">
+    <div class="col-md-6 mb-3">
+      <label class="form-label">Donor Type</label>
+      <select class="form-select" name="donor_type">
+        <option value="">-- Not categorised --</option>
+        {% for t in donor_types %}
+        <option value="{{ t }}" {% if donor.donor_type == t %}selected{% endif %}>{{ donor_type_labels[t] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-6 mb-3">
+      <label class="form-label">Connected Preacher</label>
+      <select class="form-select" name="connected_preacher_id">
+        <option value="">-- Not assigned --</option>
+        {% for p in preachers %}
+        <option value="{{ p.id }}" {% if donor.connected_preacher_id == p.id %}selected{% endif %}>{{ p.name }}{% if not p.is_active %} (inactive){% endif %}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Donation Frequency</label>
+    <select class="form-select" name="donation_frequency" style="max-width:280px">
+      <option value="">-- Not set --</option>
+      {% for f in donation_frequencies %}
+      <option value="{{ f }}" {% if donor.donation_frequency == f %}selected{% endif %}>{{ donation_frequency_labels[f] }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Gifts <span class="text-muted">(given to/received from this donor)</span></label>
+    <input type="text" class="form-control" name="gifts" value="{{ donor.gifts or '' }}" maxlength="500">
+  </div>
+
+  <hr class="my-4">
+  <h6 class="mb-3">Family &amp; Important Dates</h6>
+  <div class="row">
+    <div class="col-md-6 mb-3">
+      <label class="form-label">Donor's Date of Birth</label>
+      <input type="date" class="form-control" name="dob" value="{{ donor.dob.isoformat() if donor.dob else '' }}">
+    </div>
+    <div class="col-md-6 mb-3">
+      <label class="form-label">Marriage Anniversary</label>
+      <input type="date" class="form-control" name="marriage_anniversary" value="{{ donor.marriage_anniversary.isoformat() if donor.marriage_anniversary else '' }}">
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-md-4 mb-3">
+      <label class="form-label">Father's Date of Birth</label>
+      <input type="date" class="form-control" name="father_dob" value="{{ donor.father_dob.isoformat() if donor.father_dob else '' }}">
+    </div>
+    <div class="col-md-4 mb-3">
+      <label class="form-label">Mother's Date of Birth</label>
+      <input type="date" class="form-control" name="mother_dob" value="{{ donor.mother_dob.isoformat() if donor.mother_dob else '' }}">
+    </div>
+    <div class="col-md-4 mb-3">
+      <label class="form-label">Wife's Date of Birth</label>
+      <input type="date" class="form-control" name="wife_dob" value="{{ donor.wife_dob.isoformat() if donor.wife_dob else '' }}">
+    </div>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Additional Information <span class="text-muted">(notes, preferences, family details, follow-ups, etc.)</span></label>
+    <textarea class="form-control" name="additional_info" rows="4">{{ donor.additional_info or '' }}</textarea>
+  </div>
+
   <button class="btn btn-gold">Save Changes</button>
 </form>
 {% endblock %}
