@@ -1,0 +1,64 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Bulk Import Offline Donations{% endblock %}
+{% block content %}
+<h3 class="mb-3">📥 Bulk Import Offline Donations</h3>
+
+<div class="card card-body shadow-sm p-4 mb-4" style="max-width:700px">
+  <p class="text-muted small mb-3">
+    Upload a CSV of offline donations (cash, cheque, or bank transfer) to log them all at once --
+    each row gets a donor record, a real receipt number, and a generated receipt PDF, exactly like
+    using "Log Offline Donation" one at a time.
+  </p>
+  <p class="mb-3">
+    <a href="{{ url_for('admin.bulk_import_demo_csv') }}" class="btn btn-sm btn-outline-secondary">⬇ Download demo/template CSV</a>
+  </p>
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3">
+      <label class="form-label">CSV File</label>
+      <input type="file" class="form-control" name="csv_file" accept=".csv" required>
+      <div class="form-text">
+        Required columns: <code>full_name</code>, <code>campaign_name</code>, <code>amount</code>,
+        <code>payment_mode</code> (cash / cheque / bank_transfer), <code>donation_date</code> (YYYY-MM-DD).
+        See the demo file for every optional column (contact details, PAN, cheque/bank reference,
+        BACE property / festival / seva type / Live To Give purpose, 80G vs non-80G, remarks).
+      </div>
+    </div>
+    <div class="form-check mb-3">
+      <input class="form-check-input" type="checkbox" name="send_notifications" value="yes" id="send_notifications">
+      <label class="form-check-label" for="send_notifications">
+        Send email/WhatsApp receipts to donors for these imported donations
+      </label>
+      <div class="form-text">Off by default -- bulk imports are usually historical/backlog entries, so donors
+        aren't notified unless you tick this.</div>
+    </div>
+    <button type="submit" class="btn btn-gold">Upload &amp; Import</button>
+  </form>
+</div>
+
+{% if results is not none %}
+<div class="card card-body shadow-sm p-4" style="max-width:900px">
+  <h6 class="mb-3">Results: {{ created }} created, {{ skipped }} skipped</h6>
+  <div class="table-responsive">
+  <table class="table table-sm bg-white">
+    <thead><tr><th>Row</th><th>Name</th><th>Outcome</th></tr></thead>
+    <tbody>
+      {% for r in results %}
+      <tr>
+        <td>{{ r.line }}</td>
+        <td>{{ r.name }}</td>
+        <td>
+          {% if r.ok %}
+            <span class="badge bg-success">Imported</span> Receipt {{ r.receipt_number }}
+          {% else %}
+            <span class="badge bg-danger">Skipped</span> {{ r.errors | join('; ') }}
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

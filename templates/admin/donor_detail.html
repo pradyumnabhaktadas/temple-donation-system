@@ -39,7 +39,7 @@
 
 <div class="table-responsive">
 <table class="table table-sm bg-white shadow-sm">
-  <thead><tr><th>Date</th><th>Campaign</th><th>Amount</th><th>Mode</th><th>Transaction ID</th><th>Receipt</th><th>Status</th><th></th></tr></thead>
+  <thead><tr><th>Date</th><th>Campaign</th><th>Amount</th><th>Mode</th><th>Transaction ID</th><th>Receipt</th><th>Status</th><th></th>{% if current_user.role == 'admin' %}<th></th>{% endif %}</tr></thead>
   <tbody>
     {% for d in donations %}
     <tr>
@@ -47,7 +47,7 @@
       <td>{{ d.campaign.name }}</td>
       <td>Rs. {{ d.amount | inr }}</td>
       <td>{{ d.payment_mode.replace('_',' ').title() }}{% if d.razorpay_method %} ({{ d.razorpay_method.upper() }}){% endif %}</td>
-      <td class="small text-muted">{{ d.razorpay_payment_id or '-' }}</td>
+      <td class="small text-muted">{{ d.reference_display or '-' }}</td>
       <td>
         {% if d.status == 'success' %}
           <a href="{{ url_for('public.download_receipt', donation_id=d.id) }}">{{ d.receipt_number }}</a>
@@ -56,6 +56,8 @@
       <td>
         {% if d.status == 'success' %}<span class="badge bg-success">Success</span>
         {% elif d.status == 'pending' %}<span class="badge bg-warning">Pending</span>
+        {% elif d.status == 'cancelled' %}
+          <span class="badge bg-secondary" {% if d.cancellation_reason %}data-bs-toggle="tooltip" title="{{ d.cancellation_reason }}{% if d.cancelled_by %} -- {{ d.cancelled_by }}{% endif %}{% if d.cancelled_at %}, {{ d.cancelled_at.strftime('%d-%b-%Y') }}{% endif %}"{% endif %}>Cancelled</span>
         {% else %}<span class="badge bg-danger">Failed</span>{% endif %}
       </td>
       <td>
@@ -63,11 +65,55 @@
         <a href="#" data-bs-toggle="modal" data-bs-target="#paymentDetails{{ d.id }}" class="small">Full details</a>
         {% endif %}
       </td>
+      {% if current_user.role == 'admin' %}
+      <td>
+        {% if d.status == 'success' %}
+        <a href="#" data-bs-toggle="modal" data-bs-target="#cancelDonation{{ d.id }}" class="small text-danger">Cancel</a>
+        {% elif d.status == 'cancelled' %}
+        <form method="post" action="{{ url_for('admin.restore_donation', donation_id=d.id) }}" class="d-inline"
+              onsubmit="return confirm('Restore this donation to Success? It will count towards totals and receipts again.');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-link btn-sm p-0 small">Restore</button>
+        </form>
+        {% endif %}
+      </td>
+      {% endif %}
     </tr>
     {% endfor %}
   </tbody>
 </table>
 </div>
+
+{% if current_user.role == 'admin' %}
+{% for d in donations %}
+{% if d.status == 'success' %}
+<div class="modal fade" id="cancelDonation{{ d.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('admin.cancel_donation', donation_id=d.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="modal-header">
+          <h6 class="modal-title">Cancel donation {{ d.receipt_number or ('#' ~ d.id) }}?</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted small">This won't delete the donation or alter the issued receipt PDF, but it will
+            be excluded from totals, statements and reports, and its receipt will no longer be downloadable. This
+            can be undone later from the Restore action.</p>
+          <label class="form-label">Reason for cancellation</label>
+          <textarea class="form-control" name="cancellation_reason" rows="2" required></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Never mind</button>
+          <button type="submit" class="btn btn-danger">Cancel Donation</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endfor %}
+{% endif %}
 
 {% for d in donations %}
 {% if d.razorpay_payment_id %}

@@ -194,7 +194,32 @@ class Donation(db.Model):
 
     amount = db.Column(db.Numeric(12, 2), nullable=False)
     payment_mode = db.Column(db.String(20), nullable=False)  # online/cash/cheque/bank_transfer
-    status = db.Column(db.String(20), default="pending")  # pending/success/failed
+    # pending/success/failed/cancelled. "cancelled" is a deliberate 4th
+    # value rather than a separate is_cancelled boolean: every money-total
+    # query in this codebase (dashboard stats, campaign progress bars,
+    # Donor.total_donated/donation_count/last_donation_date, Form 10BD
+    # export, collections export, lapsed-donor report, annual statements)
+    # already filters on status == "success" specifically, so a cancelled
+    # donation is automatically excluded everywhere for free -- no need to
+    # touch a dozen call sites individually. The receipt_number stays
+    # assigned and is never reused (see ReceiptCounter docstring); only the
+    # status changes, and the /receipt/<id> download route already refuses
+    # anything that isn't status == "success", so a cancelled receipt
+    # naturally stops being downloadable too. See admin.cancel_donation().
+    status = db.Column(db.String(20), default="pending")
+    cancelled_at = db.Column(db.DateTime, nullable=True)
+    cancelled_by = db.Column(db.String(100), nullable=True)  # admin username
+    cancellation_reason = db.Column(db.String(300), nullable=True)
+
+    # Offline payment reference details -- only meaningful for
+    # payment_mode == "cheque" / "bank_transfer" respectively, entered by
+    # staff when logging an offline donation (see admin.manual_donation).
+    # Kept as their own columns rather than folded into `remarks` so
+    # they're reconcilable fields, not free text -- same reasoning as the
+    # razorpay_* fields below, just for the offline equivalents.
+    cheque_number = db.Column(db.String(50))
+    cheque_bank_name = db.Column(db.String(150))
+    bank_transaction_id = db.Column(db.String(100))  # UTR / reference number for bank transfers
 
     razorpay_order_id = db.Column(db.String(100))
     razorpay_payment_id = db.Column(db.String(100))
@@ -289,6 +314,23 @@ class Donation(db.Model):
         if self.is_80g_requested is not None:
             return self.is_80g_requested
         return self.campaign.is_80g
+
+    @property
+    def reference_display(self):
+        """Single human-readable payment reference for admin tables --
+        whichever field is actually populated for this donation's
+        payment_mode (Razorpay payment ID for online, cheque number/bank
+        for cheque, UTR/transaction ID for bank transfer). None if nothing
+        applies (e.g. cash, or an offline entry logged before these fields
+        existed)."""
+        if self.razorpay_payment_id:
+            return self.razorpay_payment_id
+        if self.payment_mode == "cheque" and self.cheque_number:
+            suffix = f" ({self.cheque_bank_name})" if self.cheque_bank_name else ""
+            return f"Cheque #{self.cheque_number}{suffix}"
+        if self.payment_mode == "bank_transfer" and self.bank_transaction_id:
+            return self.bank_transaction_id
+        return None
 
     def __repr__(self):
         return f"<Donation {self.id} {self.amount}>"

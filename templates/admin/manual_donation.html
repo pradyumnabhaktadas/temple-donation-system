@@ -75,13 +75,30 @@
     </div>
     <div class="col-md-6 mb-3">
       <label class="form-label">Payment Mode</label>
-      <select class="form-select" name="payment_mode">
+      <select class="form-select" name="payment_mode" id="payment_mode">
         <option value="cash">Cash</option>
         <option value="cheque">Cheque</option>
         <option value="bank_transfer">Bank Transfer</option>
       </select>
     </div>
   </div>
+
+  <div class="row" id="cheque-fields" style="display:none;">
+    <div class="col-md-6 mb-3">
+      <label class="form-label">Cheque Number</label>
+      <input type="text" class="form-control" name="cheque_number" id="cheque_number">
+    </div>
+    <div class="col-md-6 mb-3">
+      <label class="form-label">Bank Name</label>
+      <input type="text" class="form-control" name="cheque_bank_name" id="cheque_bank_name">
+    </div>
+  </div>
+
+  <div class="mb-3" id="bank-transfer-field" style="display:none;">
+    <label class="form-label">Transaction ID / UTR Number</label>
+    <input type="text" class="form-control" name="bank_transaction_id" id="bank_transaction_id">
+  </div>
+
   <div class="mb-3">
     <label class="form-label">Donation Date</label>
     <input type="date" class="form-control" name="donation_date" value="{{ today.isoformat() }}">
@@ -138,6 +155,25 @@
   const liveToGivePurposeField = document.getElementById('live-to-give-purpose-field');
   const liveToGivePurposeSelect = document.getElementById('live_to_give_purpose_id');
   const liveToGiveReceiptTypeField = document.getElementById('live-to-give-receipt-type-field');
+  const paymentModeSelect = document.getElementById('payment_mode');
+  const chequeFields = document.getElementById('cheque-fields');
+  const chequeNumberInput = document.getElementById('cheque_number');
+  const bankTransferField = document.getElementById('bank-transfer-field');
+  const bankTransactionIdInput = document.getElementById('bank_transaction_id');
+
+  function syncPaymentModeFields() {
+    const mode = paymentModeSelect.value;
+
+    const isCheque = mode === 'cheque';
+    chequeFields.style.display = isCheque ? '' : 'none';
+    chequeNumberInput.required = isCheque;
+    if (!isCheque) { chequeNumberInput.value = ''; document.getElementById('cheque_bank_name').value = ''; }
+
+    const isBankTransfer = mode === 'bank_transfer';
+    bankTransferField.style.display = isBankTransfer ? '' : 'none';
+    bankTransactionIdInput.required = isBankTransfer;
+    if (!isBankTransfer) bankTransactionIdInput.value = '';
+  }
 
   function syncConditionalFields() {
     const selected = campaignSelect.options[campaignSelect.selectedIndex];
@@ -162,6 +198,9 @@
 
   campaignSelect.addEventListener('change', syncConditionalFields);
   syncConditionalFields();
+
+  paymentModeSelect.addEventListener('change', syncPaymentModeFields);
+  syncPaymentModeFields();
 })();
 </script>
 {% endblock %}

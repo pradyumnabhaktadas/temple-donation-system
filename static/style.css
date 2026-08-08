@@ -305,6 +305,7 @@ body {
 .hero-trust-row span { display:flex; gap:.35rem; align-items:center; }.hero-trust-row b { color:#f6ca70; font-size:.85rem; }
 .hero-lotus { position:absolute; right:8.5%; top:50%; transform:translateY(-50%); width:185px; height:185px; z-index:-1; }
 .lotus-glow { position:absolute; inset:23px; border-radius:50%; display:grid; place-items:center; background:rgba(249,219,154,.18); color:#ffe8b3; font-size:3.8rem; box-shadow:0 0 0 23px rgba(255,255,255,.04),0 0 0 48px rgba(255,255,255,.025); }
+.lotus-glow-logo { width:62%; height:62%; object-fit:contain; filter:drop-shadow(0 2px 6px rgba(4,10,20,.35)); }
 .hero-lotus i { position:absolute; display:block; width:68px; height:118px; left:59px; top:31px; border-radius:100% 0 100% 0; background:linear-gradient(140deg,#f3c872,#d78a52); opacity:.92; transform-origin:50% 100%; }
 .hero-lotus i:nth-of-type(1){transform:rotate(0deg)} .hero-lotus i:nth-of-type(2){transform:rotate(90deg)} .hero-lotus i:nth-of-type(3){transform:rotate(180deg)} .hero-lotus i:nth-of-type(4){transform:rotate(270deg)}
 /* Photo gallery -- real temple render photos. */
@@ -369,9 +370,10 @@ body {
 .consent-box { margin:1.45rem 0 1.2rem; padding:1rem; border:1px solid #eee1d0; border-radius:.7rem; background:#fcf8f0; }.consent-box .form-check-input{margin-left:-1.5rem}.consent-box .form-check-label{line-height:1.5;color:#716455!important;}
 .donation-submit { min-height:52px; display:flex; align-items:center; justify-content:space-between; padding:0 1.15rem; border-radius:.7rem; font-size:.95rem; }.donation-submit span:last-child{font-size:1.3rem}.donation-reassurance{text-align:center;color:#867666;font-size:.71rem;margin: .85rem 0 0;}
 
-.success-card { margin-top: 4.5rem; border-top:5px solid var(--saffron); padding:2.8rem!important; }.success-symbol,.account-symbol { display:grid; place-items:center; width:54px; height:54px; margin:0 auto .8rem; background:var(--cream-alt); color:var(--maroon); border-radius:50%; font-size:1.8rem; }.success-card h3 { font-size:2rem; }.receipt-reference { display:inline-block; padding:.45rem .7rem; border-radius:.45rem; color:#756453; background:#fbf4e8; font-size:.82rem; }.success-action { display:flex; justify-content:space-between; align-items:center; width:min(100%,280px); margin:1.25rem auto .35rem; }
+.success-card { margin-top: 4.5rem; border-top:5px solid var(--saffron); padding:2.8rem!important; }.success-symbol,.account-symbol { display:grid; place-items:center; width:54px; height:54px; margin:0 auto .8rem; background:var(--cream-alt); color:var(--maroon); border-radius:50%; font-size:1.8rem; overflow:hidden; }.success-symbol img,.account-symbol img { width:70%; height:70%; object-fit:contain; }.success-card h3 { font-size:2rem; }.receipt-reference { display:inline-block; padding:.45rem .7rem; border-radius:.45rem; color:#756453; background:#fbf4e8; font-size:.82rem; }.success-action { display:flex; justify-content:space-between; align-items:center; width:min(100%,280px); margin:1.25rem auto .35rem; }
 .account-intro { margin-top:3.25rem; }.account-intro .account-symbol{width:48px;height:48px;font-size:1.45rem;margin-bottom:.55rem}.account-intro h3{font-size:2.15rem;letter-spacing:-.05em}.account-card{border-top:4px solid var(--saffron);}.account-card .btn-gold{min-height:47px}
 .site-footer-note { margin:0; padding:1.4rem 1rem 2rem; color:#8a7c6d; font-size:.75rem; text-align:center; }.site-footer-note span { color:var(--saffron-dark); font-size:1rem; margin-right:.3rem; }
+.site-footer-note .footer-logo { height:18px; width:auto; vertical-align:-4px; margin-right:.35rem; }
 .site-footer-note .footer-admin-link { color:#b4a897; font-size:.75rem; margin:0 0 0 .35rem; }.site-footer-note .footer-admin-link a { color:#b4a897; text-decoration:underline; text-decoration-color:rgba(180,168,151,.5); }.site-footer-note .footer-admin-link a:hover { color:var(--maroon); }
 
 @media (max-width: 767.98px) {

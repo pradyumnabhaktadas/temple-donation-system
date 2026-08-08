@@ -77,7 +77,23 @@
     <div class="card card-body shadow-sm">
       <h6 class="mb-3">📤 Exports</h6>
       <a class="btn btn-outline-secondary btn-sm mb-2" href="{{ url_for('admin.export_10bd') }}">Download Form 10BD data (CSV)</a><br>
-      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin.export_collections') }}">Download all collections (CSV)</a>
+      <a class="btn btn-outline-secondary btn-sm mb-3" href="{{ url_for('admin.export_collections') }}">Download all collections (CSV)</a>
+      <hr>
+      <div class="small fw-bold mb-2">Monthly Donor Report</div>
+      <p class="text-muted small mb-2">Full donor details (contact, address, PAN) plus every donation for one month.</p>
+      <form method="get" action="{{ url_for('admin.export_monthly_report') }}" class="d-flex gap-2">
+        <select name="month" class="form-select form-select-sm">
+          {% for m in range(1, 13) %}
+          <option value="{{ m }}" {% if m == today.month %}selected{% endif %}>{{ ['January','February','March','April','May','June','July','August','September','October','November','December'][m-1] }}</option>
+          {% endfor %}
+        </select>
+        <select name="year" class="form-select form-select-sm">
+          {% for y in range(today.year, today.year - 5, -1) %}
+          <option value="{{ y }}" {% if y == today.year %}selected{% endif %}>{{ y }}</option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-outline-secondary btn-sm text-nowrap">Download</button>
+      </form>
     </div>
   </div>
 </div>

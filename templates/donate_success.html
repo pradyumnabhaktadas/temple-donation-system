@@ -5,7 +5,7 @@
   <div class="col-lg-6">
     <div class="card card-body success-card text-center p-4">
       {% if donation.status == 'success' %}
-        <span class="success-symbol">ॐ</span>
+        <span class="success-symbol"><img src="{{ url_for('static', filename='branding/iskcon_dwarka_logo.png') }}" alt="ISKCON Dwarka Delhi"></span>
         <span class="section-kicker">Offering received</span>
         <h3 class="mt-2">Thank you for your seva.</h3>
         <p>Your donation of <strong>Rs. {{ donation.amount | inr(2) }}</strong> for

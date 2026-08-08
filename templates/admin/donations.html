@@ -19,11 +19,20 @@
       {% endfor %}
     </select>
   </div>
+  <div class="col-auto">
+    <select name="status" class="form-select" onchange="this.form.submit()">
+      <option value="success" {% if status == 'success' %}selected{% endif %}>Success (default)</option>
+      <option value="cancelled" {% if status == 'cancelled' %}selected{% endif %}>Cancelled</option>
+      <option value="pending" {% if status == 'pending' %}selected{% endif %}>Pending</option>
+      <option value="failed" {% if status == 'failed' %}selected{% endif %}>Failed</option>
+      <option value="all" {% if status == 'all' %}selected{% endif %}>All Statuses</option>
+    </select>
+  </div>
 </form>
 
 <div class="table-responsive">
 <table class="table table-sm bg-white shadow-sm">
-  <thead><tr><th>Date</th><th>Donor</th><th>Campaign</th><th>Amount</th><th>Mode</th><th>Receipt</th></tr></thead>
+  <thead><tr><th>Date</th><th>Donor</th><th>Campaign</th><th>Amount</th><th>Mode</th><th>Status</th><th>Receipt</th></tr></thead>
   <tbody>
     {% for d in donations %}
     <tr>
@@ -32,10 +41,22 @@
       <td>{{ d.campaign.name }}</td>
       <td>Rs. {{ d.amount | inr }}</td>
       <td>{{ d.payment_mode.replace('_',' ').title() }}</td>
-      <td><a href="{{ url_for('public.download_receipt', donation_id=d.id) }}">{{ d.receipt_number }}</a></td>
+      <td>
+        {% if d.status == 'success' %}<span class="badge bg-success">Success</span>
+        {% elif d.status == 'pending' %}<span class="badge bg-warning">Pending</span>
+        {% elif d.status == 'cancelled' %}<span class="badge bg-secondary">Cancelled</span>
+        {% else %}<span class="badge bg-danger">Failed</span>{% endif %}
+      </td>
+      <td>
+        {% if d.status == 'success' %}
+        <a href="{{ url_for('public.download_receipt', donation_id=d.id) }}">{{ d.receipt_number }}</a>
+        {% else %}
+        <a href="{{ url_for('admin.donor_detail', donor_id=d.donor.id) }}" class="small text-muted">View donor &rarr;</a>
+        {% endif %}
+      </td>
     </tr>
     {% else %}
-    <tr><td colspan="6" class="text-muted">No donations found.</td></tr>
+    <tr><td colspan="7" class="text-muted">No donations found.</td></tr>
     {% endfor %}
   </tbody>
 </table>

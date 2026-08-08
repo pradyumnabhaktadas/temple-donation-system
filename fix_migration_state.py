@@ -26,7 +26,7 @@ from app import create_app
 from extensions import db
 from sqlalchemy import inspect, text
 
-HEAD_REVISION = "e2b74a1c8f63"
+HEAD_REVISION = "a7c31f9e2b04"
 
 app = create_app()
 
@@ -154,6 +154,50 @@ with app.app_context():
         print("Added donations.is_80g_requested")
     else:
         print("donations.is_80g_requested already exists -- skipping")
+
+    # --- offline payment reference fields (cheque_number/cheque_bank_name/bank_transaction_id) ---
+    if "cheque_number" not in donation_columns():
+        db.session.execute(text("ALTER TABLE donations ADD COLUMN cheque_number VARCHAR(50)"))
+        db.session.commit()
+        print("Added donations.cheque_number")
+    else:
+        print("donations.cheque_number already exists -- skipping")
+
+    if "cheque_bank_name" not in donation_columns():
+        db.session.execute(text("ALTER TABLE donations ADD COLUMN cheque_bank_name VARCHAR(150)"))
+        db.session.commit()
+        print("Added donations.cheque_bank_name")
+    else:
+        print("donations.cheque_bank_name already exists -- skipping")
+
+    if "bank_transaction_id" not in donation_columns():
+        db.session.execute(text("ALTER TABLE donations ADD COLUMN bank_transaction_id VARCHAR(100)"))
+        db.session.commit()
+        print("Added donations.bank_transaction_id")
+    else:
+        print("donations.bank_transaction_id already exists -- skipping")
+
+    # --- cancellation fields ---
+    if "cancelled_at" not in donation_columns():
+        db.session.execute(text("ALTER TABLE donations ADD COLUMN cancelled_at TIMESTAMP"))
+        db.session.commit()
+        print("Added donations.cancelled_at")
+    else:
+        print("donations.cancelled_at already exists -- skipping")
+
+    if "cancelled_by" not in donation_columns():
+        db.session.execute(text("ALTER TABLE donations ADD COLUMN cancelled_by VARCHAR(100)"))
+        db.session.commit()
+        print("Added donations.cancelled_by")
+    else:
+        print("donations.cancelled_by already exists -- skipping")
+
+    if "cancellation_reason" not in donation_columns():
+        db.session.execute(text("ALTER TABLE donations ADD COLUMN cancellation_reason VARCHAR(300)"))
+        db.session.commit()
+        print("Added donations.cancellation_reason")
+    else:
+        print("donations.cancellation_reason already exists -- skipping")
 
     # Reconcile Alembic's bookkeeping so `flask db upgrade` behaves normally
     # (reports "already up to date") the next time it's run.

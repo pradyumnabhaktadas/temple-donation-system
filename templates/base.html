@@ -47,7 +47,7 @@
     {% block content %}{% endblock %}
   </div>
   <footer class="site-footer-note">
-    <span>ॐ</span> Thank you for supporting {{ org_name or 'the temple' }}.
+    <img src="{{ url_for('static', filename='branding/iskcon_dwarka_logo.png') }}" alt="ISKCON Dwarka Delhi" class="footer-logo"> Thank you for supporting {{ org_name or 'the temple' }}.
     <span class="footer-admin-link">· <a href="{{ url_for('admin.login') }}">Admin</a></span>
   </footer>
   {% endblock %}
