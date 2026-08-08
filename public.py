@@ -126,17 +126,26 @@ def find_or_create_donor(data):
         )
         db.session.add(donor)
     else:
-        # Backfill any missing fields on the existing record rather than
-        # creating a duplicate.
-        donor.full_name = donor.full_name or data.get("full_name", "").strip()
-        donor.email = donor.email or (email or None)
-        donor.phone = donor.phone or (phone or None)
-        donor.whatsapp_number = donor.whatsapp_number or (whatsapp_number or None)
-        donor.pan = donor.pan or (pan or None)
-        donor.address = donor.address or data.get("address", "").strip() or None
-        donor.city = donor.city or data.get("city", "").strip() or None
-        donor.state = donor.state or data.get("state", "").strip() or None
-        donor.pincode = donor.pincode or data.get("pincode", "").strip() or None
+        # Update the existing record with whatever was entered on *this*
+        # donation, rather than only backfilling blanks. A shared phone
+        # number, PAN, or email is common in Indian households (spouse,
+        # parents, grown children all donating under one family contact) --
+        # if we kept the name/address from whoever donated first, every
+        # later donation under the same contact details would silently get
+        # that first person's name printed on its receipt, even though the
+        # form clearly said someone else was giving this donation. New
+        # values win whenever the form actually supplied one; a field left
+        # blank on this submission keeps whatever was already on file
+        # instead of being wiped out.
+        donor.full_name = data.get("full_name", "").strip() or donor.full_name
+        donor.email = email or donor.email
+        donor.phone = phone or donor.phone
+        donor.whatsapp_number = whatsapp_number or donor.whatsapp_number
+        donor.pan = pan or donor.pan
+        donor.address = data.get("address", "").strip() or donor.address
+        donor.city = data.get("city", "").strip() or donor.city
+        donor.state = data.get("state", "").strip() or donor.state
+        donor.pincode = data.get("pincode", "").strip() or donor.pincode
 
     db.session.flush()
     return donor

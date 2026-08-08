@@ -56,6 +56,47 @@ class TestDonorDedup:
         assert d1.id == d2.id
         assert d2.email == "krishna@example.com"
 
+    def test_later_donation_updates_name_and_address_for_shared_contact(self, app):
+        """A shared phone/PAN/email is common in Indian households -- spouse,
+        parents, or grown children all donating under one family contact.
+        Whoever's name and address were entered on the CURRENT donation must
+        end up on that donation's receipt, not whichever name happened to be
+        saved from an earlier donation under the same contact details."""
+        from public import find_or_create_donor
+
+        d1 = find_or_create_donor({
+            "full_name": "Ramesh Kumar", "phone": "9123456789", "address": "12 MG Road", "city": "Delhi",
+        })
+        db.session.commit()
+        assert d1.full_name == "Ramesh Kumar"
+
+        d2 = find_or_create_donor({
+            "full_name": "Sita Devi", "phone": "9123456789", "address": "45 Nehru Place", "city": "Delhi",
+        })
+        db.session.commit()
+
+        assert d1.id == d2.id
+        assert d2.full_name == "Sita Devi"
+        assert d2.address == "45 Nehru Place"
+
+    def test_blank_field_on_later_donation_does_not_erase_saved_value(self, app):
+        """The flip side of the above -- if this donation's form just didn't
+        ask for/collect a field (e.g. address left blank), the previously
+        saved value should survive rather than being wiped to blank."""
+        from public import find_or_create_donor
+
+        d1 = find_or_create_donor({
+            "full_name": "Gopal Das", "phone": "9234567890", "email": "gopal@example.com", "city": "Mumbai",
+        })
+        db.session.commit()
+
+        d2 = find_or_create_donor({"full_name": "Gopal Das", "phone": "9234567890", "email": "", "city": ""})
+        db.session.commit()
+
+        assert d1.id == d2.id
+        assert d2.email == "gopal@example.com"
+        assert d2.city == "Mumbai"
+
     def test_different_donors_stay_separate(self, app):
         from public import find_or_create_donor
 
