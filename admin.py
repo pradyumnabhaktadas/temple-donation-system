@@ -794,6 +794,213 @@ def bulk_import_donations():
     return render_template("admin/bulk_import_donations.html", results=results, created=created, skipped=skipped)
 
 
+# Same idea as BULK_IMPORT_* above, but for migrating history from before
+# this website existed rather than logging new offline donations -- see
+# import_legacy_donations() for how the two differ.
+LEGACY_IMPORT_REQUIRED_COLUMNS = ["full_name", "campaign_name", "amount", "donation_date"]
+LEGACY_IMPORT_COLUMNS = [
+    "full_name", "phone", "whatsapp_number", "email", "pan", "address", "city", "state", "pincode",
+    "campaign_name", "amount", "payment_mode", "donation_date", "receipt_number",
+    "cheque_number", "cheque_bank_name", "bank_transaction_id", "remarks",
+]
+LEGACY_IMPORT_DEMO_ROWS = [
+    {
+        "full_name": "Gopal Krishna Das", "phone": "9811122233", "whatsapp_number": "", "email": "gopal@example.com",
+        "pan": "ABCDE1234F", "address": "45 Preet Vihar", "city": "Delhi", "state": "Delhi", "pincode": "110092",
+        "campaign_name": "Temple Construction", "amount": "11000", "payment_mode": "cash",
+        "donation_date": "2023-06-10", "receipt_number": "OLD/2023/00456",
+        "cheque_number": "", "cheque_bank_name": "", "bank_transaction_id": "", "remarks": "",
+    },
+    {
+        "full_name": "Radha Rani Devi", "phone": "9822233344", "whatsapp_number": "", "email": "",
+        "pan": "", "address": "", "city": "", "state": "", "pincode": "",
+        "campaign_name": "General Donations", "amount": "2500", "payment_mode": "cheque",
+        "donation_date": "2024-01-22", "receipt_number": "OLD/2024/00112",
+        "cheque_number": "998877", "cheque_bank_name": "SBI", "bank_transaction_id": "", "remarks": "",
+    },
+    {
+        "full_name": "Nitai Chandra", "phone": "", "whatsapp_number": "9933344455", "email": "nitai@example.com",
+        "pan": "FGHIJ5678K", "address": "", "city": "", "state": "", "pincode": "",
+        "campaign_name": "Annadan", "amount": "7500", "payment_mode": "bank_transfer",
+        "donation_date": "2024-11-03", "receipt_number": "",
+        "cheque_number": "", "cheque_bank_name": "", "bank_transaction_id": "UTR2024110312345", "remarks": "",
+    },
+]
+
+
+@bp.route("/donations/import-legacy/demo.csv")
+@login_required
+@admin_role_required
+def import_legacy_demo_csv():
+    """Template CSV for migrating pre-website donor/donation history."""
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=LEGACY_IMPORT_COLUMNS)
+    writer.writeheader()
+    writer.writerows(LEGACY_IMPORT_DEMO_ROWS)
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=legacy_donations_demo.csv"},
+    )
+
+
+@bp.route("/donations/import-legacy", methods=["GET", "POST"])
+@login_required
+@admin_role_required
+def import_legacy_donations():
+    """Migrates pre-website donor/donation history whose receipts were
+    already issued (on paper, or through whatever system you used before)
+    -- this is the web-UI equivalent of import_legacy_data.py, for anyone
+    who'd rather upload a file than run a script on the server.
+
+    Differs from "Bulk Import" (bulk_import_donations) in the ways that
+    matter for already-issued receipts:
+      - `receipt_number` is read from the CSV and kept as-is when given,
+        instead of being generated from this site's own numbering
+        sequence -- your old receipt numbers stay the numbers of record.
+        Leave the column blank on a row to auto-generate one from this
+        site's sequence instead (e.g. for old records where the original
+        number is lost).
+      - No PDF is generated for imported rows by default (the real
+        receipt already exists on paper/elsewhere) -- ticking "Generate
+        PDF receipts" creates one in this site's own layout for every
+        row, which will NOT match whatever the original receipt looked
+        like. Donations with no PDF here still show correctly in every
+        report, statement, and total; the receipt link on this site just
+        won't have a file behind it unless you opt in.
+      - Email/WhatsApp receipt notifications are never sent -- these
+        donors already received their receipt at the time, so importing
+        them now should never trigger a fresh notification.
+
+    Donor de-duplication uses the same PAN -> phone -> email matching as
+    everywhere else, so importing won't create duplicates of donors who
+    already exist from live donations.
+    """
+    if request.method == "GET":
+        return render_template("admin/import_legacy_donations.html", results=None)
+
+    file = request.files.get("csv_file")
+    if not file or not file.filename:
+        flash("Please choose a CSV file to upload.")
+        return redirect(url_for("admin.import_legacy_donations"))
+
+    generate_pdfs = request.form.get("generate_pdfs") == "yes"
+
+    try:
+        stream = io.TextIOWrapper(file.stream, encoding="utf-8-sig")
+        reader = csv.DictReader(stream)
+        fieldnames = {(f or "").strip() for f in (reader.fieldnames or [])}
+    except Exception:
+        flash("Couldn't read that file -- please upload a CSV (comma-separated) file.")
+        return redirect(url_for("admin.import_legacy_donations"))
+
+    missing = [c for c in LEGACY_IMPORT_REQUIRED_COLUMNS if c not in fieldnames]
+    if missing:
+        flash(
+            "That CSV is missing required column(s): " + ", ".join(missing)
+            + ". Download the demo file below for the full column list."
+        )
+        return redirect(url_for("admin.import_legacy_donations"))
+
+    campaigns_by_name = {c.name.strip().lower(): c for c in Campaign.query.all()}
+    org_cfg = _org_cfg()
+    results = []
+    created = 0
+
+    for line_num, raw_row in enumerate(reader, start=2):  # header is line 1
+        row = {(k or "").strip(): (v or "").strip() for k, v in raw_row.items() if k}
+        row_errors = []
+
+        full_name = row.get("full_name", "")
+        if not full_name:
+            row_errors.append("full_name is required")
+
+        campaign_name = row.get("campaign_name", "")
+        campaign = campaigns_by_name.get(campaign_name.lower()) if campaign_name else None
+        if not campaign_name:
+            row_errors.append("campaign_name is required")
+        elif not campaign:
+            row_errors.append(f"campaign '{campaign_name}' not found -- create it first under Admin > Campaigns")
+
+        amount = None
+        amount_raw = row.get("amount", "")
+        try:
+            amount = float(amount_raw)
+            if amount <= 0:
+                row_errors.append("amount must be greater than 0")
+        except ValueError:
+            row_errors.append(f"invalid amount '{amount_raw}'")
+
+        payment_mode = (row.get("payment_mode") or "cash").lower()
+        if payment_mode not in ("cash", "cheque", "bank_transfer", "online"):
+            payment_mode = "cash"  # unrecognised is treated as cash, same as the CLI importer, rather than skipped
+
+        donation_date = None
+        date_raw = row.get("donation_date", "")
+        try:
+            donation_date = datetime.datetime.strptime(date_raw, "%Y-%m-%d")
+        except ValueError:
+            row_errors.append(f"invalid donation_date '{date_raw}' (expected YYYY-MM-DD)")
+
+        pan = row.get("pan", "").upper()
+        if pan and not is_valid_pan(pan):
+            row_errors.append(f"invalid PAN '{pan}'")
+        row["pan"] = pan
+
+        existing_receipt = (row.get("receipt_number") or "").strip() or None
+
+        if row_errors:
+            results.append({"line": line_num, "name": full_name or "(blank)", "ok": False, "errors": row_errors})
+            continue
+
+        try:
+            donor = find_or_create_donor(row)
+
+            donation = Donation(
+                donor_id=donor.id,
+                campaign_id=campaign.id,
+                amount=amount,
+                payment_mode=payment_mode,
+                status="success",
+                donation_date=donation_date,
+                cheque_number=(row.get("cheque_number") or "")[:50] or None,
+                cheque_bank_name=(row.get("cheque_bank_name") or "")[:150] or None,
+                bank_transaction_id=(row.get("bank_transaction_id") or "")[:100] or None,
+                remarks=(row.get("remarks") or "").strip()[:300] or "Imported from legacy records",
+                recorded_by=f"legacy import ({current_user.username})",
+            )
+            db.session.add(donation)
+            db.session.flush()
+
+            if existing_receipt:
+                donation.receipt_number = existing_receipt[:50]
+                donation.financial_year = get_financial_year(donation_date)
+            else:
+                receipt_number, fy = ReceiptCounter.next_receipt_number(campaign.is_80g, donation_date)
+                donation.receipt_number = receipt_number
+                donation.financial_year = fy
+
+            if generate_pdfs:
+                donation.receipt_pdf = generate_receipt_pdf(donation, donor, campaign, org_cfg)
+
+            db.session.commit()
+
+            results.append({"line": line_num, "name": full_name, "ok": True, "receipt_number": donation.receipt_number})
+            created += 1
+        except Exception as exc:
+            db.session.rollback()
+            current_app.logger.exception("Legacy import failed on row %s", line_num)
+            reason = "duplicate receipt number" if "unique" in str(exc).lower() else f"unexpected error ({exc})"
+            results.append({
+                "line": line_num, "name": full_name or "(blank)", "ok": False,
+                "errors": [f"row skipped -- {reason}"],
+            })
+
+    skipped = len(results) - created
+    flash(f"Legacy import finished: {created} donation(s) imported, {skipped} skipped.")
+    return render_template("admin/import_legacy_donations.html", results=results, created=created, skipped=skipped)
+
+
 @bp.route("/campaigns", methods=["GET", "POST"])
 @login_required
 def campaigns():
