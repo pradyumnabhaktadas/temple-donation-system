@@ -202,6 +202,459 @@ def dashboard():
     )
 
 
+def _months_ago(base, i):
+    """Calendar-correct 'i months before base', avoiding drift from fixed
+    30-day subtraction across months of different lengths."""
+    total_months = base.year * 12 + (base.month - 1) - i
+    y, m = divmod(total_months, 12)
+    return datetime.date(y, m + 1, 1)
+
+
+def _apply_donor_population_filters(query, donor_type, preacher_id, frequency):
+    """Shared donor_type/connected_preacher/donation_frequency filtering,
+    used by both the Donors list and Analytics -- `query` must have Donor
+    columns in scope (either Donor.query directly, or a query that's
+    joined Donor in). "none" for preacher_id is a sentinel meaning "no
+    preacher assigned" (IS NULL), distinct from a blank/absent param
+    ("any preacher")."""
+    if donor_type:
+        query = query.filter(Donor.donor_type == donor_type)
+    if preacher_id == "none":
+        query = query.filter(Donor.connected_preacher_id.is_(None))
+    elif preacher_id:
+        try:
+            query = query.filter(Donor.connected_preacher_id == int(preacher_id))
+        except ValueError:
+            pass
+    if frequency:
+        query = query.filter(Donor.donation_frequency == frequency)
+    return query
+
+
+# Retention thresholds (days since last successful donation) -- a donor's
+# frequency label (set manually by staff, see Donor.donation_frequency)
+# determines when a gap starts looking like a missed gift vs. business as
+# usual. These are reasonable defaults, not a spec from the temple --
+# tune freely if real-world follow-up patterns suggest otherwise.
+_RETENTION_THRESHOLDS = {
+    "monthly": (35, 60),      # active <=35 days, at-risk 36-60, inactive >60
+    "quarterly": (100, 150),
+    "yearly": (380, 450),
+    None: (180, 365),         # occasional / one_time / not set
+}
+for _f in ("occasional", "one_time"):
+    _RETENTION_THRESHOLDS[_f] = _RETENTION_THRESHOLDS[None]
+
+
+def _donor_activity_status(frequency, last_donation_date, today):
+    """One of "never", "active", "at_risk", "inactive" for a donor, based
+    on how long it's been since their last successful donation relative
+    to how often they're expected to give."""
+    if last_donation_date is None:
+        return "never"
+    days_since = (today - last_donation_date).days
+    at_risk_after, inactive_after = _RETENTION_THRESHOLDS.get(frequency, _RETENTION_THRESHOLDS[None])
+    if days_since <= at_risk_after:
+        return "active"
+    elif days_since <= inactive_after:
+        return "at_risk"
+    return "inactive"
+
+
+def _resolve_analytics_date_range(preset, custom_from_raw, custom_to_raw, today):
+    """Resolves the Analytics page's date-range filter to a [start, end)
+    pair of dates. "this_quarter"/"this_year" are to-date (like the
+    Dashboard's FY total) rather than the full period including days that
+    haven't happened yet; "last_month" is the one preset that's a fully
+    closed period."""
+    if preset == "last_month":
+        end_of_last_month = today.replace(day=1) - datetime.timedelta(days=1)
+        start = end_of_last_month.replace(day=1)
+        end = today.replace(day=1)
+        label = end_of_last_month.strftime("%B %Y")
+    elif preset == "this_quarter":
+        q_start_month = ((today.month - 1) // 3) * 3 + 1
+        start = today.replace(month=q_start_month, day=1)
+        end = today + datetime.timedelta(days=1)
+        label = f"This Quarter (from {start.strftime('%d-%b')})"
+    elif preset == "this_year":
+        fy = get_financial_year(today)
+        start = datetime.date(int(fy.split("-")[0]), 4, 1)
+        end = today + datetime.timedelta(days=1)
+        label = f"FY {fy} to date"
+    elif preset == "custom":
+        try:
+            start = datetime.datetime.strptime(custom_from_raw, "%Y-%m-%d").date() if custom_from_raw else today - datetime.timedelta(days=30)
+        except ValueError:
+            start = today - datetime.timedelta(days=30)
+        try:
+            custom_to = datetime.datetime.strptime(custom_to_raw, "%Y-%m-%d").date() if custom_to_raw else today
+        except ValueError:
+            custom_to = today
+        end = custom_to + datetime.timedelta(days=1)
+        label = f"{start.strftime('%d-%b-%Y')} to {custom_to.strftime('%d-%b-%Y')}"
+    else:
+        preset = "this_month"
+        start = today.replace(day=1)
+        end = today + datetime.timedelta(days=1)
+        label = today.strftime("%B %Y")
+    return preset, start, end, label
+
+
+@bp.route("/analytics")
+@login_required
+def analytics():
+    """Analytics built around the four things that actually matter for
+    running an IYF/Live To Give donor program: how much is coming in
+    (Donations), how the donor base is growing (Donors), how relationships
+    are distributed (Preachers), and who needs attention right now
+    (Follow-up) -- not just a running total.
+
+    Implementation note: rather than issuing a separate SQL query per
+    section, this pulls the (small, single-temple-scale) filtered donor
+    list and their full donation history once each, then does every
+    breakdown/aggregate in Python. That keeps ~12 report sections easy to
+    verify and keeps the SQL portable (no dialect-specific DISTINCT ON /
+    correlated-subquery tricks needed across SQLite dev / Postgres prod).
+    """
+    today = datetime.date.today()
+
+    # -- Global filters (apply across every section) --
+    date_preset = request.args.get("date_preset", "this_month")
+    custom_from_raw = request.args.get("date_from", "")
+    custom_to_raw = request.args.get("date_to", "")
+    date_preset, period_start, period_end, period_label = _resolve_analytics_date_range(
+        date_preset, custom_from_raw, custom_to_raw, today
+    )
+
+    donor_type_filter = request.args.get("donor_type", "")
+    preacher_filter = request.args.get("preacher_id", "")
+    frequency_filter = request.args.get("donation_frequency", "")
+
+    donors_all = _apply_donor_population_filters(
+        Donor.query, donor_type_filter, preacher_filter, frequency_filter
+    ).all()
+    population_donor_ids = [d.id for d in donors_all]
+    donor_by_id = {d.id: d for d in donors_all}
+    all_preachers = Preacher.query.order_by(Preacher.name).all()
+    preacher_name_by_id = {p.id: p.name for p in all_preachers}
+
+    trend_granularity = request.args.get("trend", "monthly")
+    if trend_granularity not in ("monthly", "quarterly", "yearly"):
+        trend_granularity = "monthly"
+    top_scope = request.args.get("top_scope", "lifetime")
+    if top_scope not in ("lifetime", "period"):
+        top_scope = "lifetime"
+
+    # Every successful donation by a population-filtered donor, pulled
+    # once as (donor_id, amount, plain date) tuples -- everything below
+    # slices this same list rather than re-querying.
+    all_pop_donations = []
+    if population_donor_ids:
+        for did, amt, dt in (
+            db.session.query(Donation.donor_id, Donation.amount, Donation.donation_date)
+            .filter(Donation.status == "success", Donation.donor_id.in_(population_donor_ids))
+            .all()
+        ):
+            d = dt.date() if hasattr(dt, "date") else dt
+            all_pop_donations.append((did, float(amt), d))
+
+    period_donation_rows = [(did, amt) for did, amt, d in all_pop_donations if period_start <= d < period_end]
+    total_donations_amount = sum(amt for _, amt in period_donation_rows)
+    active_donor_ids = {did for did, _ in period_donation_rows}
+    donation_count_in_period = len(period_donation_rows)
+    avg_donation_in_period = (total_donations_amount / donation_count_in_period) if donation_count_in_period else 0
+
+    this_month_start = today.replace(day=1)
+    this_month_total = sum(amt for _, amt, d in all_pop_donations if d >= this_month_start)
+
+    first_donation_date, last_donation_date = {}, {}
+    for did, amt, d in all_pop_donations:
+        if did not in first_donation_date or d < first_donation_date[did]:
+            first_donation_date[did] = d
+        if did not in last_donation_date or d > last_donation_date[did]:
+            last_donation_date[did] = d
+
+    new_donors_count = sum(1 for d in first_donation_date.values() if period_start <= d < period_end)
+
+    def _created_before(donor, cutoff_date):
+        created = donor.created_at.date() if donor.created_at else datetime.date.min
+        return created < cutoff_date
+
+    # ================= 1. KPI CARDS =================
+    kpis = {
+        "total_donors": sum(1 for d in donors_all if _created_before(d, period_end)),
+        "active_donors": len(active_donor_ids),
+        "total_donations": total_donations_amount,
+        "this_month": this_month_total,
+        "monthly_recurring_donors": sum(
+            1 for d in donors_all if d.donation_frequency == "monthly" and _created_before(d, period_end)
+        ),
+        "new_donors": new_donors_count,
+        "avg_donation": avg_donation_in_period,
+        "preacher_count": len({d.connected_preacher_id for d in donors_all if d.connected_preacher_id}),
+    }
+
+    # ================= 2. DONATION TREND =================
+    trend_buckets = []
+    if trend_granularity == "monthly":
+        for i in range(11, -1, -1):
+            bucket_start = _months_ago(today.replace(day=1), i)
+            bucket_end = _months_ago(today.replace(day=1), i - 1)
+            trend_buckets.append((bucket_start.strftime("%b %Y"), bucket_start, bucket_end))
+    elif trend_granularity == "quarterly":
+        this_q_start_month = ((today.month - 1) // 3) * 3 + 1
+        this_q_start = today.replace(month=this_q_start_month, day=1)
+        for i in range(7, -1, -1):
+            bucket_start = _months_ago(this_q_start, i * 3)
+            bucket_end = _months_ago(this_q_start, (i - 1) * 3)
+            q_num = (bucket_start.month - 1) // 3 + 1
+            trend_buckets.append((f"Q{q_num} {bucket_start.year}", bucket_start, bucket_end))
+    else:  # yearly (financial years)
+        current_fy_start_year = int(get_financial_year(today).split("-")[0])
+        for offset in range(4, -1, -1):
+            fy_start_year = current_fy_start_year - offset
+            bucket_start = datetime.date(fy_start_year, 4, 1)
+            bucket_end = datetime.date(fy_start_year + 1, 4, 1)
+            trend_buckets.append((f"FY {fy_start_year}-{str(fy_start_year + 1)[-2:]}", bucket_start, bucket_end))
+
+    donation_trend = []
+    for label, bstart, bend in trend_buckets:
+        bucket_rows = [amt for _, amt, d in all_pop_donations if bstart <= d < bend]
+        donation_trend.append({"label": label, "total": sum(bucket_rows), "count": len(bucket_rows)})
+
+    # ================= 3. DONOR TYPE ANALYTICS =================
+    donor_amount_by_id = {}
+    for did, amt in period_donation_rows:
+        donor_amount_by_id[did] = donor_amount_by_id.get(did, 0) + amt
+
+    type_totals = {t: {"donors": 0, "amount": 0.0} for t in DONOR_TYPES}
+    for d in donors_all:
+        if d.donor_type in type_totals:
+            type_totals[d.donor_type]["donors"] += 1
+            type_totals[d.donor_type]["amount"] += donor_amount_by_id.get(d.id, 0)
+    grand_total_amount = sum(v["amount"] for v in type_totals.values()) or 1.0
+    donor_type_breakdown = [
+        {
+            "type": t, "label": DONOR_TYPE_LABELS[t],
+            "donors": type_totals[t]["donors"], "amount": type_totals[t]["amount"],
+            "pct": round(type_totals[t]["amount"] / grand_total_amount * 100, 1),
+        }
+        for t in DONOR_TYPES
+    ]
+
+    # ================= 4. DONATION FREQUENCY BREAKDOWN =================
+    freq_totals = {f: {"donors": 0, "amount": 0.0} for f in DONATION_FREQUENCIES}
+    for d in donors_all:
+        if d.donation_frequency in freq_totals:
+            freq_totals[d.donation_frequency]["donors"] += 1
+            freq_totals[d.donation_frequency]["amount"] += donor_amount_by_id.get(d.id, 0)
+    frequency_breakdown = [
+        {
+            "freq": f, "label": DONATION_FREQUENCY_LABELS[f],
+            "donors": freq_totals[f]["donors"], "amount": freq_totals[f]["amount"],
+        }
+        for f in DONATION_FREQUENCIES
+    ]
+
+    # ================= 5. PREACHER-WISE PERFORMANCE =================
+    donors_by_preacher = {}
+    for d in donors_all:
+        donors_by_preacher.setdefault(d.connected_preacher_id, []).append(d)
+
+    preacher_performance = []
+    for p in all_preachers:
+        p_donors = donors_by_preacher.get(p.id, [])
+        if not p_donors:
+            continue
+        p_ids = {d.id for d in p_donors}
+        lifetime_rows = [amt for did, amt, d in all_pop_donations if did in p_ids]
+        lifetime_total = sum(lifetime_rows)
+        lifetime_count = len(lifetime_rows)
+        preacher_performance.append({
+            "id": p.id, "name": p.name, "donors": len(p_donors),
+            "active_donors": sum(1 for did in p_ids if did in active_donor_ids),
+            "period_total": sum(amt for did, amt in period_donation_rows if did in p_ids),
+            "lifetime_total": lifetime_total,
+            "monthly_donors": sum(1 for d in p_donors if d.donation_frequency == "monthly"),
+            "avg_donation": (lifetime_total / lifetime_count) if lifetime_count else 0,
+        })
+    preacher_performance.sort(key=lambda r: r["lifetime_total"], reverse=True)
+
+    # ================= 6. DONOR GROWTH =================
+    fy_start_date = datetime.date(int(get_financial_year(today).split("-")[0]), 4, 1)
+    q_start_month = ((today.month - 1) // 3) * 3 + 1
+    q_start_date = today.replace(month=q_start_month, day=1)
+    month_start_date = today.replace(day=1)
+
+    new_this_month = sum(1 for d in first_donation_date.values() if d >= month_start_date)
+    new_this_quarter = sum(1 for d in first_donation_date.values() if d >= q_start_date)
+    new_this_year = sum(1 for d in first_donation_date.values() if d >= fy_start_date)
+
+    growth_trend = []
+    for i in range(11, -1, -1):
+        bucket_start = _months_ago(today.replace(day=1), i)
+        bucket_end = _months_ago(today.replace(day=1), i - 1)
+        count = sum(1 for d in first_donation_date.values() if bucket_start <= d < bucket_end)
+        growth_trend.append({"label": bucket_start.strftime("%b %Y"), "new": count})
+
+    prev_period_len = (period_end - period_start).days
+    prev_period_start = period_start - datetime.timedelta(days=prev_period_len)
+    prev_period_new = sum(1 for d in first_donation_date.values() if prev_period_start <= d < period_start)
+    donor_growth_pct = None
+    if prev_period_new > 0:
+        donor_growth_pct = round((new_donors_count - prev_period_new) / prev_period_new * 100, 1)
+
+    # ================= 7. DONOR RETENTION =================
+    retention_counts = {"active": 0, "at_risk": 0, "inactive": 0, "never": 0}
+    at_risk_list = []
+    for donor in donors_all:
+        last_date = last_donation_date.get(donor.id)
+        status = _donor_activity_status(donor.donation_frequency, last_date, today)
+        retention_counts[status] += 1
+        if status in ("at_risk", "inactive"):
+            at_risk_list.append({
+                "donor": donor, "status": status, "last_donation": last_date,
+                "days_since": (today - last_date).days if last_date else None,
+            })
+    at_risk_list.sort(key=lambda r: r["days_since"] or 0, reverse=True)
+
+    # ================= 8. BIRTHDAYS & ANNIVERSARIES =================
+    donors_with_dates = [
+        d for d in donors_all
+        if d.dob or d.father_dob or d.mother_dob or d.wife_dob or d.marriage_anniversary
+    ]
+    upcoming_30 = []
+    for donor in donors_with_dates:
+        for label, date_value in [
+            ("Donor's Birthday", donor.dob), ("Marriage Anniversary", donor.marriage_anniversary),
+            ("Father's Birthday", donor.father_dob), ("Mother's Birthday", donor.mother_dob),
+            ("Wife's Birthday", donor.wife_dob),
+        ]:
+            if not date_value:
+                continue
+            days_until, occurrence_date = _next_occurrence(date_value, today)
+            if days_until is not None and days_until <= 30:
+                upcoming_30.append({"donor": donor, "label": label, "days_until": days_until, "date": occurrence_date})
+    upcoming_30.sort(key=lambda u: u["days_until"])
+    upcoming_7 = [u for u in upcoming_30 if u["days_until"] <= 7]
+
+    birthday_month_counts = {
+        "Donor's Birthday": 0, "Father's Birthday": 0, "Mother's Birthday": 0,
+        "Wife's Birthday": 0, "Marriage Anniversary": 0,
+    }
+    for u in upcoming_30:
+        birthday_month_counts[u["label"]] += 1
+
+    # ================= 9. GEOGRAPHIC ANALYTICS =================
+    geo = {}
+    for d in donors_all:
+        state = (d.state or "").strip() or "Unknown"
+        geo.setdefault(state, {"donors": 0, "amount": 0.0})
+        geo[state]["donors"] += 1
+    for did, amt in period_donation_rows:
+        d = donor_by_id.get(did)
+        state = ((d.state or "").strip() or "Unknown") if d else "Unknown"
+        geo.setdefault(state, {"donors": 0, "amount": 0.0})
+        geo[state]["amount"] += amt
+    geography = sorted(
+        [{"state": s, "donors": v["donors"], "amount": v["amount"]} for s, v in geo.items()],
+        key=lambda r: r["amount"], reverse=True,
+    )
+
+    # ================= 10. DATA COMPLETENESS =================
+    total_pop = len(donors_all) or 1
+    with_pan = sum(1 for d in donors_all if d.pan)
+    with_address = sum(1 for d in donors_all if d.address and d.city and d.state and d.pincode)
+    with_dob = sum(1 for d in donors_all if d.dob)
+    with_preacher = sum(1 for d in donors_all if d.connected_preacher_id)
+    incomplete_count = 0
+    for d in donors_all:
+        missing = sum([
+            not d.pan, not (d.address and d.city and d.state and d.pincode),
+            not d.dob, not d.connected_preacher_id, not d.donor_type,
+        ])
+        if missing >= 2:
+            incomplete_count += 1
+    completeness = {
+        "pan_pct": round(with_pan / total_pop * 100, 1),
+        "address_pct": round(with_address / total_pop * 100, 1),
+        "dob_pct": round(with_dob / total_pop * 100, 1),
+        "preacher_pct": round(with_preacher / total_pop * 100, 1),
+        "overall_pct": round((with_pan + with_address + with_dob + with_preacher) / (total_pop * 4) * 100, 1),
+        "incomplete_count": incomplete_count,
+    }
+
+    # ================= 11. FOLLOW-UP DASHBOARD =================
+    overdue_count = sum(
+        1 for r in at_risk_list if r["donor"].donation_frequency in ("monthly", "quarterly", "yearly")
+    )
+    unassigned_count = sum(1 for d in donors_all if not d.connected_preacher_id)
+    new_without_preacher = sum(
+        1 for did, fdate in first_donation_date.items()
+        if (today - fdate).days <= 30 and donor_by_id.get(did) and not donor_by_id[did].connected_preacher_id
+    )
+    lifetime_totals_by_donor = {}
+    for did, amt, d in all_pop_donations:
+        lifetime_totals_by_donor[did] = lifetime_totals_by_donor.get(did, 0) + amt
+    sorted_totals = sorted(lifetime_totals_by_donor.values(), reverse=True)
+    high_value_cutoff = sorted_totals[9] if len(sorted_totals) >= 10 else (sorted_totals[-1] if sorted_totals else 0)
+    high_value_at_risk = [
+        r for r in at_risk_list
+        if high_value_cutoff > 0 and lifetime_totals_by_donor.get(r["donor"].id, 0) >= high_value_cutoff
+    ][:10]
+
+    followup = {
+        "overdue_count": overdue_count,
+        "unassigned_count": unassigned_count,
+        "new_without_preacher": new_without_preacher,
+        "inactive_count": retention_counts["inactive"],
+        "birthdays_week_count": sum(1 for u in upcoming_7 if "Birthday" in u["label"]),
+        "anniversaries_week_count": sum(1 for u in upcoming_7 if u["label"] == "Marriage Anniversary"),
+        "incomplete_count": completeness["incomplete_count"],
+        "high_value_at_risk": high_value_at_risk,
+    }
+
+    # ================= 12. TOP DONORS =================
+    totals_source = period_donation_rows if top_scope == "period" else [(did, amt) for did, amt, d in all_pop_donations]
+    totals_by_donor, counts_by_donor = {}, {}
+    for did, amt in totals_source:
+        totals_by_donor[did] = totals_by_donor.get(did, 0) + amt
+        counts_by_donor[did] = counts_by_donor.get(did, 0) + 1
+    top_ids = sorted(totals_by_donor, key=lambda did: totals_by_donor[did], reverse=True)[:10]
+    top_donors = [
+        {
+            "id": did, "name": donor_by_id[did].full_name,
+            "type": DONOR_TYPE_LABELS.get(donor_by_id[did].donor_type, "-"),
+            "preacher": preacher_name_by_id.get(donor_by_id[did].connected_preacher_id, "-"),
+            "total": totals_by_donor[did], "count": counts_by_donor[did],
+        }
+        for did in top_ids if did in donor_by_id
+    ]
+
+    return render_template(
+        "admin/analytics.html",
+        date_preset=date_preset, custom_from=custom_from_raw, custom_to=custom_to_raw, period_label=period_label,
+        donor_type_filter=donor_type_filter, preacher_filter=preacher_filter, frequency_filter=frequency_filter,
+        donor_types=DONOR_TYPES, donor_type_labels=DONOR_TYPE_LABELS,
+        donation_frequencies=DONATION_FREQUENCIES, donation_frequency_labels=DONATION_FREQUENCY_LABELS,
+        all_preachers=all_preachers,
+        kpis=kpis,
+        trend_granularity=trend_granularity, donation_trend=donation_trend,
+        donor_type_breakdown=donor_type_breakdown,
+        frequency_breakdown=frequency_breakdown,
+        preacher_performance=preacher_performance,
+        new_this_month=new_this_month, new_this_quarter=new_this_quarter, new_this_year=new_this_year,
+        donor_growth_pct=donor_growth_pct, growth_trend=growth_trend,
+        retention_counts=retention_counts, at_risk_list=at_risk_list[:25],
+        upcoming_7=upcoming_7, upcoming_30=upcoming_30[:25], birthday_month_counts=birthday_month_counts,
+        geography=geography,
+        completeness=completeness,
+        followup=followup,
+        top_donors=top_donors, top_scope=top_scope,
+    )
+
+
 DONORS_PER_PAGE = 30
 DONATIONS_PER_PAGE = 50
 

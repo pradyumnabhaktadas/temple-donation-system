@@ -11,6 +11,7 @@
     <div class="collapse navbar-collapse" id="adminNav">
       <div class="navbar-nav ms-auto flex-wrap">
         <a class="nav-link {% if request.endpoint == 'admin.dashboard' %}active{% endif %}" href="{{ url_for('admin.dashboard') }}">Dashboard</a>
+        <a class="nav-link {% if request.endpoint == 'admin.analytics' %}active{% endif %}" href="{{ url_for('admin.analytics') }}">Analytics</a>
         <a class="nav-link {% if request.endpoint == 'admin.donors' %}active{% endif %}" href="{{ url_for('admin.donors') }}">Donors</a>
         <a class="nav-link {% if request.endpoint == 'admin.donations' %}active{% endif %}" href="{{ url_for('admin.donations') }}">Donations</a>
         <a class="nav-link {% if request.endpoint == 'admin.manual_donation' %}active{% endif %}" href="{{ url_for('admin.manual_donation') }}">Log Offline Donation</a>
