@@ -1432,7 +1432,7 @@ def bulk_import_donations():
 LEGACY_IMPORT_REQUIRED_COLUMNS = ["full_name", "campaign_name", "amount", "donation_date"]
 LEGACY_IMPORT_COLUMNS = [
     "full_name", "phone", "whatsapp_number", "email", "pan", "address", "city", "state", "pincode",
-    "campaign_name", "amount", "payment_mode", "donation_date", "receipt_number",
+    "campaign_name", "amount", "payment_mode", "donation_date", "receipt_number", "is_80g_requested",
     "cheque_number", "cheque_bank_name", "bank_transaction_id", "remarks",
 ]
 LEGACY_IMPORT_DEMO_ROWS = [
@@ -1440,22 +1440,29 @@ LEGACY_IMPORT_DEMO_ROWS = [
         "full_name": "Gopal Krishna Das", "phone": "9811122233", "whatsapp_number": "", "email": "gopal@example.com",
         "pan": "ABCDE1234F", "address": "45 Preet Vihar", "city": "Delhi", "state": "Delhi", "pincode": "110092",
         "campaign_name": "Temple Construction", "amount": "11000", "payment_mode": "cash",
-        "donation_date": "2023-06-10", "receipt_number": "OLD/2023/00456",
+        "donation_date": "2023-06-10", "receipt_number": "OLD/2023/00456", "is_80g_requested": "",
         "cheque_number": "", "cheque_bank_name": "", "bank_transaction_id": "", "remarks": "",
     },
     {
         "full_name": "Radha Rani Devi", "phone": "9822233344", "whatsapp_number": "", "email": "",
         "pan": "", "address": "", "city": "", "state": "", "pincode": "",
         "campaign_name": "General Donations", "amount": "2500", "payment_mode": "cheque",
-        "donation_date": "2024-01-22", "receipt_number": "OLD/2024/00112",
+        "donation_date": "2024-01-22", "receipt_number": "OLD/2024/00112", "is_80g_requested": "",
         "cheque_number": "998877", "cheque_bank_name": "SBI", "bank_transaction_id": "", "remarks": "",
     },
     {
         "full_name": "Nitai Chandra", "phone": "", "whatsapp_number": "9933344455", "email": "nitai@example.com",
         "pan": "FGHIJ5678K", "address": "", "city": "", "state": "", "pincode": "",
         "campaign_name": "Annadan", "amount": "7500", "payment_mode": "bank_transfer",
-        "donation_date": "2024-11-03", "receipt_number": "",
+        "donation_date": "2024-11-03", "receipt_number": "", "is_80g_requested": "",
         "cheque_number": "", "cheque_bank_name": "", "bank_transaction_id": "UTR2024110312345", "remarks": "",
+    },
+    {
+        "full_name": "Meera Krishnan", "phone": "9877712345", "whatsapp_number": "", "email": "",
+        "pan": "", "address": "", "city": "", "state": "", "pincode": "",
+        "campaign_name": "Live To Give", "amount": "1100", "payment_mode": "online",
+        "donation_date": "2025-03-14", "receipt_number": "", "is_80g_requested": "no",
+        "cheque_number": "", "cheque_bank_name": "", "bank_transaction_id": "pay_ABC123", "remarks": "Food for Life",
     },
 ]
 
@@ -1538,6 +1545,7 @@ def import_legacy_donations():
     org_cfg = _org_cfg()
     results = []
     created = 0
+    no_receipt_pdf_skipped = 0
 
     for line_num, raw_row in enumerate(reader, start=2):  # header is line 1
         row = {(k or "").strip(): (v or "").strip() for k, v in raw_row.items() if k}
@@ -1568,16 +1576,43 @@ def import_legacy_donations():
             payment_mode = "cash"  # unrecognised is treated as cash, same as the CLI importer, rather than skipped
 
         donation_date = None
-        date_raw = row.get("donation_date", "")
+        date_raw = (row.get("donation_date") or "").strip()
         try:
             donation_date = datetime.datetime.strptime(date_raw, "%Y-%m-%d")
         except ValueError:
-            row_errors.append(f"invalid donation_date '{date_raw}' (expected YYYY-MM-DD)")
+            # Same Excel-reformatting issue as the donor importer -- a
+            # reviewed-and-resaved CSV can turn 2024-01-22 into 22/01/2024
+            # or 22/01/24. Accept day-first D/M/Y as a fallback.
+            m = re.match(r"^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$", date_raw)
+            parsed = None
+            if m:
+                d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                if y < 100:
+                    y += 2000 if y < 30 else 1900
+                try:
+                    parsed = datetime.datetime(y, mo, d)
+                except ValueError:
+                    parsed = None
+            if parsed:
+                donation_date = parsed
+            else:
+                row_errors.append(f"invalid donation_date '{date_raw}' (expected YYYY-MM-DD)")
 
         pan = row.get("pan", "").upper()
         if pan and not is_valid_pan(pan):
             row_errors.append(f"invalid PAN '{pan}'")
         row["pan"] = pan
+
+        is_80g_raw = (row.get("is_80g_requested") or "").strip().lower()
+        if is_80g_raw in ("yes", "y", "80g", "true", "1"):
+            is_80g_requested = True
+        elif is_80g_raw in ("no", "n", "non80g", "non-80g", "false", "0"):
+            is_80g_requested = False
+        elif is_80g_raw:
+            row_errors.append(f"is_80g_requested must be yes/no/blank (got '{is_80g_raw}')")
+            is_80g_requested = None
+        else:
+            is_80g_requested = None  # blank -- falls back to the campaign's own default
 
         existing_receipt = (row.get("receipt_number") or "").strip() or None
 
@@ -1595,6 +1630,7 @@ def import_legacy_donations():
                 payment_mode=payment_mode,
                 status="success",
                 donation_date=donation_date,
+                is_80g_requested=is_80g_requested,
                 cheque_number=(row.get("cheque_number") or "")[:50] or None,
                 cheque_bank_name=(row.get("cheque_bank_name") or "")[:150] or None,
                 bank_transaction_id=(row.get("bank_transaction_id") or "")[:100] or None,
@@ -1604,16 +1640,30 @@ def import_legacy_donations():
             db.session.add(donation)
             db.session.flush()
 
+            # financial_year is always computed from the actual donation
+            # date regardless of receipt number -- it's what Form 10BD and
+            # every annual report group by.
+            donation.financial_year = get_financial_year(donation_date)
+
             if existing_receipt:
                 donation.receipt_number = existing_receipt[:50]
-                donation.financial_year = get_financial_year(donation_date)
             else:
-                receipt_number, fy = ReceiptCounter.next_receipt_number(campaign.is_80g, donation_date)
-                donation.receipt_number = receipt_number
-                donation.financial_year = fy
+                # Deliberately NOT auto-generating one from this site's own
+                # sequence (032511/ISK500000...) here -- unlike a brand new
+                # donation, a legacy row with no receipt_number in the CSV
+                # usually means no receipt was ever actually issued for it
+                # (or the number just wasn't captured in the export), and
+                # minting a fresh number now would misrepresent it as if
+                # this site had issued an official receipt at the time.
+                # The donation still counts correctly everywhere (totals,
+                # Analytics, Form 10BD by financial_year) -- it just has no
+                # receipt number on file, same as it had none before.
+                donation.receipt_number = None
 
-            if generate_pdfs:
+            if generate_pdfs and donation.receipt_number:
                 donation.receipt_pdf = generate_receipt_pdf(donation, donor, campaign, org_cfg)
+            elif generate_pdfs:
+                no_receipt_pdf_skipped += 1
 
             db.session.commit()
 
@@ -1629,7 +1679,14 @@ def import_legacy_donations():
             })
 
     skipped = len(results) - created
-    flash(f"Legacy import finished: {created} donation(s) imported, {skipped} skipped.")
+    flash_msg = f"Legacy import finished: {created} donation(s) imported, {skipped} skipped."
+    if no_receipt_pdf_skipped:
+        flash_msg += (
+            f" {no_receipt_pdf_skipped} row(s) had no receipt_number, so no PDF was generated for "
+            "them even though 'Generate PDF receipts' was ticked -- add a receipt_pdf later from the "
+            "donation's own page if one turns up, or leave it as an on-file donation with no receipt."
+        )
+    flash(flash_msg)
     return render_template("admin/import_legacy_donations.html", results=results, created=created, skipped=skipped)
 
 

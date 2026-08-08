@@ -84,8 +84,10 @@
       <td>{{ d.payment_mode.replace('_',' ').title() }}{% if d.razorpay_method %} ({{ d.razorpay_method.upper() }}){% endif %}</td>
       <td class="small text-muted">{{ d.reference_display or '-' }}</td>
       <td>
-        {% if d.status == 'success' %}
+        {% if d.status == 'success' and d.receipt_number %}
           <a href="{{ url_for('public.download_receipt', donation_id=d.id) }}">{{ d.receipt_number }}</a>
+        {% elif d.status == 'success' %}
+          <span class="text-muted small">no receipt</span>
         {% else %}-{% endif %}
       </td>
       <td>
