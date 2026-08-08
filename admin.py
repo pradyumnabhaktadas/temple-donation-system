@@ -1,6 +1,7 @@
 import csv
 import io
 import os
+import re
 import datetime
 from functools import wraps
 
@@ -1690,18 +1691,35 @@ def import_donors_demo_csv():
 
 
 def _parse_import_date(raw, label, row_errors):
-    """YYYY-MM-DD or blank. Blank means 'leave whatever's already on
-    file untouched' (same convention as every other column here); a
-    non-blank value that doesn't parse fails the whole row rather than
-    being silently dropped."""
+    """YYYY-MM-DD is the canonical format (what the demo template always
+    uses), but a spreadsheet that's been opened and re-saved in Excel/
+    Google Sheets for a quick review commonly gets its date cells
+    silently reformatted to a locale style first -- e.g. 1999-09-12
+    becomes 12/09/99. So this also accepts day-first D/M/Y with a 2- or
+    4-digit year before giving up. Blank means 'leave whatever's already
+    on file untouched'; a value that still doesn't parse fails the whole
+    row rather than being silently dropped."""
     raw = (raw or "").strip()
     if not raw:
         return None
+
     try:
         return datetime.datetime.strptime(raw, "%Y-%m-%d").date()
     except ValueError:
-        row_errors.append(f"invalid {label} '{raw}' (expected YYYY-MM-DD)")
-        return None
+        pass
+
+    m = re.match(r"^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$", raw)
+    if m:
+        day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if year < 100:
+            year += 2000 if year < 30 else 1900
+        try:
+            return datetime.date(year, month, day)
+        except ValueError:
+            pass
+
+    row_errors.append(f"invalid {label} '{raw}' (expected YYYY-MM-DD)")
+    return None
 
 
 def _resolve_preacher_import(preachers_by_name, raw_name, row_errors):

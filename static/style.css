@@ -180,6 +180,9 @@ a:hover {
   background: linear-gradient(90deg, var(--maroon-dark) 0%, var(--maroon) 100%);
   padding: 0.6rem 1.25rem;
   box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+  position: sticky;
+  top: 0;
+  z-index: 30;
 }
 .admin-navbar .navbar-brand {
   font-family: 'Playfair Display', Georgia, serif;
