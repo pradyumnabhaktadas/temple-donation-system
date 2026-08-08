@@ -176,7 +176,7 @@ def bace_rent_form():
     underlying donation pipeline as the main form (create-order/webhook/
     polling/receipt), just fixed to the "BACE Contribution" campaign with
     an added "which property" field instead of a general campaign picker.
-    The property list is managed at Admin -> BACE Properties."""
+    The property list is managed at Admin -> BACE."""
     campaign = Campaign.query.filter_by(name="BACE Contribution").first()
     if campaign is None or not campaign.is_active:
         flash("The BACE Contribution campaign isn't set up yet -- please contact the office.")

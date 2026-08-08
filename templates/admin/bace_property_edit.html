@@ -1,8 +1,8 @@
 {% extends "admin/base_admin.html" %}
-{% block title %}Edit BACE Property{% endblock %}
+{% block title %}Edit BACE{% endblock %}
 {% block content %}
-<a href="{{ url_for('admin.bace_properties') }}">&larr; Back to BACE Properties</a>
-<h3 class="mt-2 mb-3">✏️ Edit BACE Property</h3>
+<a href="{{ url_for('admin.bace_properties') }}">&larr; Back to BACE</a>
+<h3 class="mt-2 mb-3">✏️ Edit BACE</h3>
 <form method="post" class="card card-body shadow-sm p-4" style="max-width:500px">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="mb-3">

@@ -83,7 +83,7 @@ class BaceProperty(db.Model):
     "Goverdhan BACE". Donations against the "BACE Contribution" campaign
     record which specific property the payment is for; this list is what
     populates that dropdown on the dedicated BACE Contribution form, and is
-    editable from Admin -> BACE Properties so staff can add/rename/retire
+    editable from Admin -> BACE so staff can add/rename/retire
     locations without a code change."""
 
     __tablename__ = "bace_properties"

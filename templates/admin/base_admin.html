@@ -19,7 +19,7 @@
         <a class="nav-link {% if request.endpoint == 'admin.import_legacy_donations' %}active{% endif %}" href="{{ url_for('admin.import_legacy_donations') }}">Import Historical Data</a>
         {% endif %}
         <a class="nav-link {% if request.endpoint == 'admin.campaigns' %}active{% endif %}" href="{{ url_for('admin.campaigns') }}">Campaigns</a>
-        <a class="nav-link {% if request.endpoint == 'admin.bace_properties' %}active{% endif %}" href="{{ url_for('admin.bace_properties') }}">BACE Properties</a>
+        <a class="nav-link {% if request.endpoint == 'admin.bace_properties' %}active{% endif %}" href="{{ url_for('admin.bace_properties') }}">BACE</a>
         <a class="nav-link {% if request.endpoint == 'admin.festivals' %}active{% endif %}" href="{{ url_for('admin.festivals') }}">Festivals</a>
         <a class="nav-link {% if request.endpoint == 'admin.seva_types' %}active{% endif %}" href="{{ url_for('admin.seva_types') }}">Seva Types</a>
         <a class="nav-link {% if request.endpoint == 'admin.live_to_give_purposes' %}active{% endif %}" href="{{ url_for('admin.live_to_give_purposes') }}">Live To Give Purposes</a>

@@ -16,24 +16,24 @@
   <header class="site-topbar">
     <div class="site-nav container d-flex justify-content-between align-items-center">
       <a href="{{ url_for('public.donate_form') }}" class="site-brand text-decoration-none d-inline-flex align-items-center gap-2">
-        <span class="brand-marks">
-          <img src="{{ url_for('static', filename='branding/iskcon_dwarka_logo.png') }}" alt="ISKCON Dwarka Delhi" class="brand-logo-main">
-          <img src="{{ url_for('static', filename='branding/iyf_logo.png') }}" alt="ISKCON Youth Forum Dwarka Delhi" class="brand-logo-iyf">
-        </span>
+        <img src="{{ url_for('static', filename='branding/iskcon_dwarka_logo.png') }}" alt="ISKCON Dwarka Delhi" class="brand-logo-main">
         <span><span class="brand-kicker">ISKCON DWARKA</span><span class="brand-font d-block">{{ org_name or 'Temple Donations' }}</span></span>
       </a>
-      <button class="site-nav-toggle d-lg-none" type="button" data-bs-toggle="collapse" data-bs-target="#siteNavLinks" aria-controls="siteNavLinks" aria-expanded="false" aria-label="Toggle navigation">
-        <span></span><span></span><span></span>
-      </button>
-      <nav class="site-nav-links collapse d-lg-flex align-items-center gap-3" id="siteNavLinks">
-        <a href="{{ url_for('public.donate_form') }}" class="text-decoration-none {% if request.endpoint == 'public.donate_form' %}fw-bold{% endif %}">Donate</a>
-        <a href="{{ url_for('public.festival_seva_form') }}" class="text-decoration-none {% if request.endpoint == 'public.festival_seva_form' %}fw-bold{% endif %}">Festival Seva</a>
-        <a href="{{ url_for('public.bace_rent_form') }}" class="text-decoration-none {% if request.endpoint == 'public.bace_rent_form' %}fw-bold{% endif %}">BACE Contribution</a>
-        <a href="{{ url_for('donor_portal.account') if session.get('donor_id') else url_for('donor_portal.login') }}"
-           class="site-account-link text-decoration-none">
-          <span aria-hidden="true">◌</span> {{ 'My donations' if session.get('donor_id') else 'Donor login' }}
-        </a>
-      </nav>
+      <div class="site-nav-right d-flex align-items-center gap-2 gap-lg-3">
+        <button class="site-nav-toggle d-lg-none" type="button" data-bs-toggle="collapse" data-bs-target="#siteNavLinks" aria-controls="siteNavLinks" aria-expanded="false" aria-label="Toggle navigation">
+          <span></span><span></span><span></span>
+        </button>
+        <nav class="site-nav-links collapse d-lg-flex align-items-center gap-3" id="siteNavLinks">
+          <a href="{{ url_for('public.donate_form') }}" class="text-decoration-none {% if request.endpoint == 'public.donate_form' %}fw-bold{% endif %}">Donate</a>
+          <a href="{{ url_for('public.festival_seva_form') }}" class="text-decoration-none {% if request.endpoint == 'public.festival_seva_form' %}fw-bold{% endif %}">Festival Seva</a>
+          <a href="{{ url_for('public.bace_rent_form') }}" class="text-decoration-none {% if request.endpoint == 'public.bace_rent_form' %}fw-bold{% endif %}">BACE Contribution</a>
+          <a href="{{ url_for('donor_portal.account') if session.get('donor_id') else url_for('donor_portal.login') }}"
+             class="site-account-link text-decoration-none">
+            <span aria-hidden="true">◌</span> {{ 'My donations' if session.get('donor_id') else 'Donor login' }}
+          </a>
+        </nav>
+        <img src="{{ url_for('static', filename='branding/iyf_logo.png') }}" alt="ISKCON Youth Forum Dwarka Delhi" class="brand-logo-iyf">
+      </div>
     </div>
   </header>
   <div class="site-main container py-4">

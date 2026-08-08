@@ -27,7 +27,7 @@ CAMPAIGNS = [
 ]
 
 # Starting list for the BACE Contribution form's property dropdown -- editable
-# afterwards from Admin -> BACE Properties without touching code.
+# afterwards from Admin -> BACE without touching code.
 BACE_PROPERTIES = [
     "Gaur Hari Dham BACE",
     "Barsana Dham BACE",

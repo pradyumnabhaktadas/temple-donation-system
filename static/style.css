@@ -247,8 +247,8 @@ body {
   z-index: 3;
 }
 .site-nav { min-height: 76px; }
-.site-brand { color: var(--maroon-dark); max-width: min(68vw, 430px); }
-.brand-marks { display:flex; align-items:center; gap:.4rem; flex:0 0 auto; }
+.site-brand { color: var(--maroon-dark); max-width: min(58vw, 430px); }
+.site-nav-right { flex:0 1 auto; }
 .brand-logo-main { height:42px; width:auto; flex:0 0 auto; }
 .brand-logo-iyf {
   height:34px; width:34px; border-radius:50%; flex:0 0 auto;

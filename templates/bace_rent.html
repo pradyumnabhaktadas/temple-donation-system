@@ -16,7 +16,7 @@
       <div class="alert alert-warning py-2 text-center">Demo mode: live Razorpay keys are not configured, so payment will be simulated. See README to go live.</div>
     {% endif %}
     {% if not properties %}
-      <div class="alert alert-warning py-2 text-center">No BACE properties are configured yet. An admin can add them under Admin -&gt; BACE Properties.</div>
+      <div class="alert alert-warning py-2 text-center">No BACE options are configured yet. An admin can add them under Admin -&gt; BACE.</div>
     {% endif %}
 
     <form id="bace-rent-form" class="donation-card">
@@ -28,7 +28,7 @@
       <input type="hidden" name="campaign_id" value="{{ campaign.id }}">
 
       <div class="form-section">
-        <label class="form-label" for="bace_property_id">BACE Property</label>
+        <label class="form-label" for="bace_property_id">BACE</label>
         <select class="form-select" name="bace_property_id" id="bace_property_id" required {% if not properties %}disabled{% endif %}>
           <option value="" disabled selected>-- Select a property --</option>
           {% for p in properties %}
