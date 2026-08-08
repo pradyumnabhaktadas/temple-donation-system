@@ -1,0 +1,66 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Import Donor Data{% endblock %}
+{% block content %}
+<h3 class="mb-3">📇 Import Donor Data</h3>
+
+<div class="card card-body shadow-sm p-4 mb-4" style="max-width:760px">
+  <p class="text-muted small mb-3">
+    Upload a CSV of donor personal details -- contact info, PAN/address, Donor Type, Connected Preacher,
+    Donation Frequency, gifts, and family dates (birthdays, marriage anniversary). <strong>No donation
+    records are created</strong> -- this only creates/updates Donor profiles, the same fields you'd fill in
+    one-by-one under Admin -&gt; Donors -&gt; Edit.
+  </p>
+  <p class="text-muted small mb-3">
+    Each row is matched to an existing donor by PAN, then phone, then email (same priority used everywhere
+    else in the app). A match updates that donor -- a value left blank in the row leaves whatever's already
+    on file untouched, so you can re-upload the same file, or a file with only a few columns filled in,
+    without wiping out existing data. No match creates a new donor.
+  </p>
+  <p class="mb-3">
+    <a href="{{ url_for('admin.import_donors_demo_csv') }}" class="btn btn-sm btn-outline-secondary">⬇ Download demo/template CSV</a>
+  </p>
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3">
+      <label class="form-label">CSV File</label>
+      <input type="file" class="form-control" name="csv_file" accept=".csv" required>
+      <div class="form-text">
+        Required column: <code>full_name</code>. Everything else is optional -- see the demo file for every
+        column, including <code>donor_type</code> (<code>iyf</code> / <code>live_to_give</code>),
+        <code>connected_preacher_name</code> (must match an existing Preacher name from Admin -&gt; Preachers,
+        or use <code>none</code> to clear an assignment), <code>donation_frequency</code>
+        (<code>one_time</code> / <code>monthly</code> / <code>quarterly</code> / <code>yearly</code> /
+        <code>occasional</code>), and dates as <code>YYYY-MM-DD</code>.
+      </div>
+    </div>
+    <button type="submit" class="btn btn-gold">Upload &amp; Import</button>
+  </form>
+</div>
+
+{% if results is not none %}
+<div class="card card-body shadow-sm p-4" style="max-width:900px">
+  <h6 class="mb-3">Results: {{ created }} created, {{ updated }} updated, {{ skipped }} skipped</h6>
+  <div class="table-responsive">
+  <table class="table table-sm bg-white">
+    <thead><tr><th>Row</th><th>Name</th><th>Outcome</th></tr></thead>
+    <tbody>
+      {% for r in results %}
+      <tr>
+        <td>{{ r.line }}</td>
+        <td>{{ r.name }}</td>
+        <td>
+          {% if r.ok %}
+            <span class="badge {{ 'bg-success' if r.action == 'created' else 'bg-info text-dark' }}">{{ r.action | capitalize }}</span>
+            <a href="{{ url_for('admin.donor_detail', donor_id=r.donor_id) }}">View donor →</a>
+          {% else %}
+            <span class="badge bg-danger">Skipped</span> {{ r.errors | join('; ') }}
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

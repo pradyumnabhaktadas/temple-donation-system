@@ -18,6 +18,7 @@
         {% if current_user.is_authenticated and current_user.role == 'admin' %}
         <a class="nav-link {% if request.endpoint == 'admin.bulk_import_donations' %}active{% endif %}" href="{{ url_for('admin.bulk_import_donations') }}">Bulk Import</a>
         <a class="nav-link {% if request.endpoint == 'admin.import_legacy_donations' %}active{% endif %}" href="{{ url_for('admin.import_legacy_donations') }}">Import Historical Data</a>
+        <a class="nav-link {% if request.endpoint == 'admin.import_donors' %}active{% endif %}" href="{{ url_for('admin.import_donors') }}">Import Donor Data</a>
         {% endif %}
         <a class="nav-link {% if request.endpoint == 'admin.campaigns' %}active{% endif %}" href="{{ url_for('admin.campaigns') }}">Campaigns</a>
         <a class="nav-link {% if request.endpoint == 'admin.bace_properties' %}active{% endif %}" href="{{ url_for('admin.bace_properties') }}">BACE</a>

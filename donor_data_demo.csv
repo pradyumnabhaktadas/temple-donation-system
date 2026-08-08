@@ -1,0 +1,4 @@
+full_name,phone,whatsapp_number,email,pan,address,city,state,pincode,donor_type,connected_preacher_name,donation_frequency,gifts,dob,father_dob,mother_dob,wife_dob,marriage_anniversary,additional_info
+Ramesh Kumar,9876543210,,ramesh@example.com,ABCDE1234F,12 MG Road,Delhi,Delhi,110001,iyf,,monthly,,1985-06-12,,,,,
+Sita Devi,9123456780,,,,45 Ring Road,Delhi,Delhi,110024,live_to_give,,quarterly,Bhagavad Gita set,1978-11-02,,,,2001-02-14,Prefers WhatsApp contact
+Amit Sharma,,9988776655,amit@example.com,FGHIJ5678K,,,,,iyf,,one_time,,,,,,,

@@ -1599,6 +1599,245 @@ def import_legacy_donations():
     return render_template("admin/import_legacy_donations.html", results=results, created=created, skipped=skipped)
 
 
+# Donor-only master-data import -- no donation records are created here.
+# Distinct from BULK_IMPORT_*/LEGACY_IMPORT_* above (which both import a
+# donation transaction per row): this is for uploading/updating the
+# contact + relationship + family fields on Donor records directly, e.g.
+# a spreadsheet of existing known donors that predates this website.
+DONOR_IMPORT_REQUIRED_COLUMNS = ["full_name"]
+DONOR_IMPORT_COLUMNS = [
+    "full_name", "phone", "whatsapp_number", "email", "pan",
+    "address", "city", "state", "pincode",
+    "donor_type", "connected_preacher_name", "donation_frequency", "gifts",
+    "dob", "father_dob", "mother_dob", "wife_dob", "marriage_anniversary",
+    "additional_info",
+]
+DONOR_IMPORT_DEMO_ROWS = [
+    {
+        "full_name": "Ramesh Kumar", "phone": "9876543210", "whatsapp_number": "", "email": "ramesh@example.com",
+        "pan": "ABCDE1234F", "address": "12 MG Road", "city": "Delhi", "state": "Delhi", "pincode": "110001",
+        "donor_type": "iyf", "connected_preacher_name": "", "donation_frequency": "monthly", "gifts": "",
+        "dob": "1985-06-12", "father_dob": "", "mother_dob": "", "wife_dob": "", "marriage_anniversary": "",
+        "additional_info": "",
+    },
+    {
+        "full_name": "Sita Devi", "phone": "9123456780", "whatsapp_number": "", "email": "",
+        "pan": "", "address": "45 Ring Road", "city": "Delhi", "state": "Delhi", "pincode": "110024",
+        "donor_type": "live_to_give", "connected_preacher_name": "", "donation_frequency": "quarterly",
+        "gifts": "Bhagavad Gita set", "dob": "1978-11-02", "father_dob": "", "mother_dob": "",
+        "wife_dob": "", "marriage_anniversary": "2001-02-14", "additional_info": "Prefers WhatsApp contact",
+    },
+    {
+        "full_name": "Amit Sharma", "phone": "", "whatsapp_number": "9988776655", "email": "amit@example.com",
+        "pan": "FGHIJ5678K", "address": "", "city": "", "state": "", "pincode": "",
+        "donor_type": "iyf", "connected_preacher_name": "", "donation_frequency": "one_time", "gifts": "",
+        "dob": "", "father_dob": "", "mother_dob": "", "wife_dob": "", "marriage_anniversary": "",
+        "additional_info": "",
+    },
+]
+
+
+@bp.route("/donors/import/demo.csv")
+@login_required
+@admin_role_required
+def import_donors_demo_csv():
+    """A ready-to-edit template CSV -- every column the donor importer
+    understands, header row plus a few example rows. Preacher names are
+    left blank in the demo so it imports cleanly out of the box even
+    before any Preachers have been added under Admin -> Preachers."""
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=DONOR_IMPORT_COLUMNS)
+    writer.writeheader()
+    writer.writerows(DONOR_IMPORT_DEMO_ROWS)
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=donor_data_demo.csv"},
+    )
+
+
+def _parse_import_date(raw, label, row_errors):
+    """YYYY-MM-DD or blank. Blank means 'leave whatever's already on
+    file untouched' (same convention as every other column here); a
+    non-blank value that doesn't parse fails the whole row rather than
+    being silently dropped."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError:
+        row_errors.append(f"invalid {label} '{raw}' (expected YYYY-MM-DD)")
+        return None
+
+
+def _resolve_preacher_import(preachers_by_name, raw_name, row_errors):
+    """Returns (should_update, preacher_id_or_None) for the
+    connected_preacher_name import column. Blank means 'leave the donor's
+    existing preacher assignment untouched'; 'none' / 'not assigned' /
+    'unassigned' explicitly clears it; anything else must case-insensitively
+    match an existing Preacher's name (manage those under Admin -> Preachers
+    first) or the row fails."""
+    name = (raw_name or "").strip()
+    if not name:
+        return False, None
+    if name.lower() in ("none", "not assigned", "unassigned"):
+        return True, None
+    match = preachers_by_name.get(name.lower())
+    if not match:
+        row_errors.append(f"preacher '{name}' not found")
+        return False, None
+    return True, match.id
+
+
+@bp.route("/donors/import", methods=["GET", "POST"])
+@login_required
+@admin_role_required
+def import_donors():
+    """Bulk-imports/updates donor master data -- contact details plus the
+    Donor Type / Connected Preacher / Donation Frequency / family-date
+    fields normally filled in one-by-one under Admin -> Donors -> Edit --
+    from a CSV. No donation records are created here.
+
+    Existing donors are matched using the same PAN -> phone -> email
+    priority as every other donor-touching form (find_or_create_donor from
+    public.py), and a match updates that donor's fields following the same
+    "new value wins, blank leaves the existing value alone" convention used
+    everywhere donor data can be re-submitted -- so re-uploading the same
+    file, or a file that only has a few columns filled in for some rows,
+    never wipes out data that's already on file.
+    """
+    if request.method == "GET":
+        return render_template("admin/import_donors.html", results=None)
+
+    file = request.files.get("csv_file")
+    if not file or not file.filename:
+        flash("Please choose a CSV file to upload.")
+        return redirect(url_for("admin.import_donors"))
+
+    try:
+        stream = io.TextIOWrapper(file.stream, encoding="utf-8-sig")
+        reader = csv.DictReader(stream)
+        fieldnames = {(f or "").strip() for f in (reader.fieldnames or [])}
+    except Exception:
+        flash("Couldn't read that file -- please upload a CSV (comma-separated) file.")
+        return redirect(url_for("admin.import_donors"))
+
+    missing = [c for c in DONOR_IMPORT_REQUIRED_COLUMNS if c not in fieldnames]
+    if missing:
+        flash(
+            "That CSV is missing required column(s): " + ", ".join(missing)
+            + ". Download the demo file below for the full column list."
+        )
+        return redirect(url_for("admin.import_donors"))
+
+    preachers_by_name = {p.name.strip().lower(): p for p in Preacher.query.all()}
+
+    results = []
+    created = 0
+    updated = 0
+
+    for line_num, raw_row in enumerate(reader, start=2):  # header is line 1
+        row = {(k or "").strip(): (v or "").strip() for k, v in raw_row.items() if k}
+        row_errors = []
+
+        full_name = row.get("full_name", "")
+        if not full_name:
+            row_errors.append("full_name is required")
+
+        pan = row.get("pan", "").upper()
+        if pan and not is_valid_pan(pan):
+            row_errors.append(f"invalid PAN '{pan}'")
+        row["pan"] = pan
+
+        donor_type_raw = row.get("donor_type", "").lower()
+        if donor_type_raw and donor_type_raw not in DONOR_TYPES:
+            row_errors.append(f"donor_type must be one of {', '.join(DONOR_TYPES)} (got '{donor_type_raw}')")
+
+        frequency_raw = row.get("donation_frequency", "").lower()
+        if frequency_raw and frequency_raw not in DONATION_FREQUENCIES:
+            row_errors.append(
+                f"donation_frequency must be one of {', '.join(DONATION_FREQUENCIES)} (got '{frequency_raw}')"
+            )
+
+        update_preacher, preacher_id = _resolve_preacher_import(
+            preachers_by_name, row.get("connected_preacher_name"), row_errors
+        )
+
+        dob = _parse_import_date(row.get("dob"), "dob", row_errors)
+        father_dob = _parse_import_date(row.get("father_dob"), "father_dob", row_errors)
+        mother_dob = _parse_import_date(row.get("mother_dob"), "mother_dob", row_errors)
+        wife_dob = _parse_import_date(row.get("wife_dob"), "wife_dob", row_errors)
+        marriage_anniversary = _parse_import_date(row.get("marriage_anniversary"), "marriage_anniversary", row_errors)
+
+        if row_errors:
+            results.append({"line": line_num, "name": full_name or "(blank)", "ok": False, "errors": row_errors})
+            continue
+
+        try:
+            # Mirrors find_or_create_donor's own PAN -> phone -> email
+            # matching so we know up front whether this row will create a
+            # new donor or update an existing one (for the results table).
+            phone_v = row.get("phone", "").strip()
+            email_v = row.get("email", "").strip().lower()
+            existing = None
+            if pan:
+                existing = Donor.query.filter_by(pan=pan).first()
+            if existing is None and phone_v:
+                existing = Donor.query.filter_by(phone=phone_v).first()
+            if existing is None and email_v:
+                existing = Donor.query.filter_by(email=email_v).first()
+            was_new = existing is None
+
+            donor = find_or_create_donor(row)
+
+            if donor_type_raw:
+                donor.donor_type = donor_type_raw
+            if update_preacher:
+                donor.connected_preacher_id = preacher_id
+            if frequency_raw:
+                donor.donation_frequency = frequency_raw
+            gifts_raw = row.get("gifts", "")
+            if gifts_raw:
+                donor.gifts = gifts_raw[:500]
+            if dob:
+                donor.dob = dob
+            if father_dob:
+                donor.father_dob = father_dob
+            if mother_dob:
+                donor.mother_dob = mother_dob
+            if wife_dob:
+                donor.wife_dob = wife_dob
+            if marriage_anniversary:
+                donor.marriage_anniversary = marriage_anniversary
+            additional_info_raw = row.get("additional_info", "")
+            if additional_info_raw:
+                donor.additional_info = additional_info_raw
+
+            db.session.commit()
+            results.append({
+                "line": line_num, "name": full_name, "ok": True,
+                "action": "created" if was_new else "updated", "donor_id": donor.id,
+            })
+            if was_new:
+                created += 1
+            else:
+                updated += 1
+        except Exception as exc:
+            db.session.rollback()
+            current_app.logger.exception("Donor import failed on row %s", line_num)
+            results.append({
+                "line": line_num, "name": full_name or "(blank)", "ok": False,
+                "errors": [f"unexpected error -- row skipped ({exc})"],
+            })
+
+    skipped = len(results) - created - updated
+    flash(f"Donor import finished: {created} created, {updated} updated, {skipped} skipped.")
+    return render_template(
+        "admin/import_donors.html", results=results, created=created, updated=updated, skipped=skipped
+    )
+
+
 @bp.route("/campaigns", methods=["GET", "POST"])
 @login_required
 def campaigns():
