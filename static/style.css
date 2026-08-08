@@ -444,6 +444,7 @@ body {
 .donation-card h2 { font-size:1.8rem; margin:0; letter-spacing:-.04em; }.secure-pill { color:#555e47; background:#edf1e5; border-radius:99px; padding:.42rem .68rem; font-size:.7rem; font-weight:700; white-space:nowrap; }
 .form-section { padding:1.5rem 0; border-bottom:1px solid #eee4d6; }.form-section:last-of-type { border:0; }
 .form-label { font-size:.78rem; letter-spacing:.01em; margin-bottom:.48rem; }.field-note { color:#857566; font-size:.73rem; }
+.amount-label { font-size:1.08rem; font-weight:700; letter-spacing:-.01em; color:var(--maroon-dark); }
 .form-select,.form-control { border-color:#dfd5c6; min-height:46px; background:#fffefa; font-size:.93rem; }.form-control::placeholder{color:#a99b8d}.form-select:hover,.form-control:hover{border-color:#bdab95}
 .amount-picker { display:grid; grid-template-columns:repeat(4,1fr); gap:.55rem; margin: .8rem 0; }.amount-option { border:1px solid #e0d7c9; color:var(--maroon-dark); background:#fff; border-radius:.58rem; padding:.58rem .35rem; font-weight:700; font-size:.85rem; transition:.18s ease; }.amount-option:hover,.amount-option.active { background:var(--maroon); border-color:var(--maroon); color:#fff; box-shadow:0 4px 9px rgba(15,36,68,.18); }
 .currency-input { position:relative; }.currency-input>span { position:absolute; top:50%; transform:translateY(-50%); left: .9rem; z-index:2; color:var(--maroon-dark); font-weight:700; }.currency-input input { padding-left:2rem; }

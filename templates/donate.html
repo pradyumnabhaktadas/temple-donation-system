@@ -55,6 +55,24 @@
           <input type="email" class="form-control" name="email" required>
         </div>
       </div>
+
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">WhatsApp Number <span class="text-muted">(if different from phone)</span></label>
+          <input type="tel" class="form-control" name="whatsapp_number">
+        </div>
+      </div>
+      </div>
+
+      <div class="form-section">
+        <div class="d-flex justify-content-between align-items-center"><label class="form-label amount-label mb-0" for="amount">Contribution Amount</label><span class="field-note">Minimum Rs. 101</span></div>
+        <div class="amount-picker" id="amount-picker" role="group" aria-label="Preset donation amounts">
+          <button type="button" class="amount-option" data-amount="501">₹501</button>
+          <button type="button" class="amount-option" data-amount="1001">₹1,001</button>
+          <button type="button" class="amount-option" data-amount="2501">₹2,501</button>
+          <button type="button" class="amount-option" data-amount="5001">₹5,001</button>
+        </div>
+        <div class="currency-input"><span>₹</span><input type="number" min="101" step="1" class="form-control" name="amount" id="amount" placeholder="Or enter a custom amount" required></div>
       </div>
 
       <div class="form-section">
@@ -68,42 +86,24 @@
       </div>
 
       <div class="form-section">
-        <label class="form-label mb-2">Receipt Required</label>
+        <label class="form-label mb-2">Do you need an 80G receipt? <span class="text-muted">(to claim tax benefits)</span></label>
         <div class="d-flex gap-4">
           <div class="form-check">
             <input class="form-check-input" type="radio" name="receipt_type" id="receipt_type_80g" value="80g" required>
-            <label class="form-check-label" for="receipt_type_80g">80G <span class="text-muted">(to claim tax benefits)</span></label>
+            <label class="form-check-label" for="receipt_type_80g">Yes</label>
           </div>
           <div class="form-check">
             <input class="form-check-input" type="radio" name="receipt_type" id="receipt_type_non80g" value="non80g">
-            <label class="form-check-label" for="receipt_type_non80g">Non 80G</label>
+            <label class="form-check-label" for="receipt_type_non80g">No</label>
           </div>
         </div>
       </div>
 
-      <div class="form-section">
-        <div class="d-flex justify-content-between align-items-center"><label class="form-label mb-0" for="amount">Contribution amount</label><span class="field-note">Minimum Rs. 101</span></div>
-        <div class="amount-picker" id="amount-picker" role="group" aria-label="Preset donation amounts">
-          <button type="button" class="amount-option" data-amount="501">₹501</button>
-          <button type="button" class="amount-option" data-amount="1001">₹1,001</button>
-          <button type="button" class="amount-option" data-amount="2501">₹2,501</button>
-          <button type="button" class="amount-option" data-amount="5001">₹5,001</button>
-        </div>
-        <div class="currency-input"><span>₹</span><input type="number" min="101" step="1" class="form-control" name="amount" id="amount" placeholder="Or enter a custom amount" required></div>
-      </div>
-
-      <div class="form-section">
-      <div class="section-label"><span>01</span> More details</div>
-      <div class="row">
-        <div class="col-md-6 mb-3">
-          <label class="form-label">WhatsApp Number <span class="text-muted">(if different from phone)</span></label>
-          <input type="tel" class="form-control" name="whatsapp_number">
-        </div>
-        <div class="col-md-6 mb-3">
-          <label class="form-label">PAN <span class="text-muted">(required for 80G receipt)</span></label>
-          <input type="text" class="form-control" name="pan" id="pan" style="text-transform:uppercase" maxlength="10"
-                 pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10 characters, e.g. ABCDE1234F">
-        </div>
+      <div class="form-section" id="eightyg-fields" style="display:none;">
+      <div class="mb-3">
+        <label class="form-label">PAN <span class="text-muted">(required for 80G receipt)</span></label>
+        <input type="text" class="form-control" name="pan" id="pan" style="text-transform:uppercase" maxlength="10"
+               pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10 characters, e.g. ABCDE1234F">
       </div>
 
       <div class="mb-0">
@@ -295,13 +295,17 @@
     amountOptions.forEach((b) => b.classList.toggle('active', b.dataset.amount === amountInput.value));
   });
 
-  // Choosing "80G" makes PAN required (needed to actually claim the tax
-  // benefit); "Non 80G" leaves it optional, same as every other form.
+  // Choosing "Yes" (80G) reveals the PAN/Address fields and makes PAN
+  // required (needed to actually claim the tax benefit); "No" hides that
+  // whole block again -- nothing to fill in if no receipt is needed.
   const panInput = document.getElementById('pan');
+  const eightyGFields = document.getElementById('eightyg-fields');
   const receiptRadios = document.querySelectorAll('input[name="receipt_type"]');
   receiptRadios.forEach((radio) => {
     radio.addEventListener('change', () => {
-      panInput.required = radio.value === '80g' && radio.checked;
+      const is80g = radio.value === '80g' && radio.checked;
+      eightyGFields.style.display = is80g ? '' : 'none';
+      panInput.required = is80g;
     });
   });
 
