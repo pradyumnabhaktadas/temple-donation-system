@@ -1,14 +1,16 @@
 """One-off repair for a stuck migration.
 
-What happened: `flask db upgrade` failed with
-"psycopg2.errors.DuplicateTable: relation 'bace_properties' already exists".
-That means the bace_properties table (and, most likely, festivals /
-seva_types too, and the new columns on donations) already exist in the
-database -- but Alembic's own bookkeeping table (alembic_version) still
-thinks the old revision (b7f4c9d21a08) is current, so it tries to create
-everything again and fails. This can happen if `flask db upgrade` was
-run more than once close together, or against a database that already had
-these tables from an earlier attempt.
+What happened (most recently, 2026-08-07): `flask db upgrade` failed with
+"psycopg2.errors.DuplicateTable: relation 'live_to_give_purposes' already
+exists", even though `flask db current` reported the database was still on
+the *previous* revision (d9a27e6b5c31). That means the table (and probably
+the new donations columns alongside it) already exist in the database --
+but Alembic's own bookkeeping table (alembic_version) doesn't know that, so
+it tries to create everything again and fails. Same class of issue as the
+earlier bace_properties incident this script was originally written for --
+can happen if `flask db upgrade` was run more than once close together, or
+a table got created outside of Alembic (db.create_all(), a half-finished
+prior attempt, etc.) without alembic_version being updated to match.
 
 This script reconciles the two: it checks what actually exists (tables and
 columns), creates only what's missing, and then stamps alembic_version to
@@ -24,7 +26,7 @@ from app import create_app
 from extensions import db
 from sqlalchemy import inspect, text
 
-HEAD_REVISION = "d9a27e6b5c31"
+HEAD_REVISION = "e2b74a1c8f63"
 
 app = create_app()
 
@@ -119,6 +121,39 @@ with app.app_context():
         print("Added donations.seva_type_id + FK")
     else:
         print("donations.seva_type_id already exists -- skipping")
+
+    # --- live_to_give_purposes ---
+    if "live_to_give_purposes" not in tables:
+        db.session.execute(text("""
+            CREATE TABLE live_to_give_purposes (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(150) NOT NULL UNIQUE,
+                is_active BOOLEAN NOT NULL,
+                created_at TIMESTAMP
+            )
+        """))
+        db.session.commit()
+        print("Created live_to_give_purposes")
+    else:
+        print("live_to_give_purposes already exists -- skipping")
+
+    if "live_to_give_purpose_id" not in donation_columns():
+        db.session.execute(text("ALTER TABLE donations ADD COLUMN live_to_give_purpose_id INTEGER"))
+        db.session.execute(text(
+            "ALTER TABLE donations ADD CONSTRAINT fk_donations_live_to_give_purpose_id "
+            "FOREIGN KEY (live_to_give_purpose_id) REFERENCES live_to_give_purposes(id)"
+        ))
+        db.session.commit()
+        print("Added donations.live_to_give_purpose_id + FK")
+    else:
+        print("donations.live_to_give_purpose_id already exists -- skipping")
+
+    if "is_80g_requested" not in donation_columns():
+        db.session.execute(text("ALTER TABLE donations ADD COLUMN is_80g_requested BOOLEAN"))
+        db.session.commit()
+        print("Added donations.is_80g_requested")
+    else:
+        print("donations.is_80g_requested already exists -- skipping")
 
     # Reconcile Alembic's bookkeeping so `flask db upgrade` behaves normally
     # (reports "already up to date") the next time it's run.

@@ -17,7 +17,7 @@
         {% elif donation.festival %}
         <a class="btn btn-link" href="{{ url_for('public.festival_seva_form') }}">Offer another seva</a>
         {% elif donation.live_to_give_purpose %}
-        <a class="btn btn-link" href="{{ url_for('public.live_to_give_form') }}">Give again</a>
+        <a class="btn btn-link" href="{{ url_for('public.donate_form') }}">Give again</a>
         {% else %}
         <a class="btn btn-link" href="{{ url_for('public.donate_form') }}">Make another offering</a>
         {% endif %}

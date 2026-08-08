@@ -144,10 +144,26 @@ def find_or_create_donor(data):
 
 @bp.route("/")
 def donate_form():
-    campaigns = Campaign.query.filter_by(is_active=True).order_by(Campaign.is_80g.desc(), Campaign.name).all()
+    """Main public donation page. This *is* the "Live To Give" (Nitya
+    Seva) form -- there used to be a separate general-purpose multi-campaign
+    picker here plus a dedicated /live-to-give page; the two served the
+    same purpose (donor picks any purpose and any amount) so they were
+    merged into this one route. Festival Seva and BACE Contribution remain
+    separate dedicated forms, each fixed to its own campaign -- see
+    festival_seva_form()/bace_rent_form() below.
+
+    Purpose picker (LiveToGivePurpose, managed at Admin -> Live To Give
+    Purposes) and donor-chosen 80G/Non-80G receipt type per donation are
+    unchanged from the old dedicated page -- see Donation.effective_is_80g.
+    """
+    campaign = Campaign.query.filter_by(name="Live To Give").first()
+    purposes = []
+    if campaign is not None and campaign.is_active:
+        purposes = LiveToGivePurpose.query.filter_by(is_active=True).order_by(LiveToGivePurpose.name).all()
     return render_template(
         "donate.html",
-        campaigns=campaigns,
+        campaign=campaign,
+        purposes=purposes,
         razorpay_enabled=current_app.config["RAZORPAY_ENABLED"],
         razorpay_key_id=current_app.config["RAZORPAY_KEY_ID"],
         org_name=current_app.config["ORG_NAME"],
@@ -206,27 +222,12 @@ def festival_seva_form():
 
 @bp.route("/live-to-give")
 def live_to_give_form():
-    """Dedicated collection form for the "Live To Give" (Nitya Seva)
-    campaign -- same underlying donation pipeline as the main form, fixed
-    to the "Live To Give" campaign, with a donation-purpose picker
-    (LiveToGivePurpose, managed at Admin -> Live To Give Purposes) and a
-    donor-chosen 80G/Non-80G receipt type per donation (unique to this
-    form -- every other campaign's 80G status is fixed, see
-    Donation.effective_is_80g)."""
-    campaign = Campaign.query.filter_by(name="Live To Give").first()
-    if campaign is None or not campaign.is_active:
-        flash("The Live To Give campaign isn't set up yet -- please contact the office.")
-        return redirect(url_for("public.donate_form"))
-
-    purposes = LiveToGivePurpose.query.filter_by(is_active=True).order_by(LiveToGivePurpose.name).all()
-    return render_template(
-        "live_to_give.html",
-        campaign=campaign,
-        purposes=purposes,
-        razorpay_enabled=current_app.config["RAZORPAY_ENABLED"],
-        razorpay_key_id=current_app.config["RAZORPAY_KEY_ID"],
-        org_name=current_app.config["ORG_NAME"],
-    )
+    """Live To Give used to be its own dedicated page (live_to_give.html);
+    it's now just the main Donate page (see donate_form() above) -- kept
+    here as a redirect so any already-shared /live-to-give links (WhatsApp
+    receipt messages already sent, QR codes, bookmarks) keep working
+    instead of 404ing."""
+    return redirect(url_for("public.donate_form"), code=301)
 
 
 @bp.route("/api/create-order", methods=["POST"])
