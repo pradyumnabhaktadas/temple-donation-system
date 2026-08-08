@@ -413,6 +413,8 @@ body {
 .devotional-quote { text-align:center; margin:0 0 2.8rem; padding:2.4rem 1.5rem; background:var(--cream-alt); border-radius:1.25rem; }
 .devotional-quote p.quote-text { font-family:'Playfair Display',serif; font-style:italic; font-size:1.35rem; color:var(--maroon-dark); max-width:640px; margin:0 auto .7rem; line-height:1.45; }
 .devotional-quote p.quote-source { margin:0; color:var(--saffron-dark); font-weight:700; font-size:.78rem; letter-spacing:.04em; text-transform:uppercase; }
+.devotional-quote p.quote-sanskrit { font-size:1.2rem; font-weight:600; color:var(--maroon-dark); line-height:2; max-width:620px; margin:0 auto .6rem; }
+.devotional-quote p.quote-attribution { color:var(--saffron-dark); font-weight:700; font-size:.98rem; margin:.7rem 0 .4rem; }
 
 /* Compact trust strip -- three short reassurances, no elaboration needed. */
 .trust-strip { display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; margin:0 0 2.8rem; }
