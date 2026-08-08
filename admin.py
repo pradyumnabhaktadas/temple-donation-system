@@ -188,6 +188,18 @@ def dashboard():
         days_left = (deadline - today).days
         form_10bd_reminder = {"filing_fy": filing_fy, "days_left": days_left, "overdue": days_left < 0}
 
+    # Birthday reminder -- donor's own DOB only (family DOBs/anniversaries
+    # get the fuller treatment on Donor Insights); next 7 days, today's
+    # first. Reuses the same Feb-29/year-wraparound-safe date math as
+    # Donor Insights and Analytics (_next_occurrence, defined below).
+    birthday_upcoming = []
+    for donor in Donor.query.filter(Donor.dob.isnot(None)).all():
+        days_until, occurrence_date = _next_occurrence(donor.dob, today)
+        if days_until is not None and days_until <= 7:
+            birthday_upcoming.append({"donor": donor, "days_until": days_until, "date": occurrence_date})
+    birthday_upcoming.sort(key=lambda u: u["days_until"])
+    birthdays_today = [u for u in birthday_upcoming if u["days_until"] == 0]
+
     return render_template(
         "admin/dashboard.html",
         today_total=float(today_total),
@@ -200,6 +212,8 @@ def dashboard():
         donation_count=donation_count,
         fy=fy,
         form_10bd_reminder=form_10bd_reminder,
+        birthdays_today=birthdays_today,
+        birthday_upcoming=birthday_upcoming,
         today=today,
     )
 
