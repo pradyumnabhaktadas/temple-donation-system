@@ -2,7 +2,9 @@ import csv
 import io
 import os
 import re
+import secrets
 import datetime
+from collections import defaultdict
 from functools import wraps
 
 from flask import (
@@ -26,6 +28,22 @@ from public import find_or_create_donor, _org_cfg
 from backup_utils import build_backup_zip
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
+
+ADMIN_ROLES = ["staff", "manager", "admin"]
+ADMIN_ROLE_LABELS = {
+    "staff": "Staff -- day-to-day work (log donations, view donors/reports)",
+    "manager": "Manager -- staff permissions, same restrictions as staff for now",
+    "admin": "Admin -- full access, including managing campaigns and other accounts",
+}
+
+
+def _generate_temp_password():
+    """A random 12-character password for a newly created or reset admin
+    account -- shown once in the results banner (there's no email on file
+    for AdminUser to send it to), with must_change_password forced on so
+    it can never be the account's permanent password."""
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789"  # no 0/O/1/I/l
+    return "".join(secrets.choice(alphabet) for _ in range(12))
 
 
 def admin_role_required(view):
@@ -114,6 +132,133 @@ def change_password():
             return redirect(url_for("admin.dashboard"))
 
     return render_template("admin/change_password.html", force=current_user.must_change_password)
+
+
+@bp.route("/settings/users")
+@login_required
+@admin_role_required
+def manage_users():
+    """Admin-only account management -- add staff/manager/admin logins,
+    reset a forgotten password, unlock a rate-limited account, change a
+    role, or remove a former staff member's access. Previously the only
+    way to do any of this was direct database/shell access (e.g. re-running
+    seed.py), which doesn't scale past one admin."""
+    users = AdminUser.query.order_by(AdminUser.role.desc(), AdminUser.username).all()
+    return render_template(
+        "admin/manage_users.html", users=users,
+        admin_roles=ADMIN_ROLES, admin_role_labels=ADMIN_ROLE_LABELS,
+    )
+
+
+@bp.route("/settings/users/add", methods=["POST"])
+@login_required
+@admin_role_required
+def add_user():
+    username = request.form.get("username", "").strip()
+    role = request.form.get("role", "staff")
+
+    if not username:
+        flash("Username is required.")
+        return redirect(url_for("admin.manage_users"))
+    if role not in ADMIN_ROLES:
+        role = "staff"
+    if AdminUser.query.filter_by(username=username).first():
+        flash(f"Username '{username}' is already taken.")
+        return redirect(url_for("admin.manage_users"))
+
+    temp_password = _generate_temp_password()
+    user = AdminUser(username=username, role=role, must_change_password=True)
+    user.set_password(temp_password)
+    db.session.add(user)
+    db.session.commit()
+
+    flash(
+        f"Account '{username}' created ({role}). Temporary password: {temp_password} -- "
+        "share this with them directly (it won't be shown again); they'll be required to "
+        "set their own password on first login."
+    )
+    return redirect(url_for("admin.manage_users"))
+
+
+@bp.route("/settings/users/<int:user_id>/reset-password", methods=["POST"])
+@login_required
+@admin_role_required
+def reset_user_password(user_id):
+    user = AdminUser.query.get_or_404(user_id)
+    temp_password = _generate_temp_password()
+    user.set_password(temp_password)
+    user.must_change_password = True
+    user.failed_attempts = 0
+    user.locked_until = None
+    db.session.commit()
+
+    flash(
+        f"Password reset for '{user.username}'. Temporary password: {temp_password} -- "
+        "share this with them directly (it won't be shown again); they'll be required to "
+        "set their own password on next login."
+    )
+    return redirect(url_for("admin.manage_users"))
+
+
+@bp.route("/settings/users/<int:user_id>/unlock", methods=["POST"])
+@login_required
+@admin_role_required
+def unlock_user(user_id):
+    user = AdminUser.query.get_or_404(user_id)
+    user.failed_attempts = 0
+    user.locked_until = None
+    db.session.commit()
+    flash(f"'{user.username}' has been unlocked.")
+    return redirect(url_for("admin.manage_users"))
+
+
+@bp.route("/settings/users/<int:user_id>/role", methods=["POST"])
+@login_required
+@admin_role_required
+def change_user_role(user_id):
+    user = AdminUser.query.get_or_404(user_id)
+    new_role = request.form.get("role", "")
+
+    if new_role not in ADMIN_ROLES:
+        flash("Invalid role.")
+        return redirect(url_for("admin.manage_users"))
+
+    if user.id == current_user.id and new_role != "admin":
+        # An admin demoting themselves is how you accidentally lock
+        # yourself out of Settings/user management with nobody left able
+        # to undo it (if they're also the last admin) -- block outright
+        # rather than trying to detect "are you the last one" here too.
+        flash("You can't change your own role away from admin. Have another admin do this for you.")
+        return redirect(url_for("admin.manage_users"))
+
+    user.role = new_role
+    db.session.commit()
+    flash(f"'{user.username}' is now {new_role}.")
+    return redirect(url_for("admin.manage_users"))
+
+
+@bp.route("/settings/users/<int:user_id>/delete", methods=["POST"])
+@login_required
+@admin_role_required
+def delete_user(user_id):
+    user = AdminUser.query.get_or_404(user_id)
+
+    if user.id == current_user.id:
+        flash("You can't delete your own account while logged in as it.")
+        return redirect(url_for("admin.manage_users"))
+
+    if user.role == "admin" and AdminUser.query.filter_by(role="admin").count() <= 1:
+        flash("Can't delete the last remaining admin account -- promote another account to admin first.")
+        return redirect(url_for("admin.manage_users"))
+
+    # AdminUser isn't referenced by a foreign key anywhere (donation.
+    # recorded_by is just a text snapshot like "manual entry (username)"),
+    # so deleting the account doesn't touch any donation/donor history.
+    username = user.username
+    db.session.delete(user)
+    db.session.commit()
+    flash(f"Account '{username}' has been removed.")
+    return redirect(url_for("admin.manage_users"))
 
 
 @bp.route("/")
@@ -865,6 +1010,46 @@ def donor_merge(donor_id):
 
     flash(f"Merged {moved} donation(s) from the duplicate record into {keep.full_name}.")
     return redirect(url_for("admin.donor_detail", donor_id=donor_id))
+
+
+@bp.route("/donors/duplicates")
+@login_required
+def duplicate_donors():
+    """Donors who share a phone number or email but have different names on
+    file -- worth a quick human check.
+
+    find_or_create_donor (public.py) only treats a phone/email match as
+    "the same donor" when the name also agrees -- a shared family phone
+    number no longer lets one donation silently overwrite a different
+    family member's name/PAN/address. The flip side is that every group
+    listed here is, by design, already kept as separate donor records; this
+    page exists so staff can glance through them and confirm that's
+    correct (genuinely different people sharing one contact) rather than
+    two records for the same person (a nickname vs. legal name, a retyped
+    name that didn't quite match, etc). Use the merge tool on a donor's own
+    page (enter the other one's phone or email) to combine two records that
+    really are the same person.
+    """
+    phone_groups = defaultdict(list)
+    for donor in Donor.query.filter(Donor.phone.isnot(None)).order_by(Donor.full_name).all():
+        phone_groups[donor.phone].append(donor)
+    phone_dupes = sorted(
+        (group for group in phone_groups.values() if len(group) > 1),
+        key=lambda g: g[0].phone,
+    )
+
+    email_groups = defaultdict(list)
+    for donor in Donor.query.filter(Donor.email.isnot(None)).order_by(Donor.full_name).all():
+        email_groups[donor.email].append(donor)
+    email_dupes = sorted(
+        (group for group in email_groups.values() if len(group) > 1),
+        key=lambda g: g[0].email,
+    )
+
+    return render_template(
+        "admin/duplicate_donors.html",
+        phone_dupes=phone_dupes, email_dupes=email_dupes,
+    )
 
 
 def _apply_donations_filters(query):

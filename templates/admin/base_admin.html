@@ -10,8 +10,8 @@
     </button>
     <div class="collapse navbar-collapse" id="adminNav">
       {% set offline_donation_endpoints = ['admin.manual_donation', 'admin.bulk_import_donations'] %}
-      {% set donors_endpoints = ['admin.donors', 'admin.birthdays', 'admin.donor_insights', 'admin.lapsed_donors', 'admin.import_donors'] %}
-      {% set settings_endpoints = ['admin.campaigns', 'admin.bace_properties', 'admin.festivals', 'admin.seva_types', 'admin.live_to_give_purposes', 'admin.preachers', 'admin.data_backup'] %}
+      {% set donors_endpoints = ['admin.donors', 'admin.birthdays', 'admin.donor_insights', 'admin.lapsed_donors', 'admin.duplicate_donors', 'admin.import_donors'] %}
+      {% set settings_endpoints = ['admin.campaigns', 'admin.bace_properties', 'admin.festivals', 'admin.seva_types', 'admin.live_to_give_purposes', 'admin.preachers', 'admin.data_backup', 'admin.manage_users'] %}
       <div class="navbar-nav ms-auto flex-wrap">
         <a class="nav-link {% if request.endpoint == 'admin.dashboard' %}active{% endif %}" href="{{ url_for('admin.dashboard') }}">Dashboard</a>
         <a class="nav-link {% if request.endpoint == 'admin.analytics' %}active{% endif %}" href="{{ url_for('admin.analytics') }}">Analytics</a>
@@ -28,6 +28,7 @@
             <li><a class="dropdown-item {% if request.endpoint == 'admin.birthdays' %}active{% endif %}" href="{{ url_for('admin.birthdays') }}">Birthdays</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.donor_insights' %}active{% endif %}" href="{{ url_for('admin.donor_insights') }}">Donor Insights</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.lapsed_donors' %}active{% endif %}" href="{{ url_for('admin.lapsed_donors') }}">Lapsed Donors</a></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'admin.duplicate_donors' %}active{% endif %}" href="{{ url_for('admin.duplicate_donors') }}">Possible Duplicates</a></li>
             {% if current_user.is_authenticated and current_user.role == 'admin' %}
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.import_donors' %}active{% endif %}" href="{{ url_for('admin.import_donors') }}">Import Donor Data</a></li>
@@ -47,6 +48,7 @@
             {% if current_user.is_authenticated and current_user.role == 'admin' %}
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.data_backup' %}active{% endif %}" href="{{ url_for('admin.data_backup') }}">Data Backup</a></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'admin.manage_users' %}active{% endif %}" href="{{ url_for('admin.manage_users') }}">Manage Users</a></li>
             {% endif %}
           </ul>
         </div>

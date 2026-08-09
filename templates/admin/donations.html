@@ -137,7 +137,7 @@
             <tr><th class="text-muted">Phone</th><td>{{ d.donor.phone or '-' }}</td></tr>
             <tr><th class="text-muted">WhatsApp</th><td>{{ d.donor.whatsapp_number or '-' }}</td></tr>
             <tr><th class="text-muted">Email</th><td>{{ d.donor.email or '-' }}</td></tr>
-            <tr><th class="text-muted">PAN</th><td>{{ d.donor.pan or 'Not Provided' }}</td></tr>
+            <tr><th class="text-muted">PAN</th><td>{{ d.donor.pan or '-' }}</td></tr>
             <tr><th class="text-muted">Address</th><td>{{ d.donor.address or '-' }}</td></tr>
             <tr><th class="text-muted">City / State / Pincode</th><td>{{ [d.donor.city, d.donor.state, d.donor.pincode] | select | join(', ') or '-' }}</td></tr>
             <tr><th class="text-muted">Campaign</th><td>{{ d.campaign.name }}</td></tr>

@@ -1,0 +1,67 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Possible Duplicate Donors{% endblock %}
+{% block content %}
+<h3 class="mb-3">🔍 Possible Duplicate Donors</h3>
+
+<div class="alert alert-info small">
+  These donors share a phone number or email but have <strong>different names</strong> on file. That's
+  usually correct -- a shared family phone/email used by different people -- but take a look at each group
+  below and confirm. If two rows really are the same person (a nickname, a retyped name that didn't quite
+  match, etc.), open either donor's page and use "Merge duplicate" there, entering the other one's phone or
+  email.
+</div>
+
+<div class="card card-body shadow-sm p-4 mb-4">
+  <h6 class="mb-3">Sharing a Phone Number <span class="text-muted fw-normal">({{ phone_dupes | length }} group(s))</span></h6>
+  {% if phone_dupes %}
+  <div class="table-responsive">
+  <table class="table table-sm bg-white mb-0">
+    <thead><tr><th>Phone</th><th>Donor</th><th>PAN</th><th class="text-end">Donations</th><th class="text-end">Total Given</th><th></th></tr></thead>
+    <tbody>
+      {% for group in phone_dupes %}
+        {% for donor in group %}
+        <tr {% if loop.first %}class="border-top border-2"{% endif %}>
+          <td class="small text-muted">{% if loop.first %}{{ donor.phone }}{% endif %}</td>
+          <td><a href="{{ url_for('admin.donor_detail', donor_id=donor.id) }}">{{ donor.full_name }}</a></td>
+          <td class="small">{{ donor.pan or '-' }}</td>
+          <td class="text-end">{{ donor.donation_count }}</td>
+          <td class="text-end">Rs. {{ donor.total_donated | inr }}</td>
+          <td><a href="{{ url_for('admin.donor_detail', donor_id=donor.id) }}" class="small">View &amp; merge &rarr;</a></td>
+        </tr>
+        {% endfor %}
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="text-muted small mb-0">No donors currently share a phone number under different names.</p>
+  {% endif %}
+</div>
+
+<div class="card card-body shadow-sm p-4">
+  <h6 class="mb-3">Sharing an Email Address <span class="text-muted fw-normal">({{ email_dupes | length }} group(s))</span></h6>
+  {% if email_dupes %}
+  <div class="table-responsive">
+  <table class="table table-sm bg-white mb-0">
+    <thead><tr><th>Email</th><th>Donor</th><th>PAN</th><th class="text-end">Donations</th><th class="text-end">Total Given</th><th></th></tr></thead>
+    <tbody>
+      {% for group in email_dupes %}
+        {% for donor in group %}
+        <tr {% if loop.first %}class="border-top border-2"{% endif %}>
+          <td class="small text-muted">{% if loop.first %}{{ donor.email }}{% endif %}</td>
+          <td><a href="{{ url_for('admin.donor_detail', donor_id=donor.id) }}">{{ donor.full_name }}</a></td>
+          <td class="small">{{ donor.pan or '-' }}</td>
+          <td class="text-end">{{ donor.donation_count }}</td>
+          <td class="text-end">Rs. {{ donor.total_donated | inr }}</td>
+          <td><a href="{{ url_for('admin.donor_detail', donor_id=donor.id) }}" class="small">View &amp; merge &rarr;</a></td>
+        </tr>
+        {% endfor %}
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="text-muted small mb-0">No donors currently share an email address under different names.</p>
+  {% endif %}
+</div>
+{% endblock %}

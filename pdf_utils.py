@@ -491,7 +491,7 @@ def generate_receipt_pdf(donation, donor, campaign, org_cfg):
         ("Name", donor.full_name, 2),
         ("Address", donor.address or "-", 5),
         ("PIN", donor.pincode or "-", 1),
-        ("PAN", donor.pan or "Not Provided", 1),
+        ("PAN", donor.pan or "-", 1),
         ("Mobile", donor.phone or "-", 1),
     ]
     whatsapp = getattr(donor, "whatsapp_number", None)
@@ -754,7 +754,7 @@ def generate_annual_statement_pdf(donor, donations, fy, org_cfg):
         c.setFont("Helvetica-Bold", 10)
         c.drawString(margin, y, "PAN:")
         c.setFont("Helvetica", 10)
-        c.drawString(margin + 20 * mm, y, donor.pan or "Not Provided")
+        c.drawString(margin + 20 * mm, y, donor.pan or "-")
         y -= 6 * mm
 
         c.setFont("Helvetica-Bold", 10)

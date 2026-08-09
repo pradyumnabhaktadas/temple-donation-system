@@ -1,0 +1,100 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Manage Users{% endblock %}
+{% block content %}
+<h3 class="mb-3">👤 Manage Users</h3>
+
+<div class="card card-body shadow-sm p-4 mb-4" style="max-width:640px">
+  <h6 class="mb-3">Add a New Account</h6>
+  <form method="post" action="{{ url_for('admin.add_user') }}" class="row g-2 align-items-end">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="col-md-6">
+      <label class="form-label small">Username</label>
+      <input type="text" name="username" class="form-control" required>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label small">Role</label>
+      <select name="role" class="form-select">
+        {% for r in admin_roles %}
+        <option value="{{ r }}" {% if r == 'staff' %}selected{% endif %}>{{ r | capitalize }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <button class="btn btn-gold w-100">Create</button>
+    </div>
+  </form>
+  <ul class="text-muted small mt-3 mb-0">
+    {% for r in admin_roles %}
+    <li><strong>{{ r | capitalize }}:</strong> {{ admin_role_labels[r] }}</li>
+    {% endfor %}
+  </ul>
+  <p class="text-muted small mt-2 mb-0">
+    A temporary password is generated and shown once right after you create the account (or reset one below)
+    -- there's no email on file to send it to, so copy it and share it with them directly. They'll be
+    required to set their own password the first time they log in with it.
+  </p>
+</div>
+
+<div class="card card-body shadow-sm p-4" style="max-width:900px">
+  <h6 class="mb-3">Existing Accounts</h6>
+  <div class="table-responsive">
+  <table class="table table-sm bg-white align-middle">
+    <thead><tr><th>Username</th><th>Role</th><th>Created</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td>{{ u.username }}{% if u.id == current_user.id %} <span class="badge bg-secondary">You</span>{% endif %}</td>
+        <td>
+          <form method="post" action="{{ url_for('admin.change_user_role', user_id=u.id) }}" class="d-flex gap-1">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <select name="role" class="form-select form-select-sm" style="width:auto;" {% if u.id == current_user.id %}disabled{% endif %}>
+              {% for r in admin_roles %}
+              <option value="{{ r }}" {% if r == u.role %}selected{% endif %}>{{ r | capitalize }}</option>
+              {% endfor %}
+            </select>
+            {% if u.id != current_user.id %}
+            <button class="btn btn-sm btn-outline-secondary">Save</button>
+            {% endif %}
+          </form>
+        </td>
+        <td class="small text-muted">{{ u.created_at.strftime('%d-%b-%Y') if u.created_at else '-' }}</td>
+        <td>
+          {% if u.is_locked() %}
+            <span class="badge bg-danger">Locked</span>
+          {% elif u.must_change_password %}
+            <span class="badge bg-warning">Must set password</span>
+          {% else %}
+            <span class="badge bg-success">Active</span>
+          {% endif %}
+        </td>
+        <td class="text-end">
+          <div class="d-flex gap-1 justify-content-end flex-wrap">
+            {% if u.is_locked() %}
+            <form method="post" action="{{ url_for('admin.unlock_user', user_id=u.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-sm btn-outline-secondary">Unlock</button>
+            </form>
+            {% endif %}
+            <form method="post" action="{{ url_for('admin.reset_user_password', user_id=u.id) }}"
+                  onsubmit="return confirm('Reset the password for {{ u.username }}? A new temporary password will be generated.');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-sm btn-outline-secondary">Reset Password</button>
+            </form>
+            {% if u.id != current_user.id %}
+            <form method="post" action="{{ url_for('admin.delete_user', user_id=u.id) }}"
+                  onsubmit="return confirm('Remove {{ u.username }}\'s account? This can\'t be undone.');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-sm btn-outline-danger">Delete</button>
+            </form>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="text-muted text-center py-3">No accounts found.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}
