@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}About Us - {{ org_name }}{% endblock %}
+{% block content %}
+<section class="donation-hero">
+  <div class="donation-hero-copy">
+    <p class="hero-eyebrow">{{ org_name or 'ISKCON Dwarka Delhi' }}</p>
+    <h1>About <em>Us</em></h1>
+    <p class="hero-lede">{{ org_about_text }}</p>
+    <div class="hero-trust-row">
+      <span>🙏 ISKCON Youth Forum (IYF)</span><span>🕉 Dwarka, Delhi</span>
+    </div>
+  </div>
+  <div class="hero-lotus" aria-hidden="true"><div class="lotus-glow"><img src="{{ url_for('static', filename='branding/iskcon_dwarka_logo.png') }}" alt="" class="lotus-glow-logo"></div><i></i><i></i><i></i><i></i></div>
+</section>
+
+<section class="devotional-quote">
+  <p class="quote-text">"The basic principle of Krishna consciousness is to purify the senses and engage them in the loving service of the Lord."</p>
+  <p class="quote-source">— Śrīla Prabhupāda, Founder-Ācārya of ISKCON</p>
+</section>
+
+<section class="ways-to-give">
+  <div class="section-label"><span>◌</span> What we do</div>
+  <div class="photo-gallery-grid" style="grid-template-columns:repeat(3,1fr);">
+    <a href="{{ url_for('public.donate_form') }}" class="give-way-card">
+      <div class="give-way-icon">🛕</div>
+      <h3>Deity Worship &amp; Temple Construction</h3>
+      <p>Daily seva for Sri Sri Rukmini Dwarkadish, Sri Sri Gaur Nitai and Sri Sri Jagannath Baldeva Subhadra, and the ongoing construction of the Dwarka temple.</p>
+    </a>
+    <a href="{{ url_for('public.festival_seva_form') }}" class="give-way-card">
+      <div class="give-way-icon">🪔</div>
+      <h3>Festivals &amp; Celebrations</h3>
+      <p>Janmashtami, Radhashtami, Gaura Purnima, Rama Navami, Govardhan Puja, Diwali and more, celebrated with the community throughout the year.</p>
+    </a>
+    <a href="{{ url_for('public.donate_form') }}" class="give-way-card">
+      <div class="give-way-icon">📖</div>
+      <h3>Youth Preaching</h3>
+      <p>College preaching, camps and outreach programs that bring young people closer to Krishna consciousness and Vedic wisdom.</p>
+    </a>
+    <a href="{{ url_for('public.donate_form') }}" class="give-way-card">
+      <div class="give-way-icon">🍛</div>
+      <h3>Food for Life</h3>
+      <p>Annadan -- distributing sanctified prasadam so that no one in our community goes without a meal.</p>
+    </a>
+    <a href="{{ url_for('public.bace_rent_form') }}" class="give-way-card">
+      <div class="give-way-icon">🏠</div>
+      <h3>Community Support (BACE)</h3>
+      <p>Upkeep and support for BACE properties that house and sustain the wider community of devotees.</p>
+    </a>
+    <a href="{{ url_for('public.donate_form') }}" class="give-way-card">
+      <div class="give-way-icon">🐄</div>
+      <h3>Cow Protection &amp; Sanatan Dharma</h3>
+      <p>Go-seva and outreach dedicated to spreading Sanatan Dharma, in the tradition Srila Prabhupada carried across the world.</p>
+    </a>
+  </div>
+</section>
+
+<section class="photo-gallery">
+  <div class="section-label"><span>◌</span> Deity darshan</div>
+  <div class="photo-gallery-grid cols-5">
+    <div class="photo-card">
+      <img src="{{ url_for('static', filename='images/deities/rukmini-dwarkadish.jpg') }}" alt="Sri Sri Rukmini Dwarkadish deity darshan" loading="lazy">
+      <div class="photo-card-caption">Sri Sri Rukmini Dwarkadish</div>
+    </div>
+    <div class="photo-card">
+      <img src="{{ url_for('static', filename='images/deities/dwarkadish-closeup.jpg') }}" alt="Close-up darshan of Sri Dwarkadish" loading="lazy">
+      <div class="photo-card-caption">Dwarkadish</div>
+    </div>
+    <div class="photo-card">
+      <img src="{{ url_for('static', filename='images/deities/gaur-nitai.jpg') }}" alt="Sri Sri Gaur Nitai deity darshan" loading="lazy">
+      <div class="photo-card-caption">Sri Sri Gaur Nitai</div>
+    </div>
+    <div class="photo-card">
+      <img src="{{ url_for('static', filename='images/deities/jagannath-baldeva-subhadra.jpg') }}" alt="Sri Sri Jagannath Baldeva Subhadra deity darshan" loading="lazy">
+      <div class="photo-card-caption">Sri Sri Jagannath, Baldeva &amp; Subhadra</div>
+    </div>
+  </div>
+</section>
+
+<section class="photo-gallery">
+  <div class="section-label"><span>◌</span> Our upcoming temple</div>
+  <div class="photo-gallery-grid">
+    <div class="photo-card">
+      <img src="{{ url_for('static', filename='images/temple/aerial-day.jpg') }}" alt="Aerial view of the upcoming temple complex" loading="lazy">
+      <div class="photo-card-caption">From Above</div>
+    </div>
+    <div class="photo-card">
+      <img src="{{ url_for('static', filename='images/temple/side-left.jpg') }}" alt="Elevation view of the temple's nine shikharas" loading="lazy">
+      <div class="photo-card-caption">Nine Sacred Shikharas</div>
+    </div>
+    <div class="photo-card">
+      <img src="{{ url_for('static', filename='images/temple/side-right.jpg') }}" alt="Elevation view of the temple building" loading="lazy">
+      <div class="photo-card-caption">A Temple Rising</div>
+    </div>
+    <div class="photo-card">
+      <img src="{{ url_for('static', filename='images/temple/aerial-dusk.jpg') }}" alt="Aerial view of the temple at dusk, illuminated" loading="lazy">
+      <div class="photo-card-caption">As Evening Falls</div>
+    </div>
+  </div>
+</section>
+
+<section class="ways-to-give">
+  <div class="section-label"><span>◌</span> Visit &amp; contact us</div>
+  <div class="photo-gallery-grid" style="grid-template-columns:repeat(2,1fr);">
+    <div class="give-way-card" style="cursor:default;">
+      <div class="give-way-icon">📍</div>
+      <h3>Located On</h3>
+      <p>{{ org_contact_address }}</p>
+    </div>
+    <div class="give-way-card" style="cursor:default;">
+      <div class="give-way-icon">✉️</div>
+      <h3>Get In Touch</h3>
+      <p>Please email us on <a href="mailto:{{ org_contact_email }}">{{ org_contact_email }}</a> for any query or suggestion. We request you to mention your name and mobile number for a better response.</p>
+    </div>
+  </div>
+</section>
+
+<section class="final-cta-banner">
+  <h3>Join Us in Krishna's Service</h3>
+  <a href="{{ url_for('public.donate_form') }}#donation-card" class="btn btn-gold">Give Now →</a>
+</section>
+{% endblock %}

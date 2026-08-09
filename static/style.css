@@ -405,7 +405,9 @@ body {
 /* "Ways to give" hub cards -- links out to the dedicated Festival Seva /
    BACE Contribution forms so they're discoverable from the homepage. */
 .ways-to-give { margin: 0 0 2.8rem; }
-.ways-to-give-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; }
+/* 2 columns while the My Seva/Donor Login card is hidden -- switch back to
+   repeat(3,1fr) if that card is restored in donate.html. */
+.ways-to-give-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:1rem; }
 .give-way-card {
   display:block; text-decoration:none; background:#fffdfa; border:1px solid rgba(22,42,72,.11);
   border-radius:1rem; padding:1.4rem 1.3rem; box-shadow:0 8px 20px rgba(14,26,46,.08);

@@ -229,6 +229,15 @@ def festival_seva_form():
     )
 
 
+@bp.route("/about")
+def about_us():
+    """Static About Us page -- mission/activities/contact info. org_name,
+    org_about_text, org_contact_address, org_contact_email are already
+    available in every template via the inject_org context processor
+    (see app.py), so nothing extra needs to be passed in here."""
+    return render_template("about.html")
+
+
 @bp.route("/live-to-give")
 def live_to_give_form():
     """Live To Give used to be its own dedicated page (live_to_give.html);
