@@ -36,37 +36,22 @@ def main():
     args = parser.parse_args()
 
     from app import create_app
-    from backup_utils import build_backup_zip
-    from email_utils import send_backup_email
+    from backup_utils import run_backup
 
     app = create_app()
     with app.app_context():
-        filename, zip_bytes = build_backup_zip()
+        result = run_backup(app, dest_dir=args.dest, send_email=not args.no_email)
 
-        os.makedirs(args.dest, exist_ok=True)
-        backup_path = os.path.join(args.dest, filename)
-        with open(backup_path, "wb") as f:
-            f.write(zip_bytes)
-        print(f"Backed up to {backup_path} ({len(zip_bytes):,} bytes)")
-
-        keep = app.config.get("BACKUP_RETENTION_COUNT", 12)
-        backups = sorted(
-            (f for f in os.listdir(args.dest) if f.startswith("temple_data_backup_") and f.endswith(".zip")),
-            reverse=True,
-        )
-        for old in backups[keep:]:
-            os.remove(os.path.join(args.dest, old))
+        print(f"Backed up to {result['saved_path']} ({result['size_bytes']:,} bytes)")
+        for old in result["pruned"]:
             print(f"Pruned old backup: {old}")
 
-        if not args.no_email:
-            to_email = app.config.get("BACKUP_EMAIL") or app.config.get("ORG_CONTACT_EMAIL")
-            sent = send_backup_email(app.config, to_email, filename, zip_bytes)
-            if sent:
-                print(f"Emailed backup to {to_email}")
-            elif app.config.get("SMTP_HOST"):
-                print(f"Could not email backup to {to_email} -- see logs above for the error.")
-            else:
-                print("SMTP not configured -- backup saved to disk only.")
+        if result["email_sent"]:
+            print(f"Emailed backup to {result['emailed_to']}")
+        elif result["emailed_to"]:
+            print(f"Could not email backup to {result['emailed_to']} -- see logs above for the error.")
+        elif result["email_skipped_reason"]:
+            print(result["email_skipped_reason"])
 
 
 if __name__ == "__main__":

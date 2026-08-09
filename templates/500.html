@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Something Went Wrong{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-6">
+    <div class="card card-body shadow-sm text-center p-4">
+      <span style="font-size:2.2rem;">🙏</span>
+      <h3 class="mt-2">Something Went Wrong</h3>
+      <p class="text-muted">We hit an unexpected error on our end -- nothing you did caused this. If you were in
+        the middle of making a donation, please check your bank/UPI app before trying again, since the payment
+        may have already gone through. Otherwise, please try again in a few minutes.</p>
+      <a class="btn btn-primary" href="{{ url_for('public.donate_form') }}">Go to Donate Page</a>
+      {% if org_contact_email %}
+      <p class="text-muted small mt-3 mb-0">Still stuck? Email us at <a href="mailto:{{ org_contact_email }}">{{ org_contact_email }}</a>.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

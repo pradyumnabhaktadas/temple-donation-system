@@ -30,6 +30,43 @@
 </div>
 {% endif %}
 
+{% if failed_abandoned_donations %}
+<div class="card card-body shadow-sm mb-4">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+    <h6 class="mb-0">⚠️ Failed / Abandoned Online Donations <span class="text-muted fw-normal">(last 7 days)</span></h6>
+    <span class="d-flex gap-2">
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.donations', status='pending') }}">View Pending</a>
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.donations', status='failed') }}">View Failed</a>
+    </span>
+  </div>
+  <p class="text-muted small mb-2">
+    A donation row is created the moment someone starts checkout, before payment confirms -- these either
+    never completed (donor closed the payment popup, connection dropped, etc.) or the payment itself failed.
+    Worth a follow-up call/WhatsApp; the amount was never actually collected.
+  </p>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0">
+      <thead><tr><th>Date</th><th>Donor</th><th>Phone</th><th class="text-end">Amount</th><th>Campaign</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for d in failed_abandoned_donations %}
+        <tr>
+          <td>{{ d.donation_date.strftime('%d %b %Y, %I:%M %p') if d.donation_date else '-' }}</td>
+          <td>{% if d.donor %}<a href="{{ url_for('admin.donor_detail', donor_id=d.donor.id) }}">{{ d.donor.full_name }}</a>{% else %}-{% endif %}</td>
+          <td>{{ d.donor.phone or '-' if d.donor else '-' }}</td>
+          <td class="text-end">Rs. {{ d.amount | inr }}</td>
+          <td>{{ d.campaign.name if d.campaign else '-' }}</td>
+          <td><span class="badge {{ 'bg-danger' if d.status == 'failed' else 'bg-secondary' }}">{{ d.status | capitalize }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if failed_abandoned_count > failed_abandoned_donations | length %}
+  <p class="text-muted small mt-2 mb-0">Showing the {{ failed_abandoned_donations | length }} most recent of {{ failed_abandoned_count }} total -- see the full Donations Log for the rest.</p>
+  {% endif %}
+</div>
+{% endif %}
+
 <div class="row g-3 mb-4">
   <div class="col-md-3">
     <div class="stat-card text-center">

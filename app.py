@@ -162,6 +162,24 @@ def create_app(test_config=None):
             return jsonify({"error": "Security check failed. Please refresh the page and try again."}), 400
         return render_template("csrf_error.html", reason=e.description), 400
 
+    @app.errorhandler(404)
+    def handle_404(e):
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "Not found."}), 404
+        return render_template("404.html"), 404
+
+    @app.errorhandler(500)
+    def handle_500(e):
+        # Roll back the DB session first -- if the error came from a failed
+        # query/commit, the session is left in an unusable state and
+        # rendering 500.html (which itself touches the DB indirectly via
+        # url_for/context processors, though not the DB directly) or any
+        # request after this one would otherwise keep failing too.
+        db.session.rollback()
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "Something went wrong on our end. Please try again shortly."}), 500
+        return render_template("500.html"), 500
+
     from public import bp as public_bp
     from admin import bp as admin_bp
     from donor_portal import bp as donor_bp

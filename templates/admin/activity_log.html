@@ -1,0 +1,67 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Admin Activity Log{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h3 class="mb-0">📜 Admin Activity Log</h3>
+</div>
+<p class="text-muted small mb-3">
+  Every donor edit/merge, donation cancel/restore, campaign change, and admin account action taken from this
+  panel, newest first. Doesn't include plain page views -- only actions that changed data.
+</p>
+
+<form class="row g-2 mb-3">
+  <div class="col-auto">
+    <select name="admin_username" class="form-select" onchange="this.form.submit()">
+      <option value="">All Admins</option>
+      {% for u in known_usernames %}
+      <option value="{{ u }}" {% if admin_username == u %}selected{% endif %}>{{ u }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <select name="action" class="form-select" onchange="this.form.submit()">
+      <option value="">All Actions</option>
+      {% for a in known_actions %}
+      <option value="{{ a }}" {% if action == a %}selected{% endif %}>{{ a.replace('_', ' ').title() }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% if admin_username or action %}
+  <div class="col-auto">
+    <a class="btn btn-outline-secondary" href="{{ url_for('admin.activity_log') }}">Clear Filters</a>
+  </div>
+  {% endif %}
+</form>
+
+{% if entries %}
+<div class="table-responsive">
+  <table class="table table-sm table-hover">
+    <thead>
+      <tr><th>When</th><th>Admin</th><th>Action</th><th>Target</th><th>Details</th></tr>
+    </thead>
+    <tbody>
+      {% for e in entries %}
+      <tr>
+        <td class="text-nowrap">{{ e.created_at.strftime('%d %b %Y, %I:%M %p') }}</td>
+        <td>{{ e.admin_username }}</td>
+        <td><span class="badge bg-secondary">{{ e.action.replace('_', ' ').title() }}</span></td>
+        <td>
+          {% if e.target_type == 'donor' and e.target_id %}
+          <a href="{{ url_for('admin.donor_detail', donor_id=e.target_id) }}">Donor #{{ e.target_id }}</a>
+          {% elif e.target_type %}
+          {{ e.target_type | capitalize }}{% if e.target_id %} #{{ e.target_id }}{% endif %}
+          {% else %}
+          -
+          {% endif %}
+        </td>
+        <td>{{ e.details or '-' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% include "admin/_pagination.html" %}
+{% else %}
+<p class="text-muted">No activity logged yet{% if admin_username or action %} matching this filter{% endif %}.</p>
+{% endif %}
+{% endblock %}

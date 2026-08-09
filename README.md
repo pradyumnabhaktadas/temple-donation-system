@@ -23,10 +23,13 @@ receipts, a live collection dashboard, and admin tooling to manage it all.
   receipts via WhatsApp" below) -- both are additive on top of the
   always-available download link, never a replacement for it.
 - **Admin panel**: dashboard (today/month/year, campaign and payment-mode
-  breakdowns, 6-month trend, campaign progress bars), donor search &
+  breakdowns, 6-month trend, campaign progress bars, a failed/abandoned
+  online-donation alert for proactive donor follow-up), donor search &
   history, donation log, manual entry for offline (cash/cheque/bank
-  transfer) donations, campaign management, CSV exports, and a lapsed-donor
-  report.
+  transfer) donations, campaign management, CSV exports, a lapsed-donor
+  report, multi-account admin/staff user management, and an activity log
+  auditing who made which change (donor edits/merges, donation cancel/
+  restore, campaign changes, account management).
 - **Donor tools**: edit a donor's details, and merge a duplicate donor
   record into the correct one (moves their donations across, then removes
   the duplicate).
@@ -45,6 +48,9 @@ receipts, a live collection dashboard, and admin tooling to manage it all.
   old Excel/Zoho Forms data into the unified database.
 - **Automated tests** (`tests/`) covering donor dedup, receipt numbering,
   financial-year math, PAN validation, and key routes.
+- **Branded 404/500 error pages** and basic **SEO/sharing polish** (meta
+  description, Open Graph/Twitter Card tags, favicon, `robots.txt`,
+  `sitemap.xml`) on every public page.
 
 ## Admin roles
 
@@ -416,6 +422,44 @@ Set this up as a daily cron job (or your host's scheduled task feature) —
 see the comment at the top of the script for a crontab example. If you
 move to Postgres instead, use your host's managed backups or `pg_dump`
 rather than this script.
+
+### Full data backup (portable, works on SQLite or Postgres)
+
+`backup_utils.py` builds a ZIP of one CSV per table (donors, donations,
+campaigns, and every admin-editable lookup list) via the SQLAlchemy ORM,
+so it works identically on SQLite or Postgres. There are three ways to
+run it:
+
+- **Admin -> Settings -> Data Backup -> Download Backup Now** — streams a
+  fresh ZIP straight to your browser, nothing saved on the server.
+- **Admin -> Settings -> Data Backup -> Run Backup Now** — runs the full
+  routine on demand: saves a copy to `instance/backups/` on that web
+  service, prunes old copies beyond `BACKUP_RETENTION_COUNT`, and emails
+  it if SMTP + `BACKUP_EMAIL`/`ORG_CONTACT_EMAIL` are configured.
+- **`python backup_data.py`** — the same routine, meant to run
+  automatically on a schedule (see the `temple-weekly-backup` Cron Job in
+  `render.yaml`, Sundays 2 AM UTC). `--dest` overrides the save directory,
+  `--no-email` skips the email step.
+
+To restore from one of these ZIPs — e.g. after data loss, or seeding a
+new host — use `restore_backup.py`:
+
+```bash
+python restore_backup.py path/to/temple_data_backup_20260101_020000.zip --dry-run   # preview first
+python restore_backup.py path/to/temple_data_backup_20260101_020000.zip             # upsert by id
+python restore_backup.py path/to/temple_data_backup_20260101_020000.zip --wipe      # fresh/empty DB
+```
+
+By default it upserts (matches existing rows by id, inserts anything
+missing, deletes nothing) — safer when the current database already has
+data. `--wipe` deletes every row of every backed-up table first, for a
+"make the database look exactly like this backup" restore into a fresh
+database. Always take a fresh backup of the *current* database before
+running this against production. Admin login credentials and receipt PDFs
+are deliberately excluded from every backup (see `backup_utils.py`'s
+module docstring) and are therefore untouched by a restore — recreate
+admin accounts via Admin -> Manage Users, and receipt PDFs regenerate
+automatically the next time they're downloaded or emailed.
 
 ## Running the tests
 

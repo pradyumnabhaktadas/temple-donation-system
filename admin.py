@@ -17,7 +17,7 @@ from sqlalchemy import func, extract
 from extensions import db
 from models import (
     Donor, Campaign, Donation, AdminUser, ReceiptCounter, BaceProperty, Festival, SevaType,
-    LiveToGivePurpose, Preacher, DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES,
+    LiveToGivePurpose, Preacher, AdminActivityLog, DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES,
     DONATION_FREQUENCY_LABELS,
 )
 from utils import get_financial_year, is_valid_pan
@@ -25,7 +25,7 @@ from pdf_utils import generate_receipt_pdf
 from email_utils import send_receipt_email
 from whatsapp_utils import send_receipt_whatsapp
 from public import find_or_create_donor, _org_cfg
-from backup_utils import build_backup_zip
+from backup_utils import build_backup_zip, run_backup
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -44,6 +44,23 @@ def _generate_temp_password():
     it can never be the account's permanent password."""
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789"  # no 0/O/1/I/l
     return "".join(secrets.choice(alphabet) for _ in range(12))
+
+
+def log_activity(action, target_type=None, target_id=None, details=None):
+    """Records one row in the admin activity log (see AdminActivityLog in
+    models.py) -- call this alongside the db.session change it's
+    describing, before the commit, so the log entry lands in the same
+    transaction as the change itself. Deliberately swallows its own
+    errors: a logging failure should never break the actual admin action
+    it's describing (e.g. a donor edit must still succeed even if, for
+    some reason, writing the log row fails)."""
+    try:
+        db.session.add(AdminActivityLog(
+            admin_username=current_user.username if current_user.is_authenticated else "system",
+            action=action, target_type=target_type, target_id=target_id, details=details,
+        ))
+    except Exception:
+        current_app.logger.exception("Failed to write admin activity log entry for action=%s", action)
 
 
 def admin_role_required(view):
@@ -170,6 +187,8 @@ def add_user():
     user = AdminUser(username=username, role=role, must_change_password=True)
     user.set_password(temp_password)
     db.session.add(user)
+    db.session.flush()
+    log_activity("admin_user_add", target_type="admin_user", target_id=user.id, details=f"Created account '{username}' ({role})")
     db.session.commit()
 
     flash(
@@ -190,6 +209,7 @@ def reset_user_password(user_id):
     user.must_change_password = True
     user.failed_attempts = 0
     user.locked_until = None
+    log_activity("admin_user_reset_password", target_type="admin_user", target_id=user.id, details=f"Reset password for '{user.username}'")
     db.session.commit()
 
     flash(
@@ -207,6 +227,7 @@ def unlock_user(user_id):
     user = AdminUser.query.get_or_404(user_id)
     user.failed_attempts = 0
     user.locked_until = None
+    log_activity("admin_user_unlock", target_type="admin_user", target_id=user.id, details=f"Unlocked '{user.username}'")
     db.session.commit()
     flash(f"'{user.username}' has been unlocked.")
     return redirect(url_for("admin.manage_users"))
@@ -231,7 +252,9 @@ def change_user_role(user_id):
         flash("You can't change your own role away from admin. Have another admin do this for you.")
         return redirect(url_for("admin.manage_users"))
 
+    old_role = user.role
     user.role = new_role
+    log_activity("admin_user_role_change", target_type="admin_user", target_id=user.id, details=f"'{user.username}' role changed: {old_role} -> {new_role}")
     db.session.commit()
     flash(f"'{user.username}' is now {new_role}.")
     return redirect(url_for("admin.manage_users"))
@@ -254,11 +277,53 @@ def delete_user(user_id):
     # AdminUser isn't referenced by a foreign key anywhere (donation.
     # recorded_by is just a text snapshot like "manual entry (username)"),
     # so deleting the account doesn't touch any donation/donor history.
-    username = user.username
+    username, deleted_id = user.username, user.id
     db.session.delete(user)
+    log_activity("admin_user_delete", target_type="admin_user", target_id=deleted_id, details=f"Deleted account '{username}'")
     db.session.commit()
     flash(f"Account '{username}' has been removed.")
     return redirect(url_for("admin.manage_users"))
+
+
+ACTIVITY_LOG_PER_PAGE = 50
+
+
+@bp.route("/settings/activity-log")
+@login_required
+@admin_role_required
+def activity_log():
+    """Admin-only page listing every row written by log_activity() above --
+    donor edits/merges, donation cancel/restore, campaign CRUD, and admin
+    user management actions, newest first. Filterable by which admin did
+    it and what kind of action, so "what did X do last week" or "who
+    cancelled this donation" are both answerable without a database
+    console."""
+    query = AdminActivityLog.query
+
+    admin_username = request.args.get("admin_username", "")
+    if admin_username:
+        query = query.filter_by(admin_username=admin_username)
+
+    action = request.args.get("action", "")
+    if action:
+        query = query.filter_by(action=action)
+
+    page = request.args.get("page", 1, type=int)
+    pagination = db.paginate(
+        query.order_by(AdminActivityLog.created_at.desc()), page=page, per_page=ACTIVITY_LOG_PER_PAGE, error_out=False
+    )
+
+    # Options for the filter dropdowns -- every admin username/action that's
+    # actually appeared in the log so far, rather than a hardcoded list that
+    # could drift out of sync with what's really been logged.
+    known_usernames = [r[0] for r in db.session.query(AdminActivityLog.admin_username).distinct().order_by(AdminActivityLog.admin_username).all()]
+    known_actions = [r[0] for r in db.session.query(AdminActivityLog.action).distinct().order_by(AdminActivityLog.action).all()]
+
+    return render_template(
+        "admin/activity_log.html", pagination=pagination, entries=pagination.items,
+        admin_username=admin_username, action=action,
+        known_usernames=known_usernames, known_actions=known_actions,
+    )
 
 
 @bp.route("/")
@@ -345,6 +410,38 @@ def dashboard():
         if days_until == 0:
             birthdays_today.append({"donor": donor})
 
+    # Failed/abandoned online donations -- a Donation row is created with
+    # status="pending" the instant checkout starts (see
+    # public.create_order), before the payment actually confirms, so a
+    # donor who closes the Razorpay popup or whose payment fails leaves a
+    # real row behind that's easy to miss (the Donations Log defaults to
+    # status=success, see _apply_donations_filters above). Surface the
+    # last 7 days of these here so staff can proactively follow up --
+    # "still pending" often just means "abandoned the checkout partway",
+    # worth a call/WhatsApp nudge; "failed" means the payment itself
+    # didn't go through. Excludes anything from the last 30 minutes so a
+    # donor who is mid-checkout right now doesn't show up as if something
+    # were already wrong.
+    stale_cutoff = datetime.datetime.utcnow() - datetime.timedelta(minutes=30)
+    lookback = datetime.datetime.utcnow() - datetime.timedelta(days=7)
+    failed_abandoned_donations = (
+        Donation.query.filter(
+            Donation.status.in_(["pending", "failed"]),
+            Donation.donation_date >= lookback,
+            Donation.donation_date <= stale_cutoff,
+        )
+        .order_by(Donation.donation_date.desc())
+        .limit(15)
+        .all()
+    )
+    failed_abandoned_count = (
+        Donation.query.filter(
+            Donation.status.in_(["pending", "failed"]),
+            Donation.donation_date >= lookback,
+            Donation.donation_date <= stale_cutoff,
+        ).count()
+    )
+
     return render_template(
         "admin/dashboard.html",
         today_total=float(today_total),
@@ -358,6 +455,8 @@ def dashboard():
         fy=fy,
         form_10bd_reminder=form_10bd_reminder,
         birthdays_today=birthdays_today,
+        failed_abandoned_donations=failed_abandoned_donations,
+        failed_abandoned_count=failed_abandoned_count,
         today=today,
     )
 
@@ -954,6 +1053,7 @@ def donor_edit(donor_id):
         donor.wife_dob = _parse_optional_date(form, "wife_dob")
         donor.marriage_anniversary = _parse_optional_date(form, "marriage_anniversary")
 
+        log_activity("donor_edit", target_type="donor", target_id=donor.id, details=f"Edited donor '{donor.full_name}'")
         db.session.commit()
         flash("Donor details updated.")
         return redirect(url_for("admin.donor_detail", donor_id=donor.id))
@@ -1006,6 +1106,10 @@ def donor_merge(donor_id):
     keep.pincode = keep.pincode or duplicate.pincode
 
     db.session.delete(duplicate)
+    log_activity(
+        "donor_merge", target_type="donor", target_id=keep.id,
+        details=f"Merged duplicate donor #{duplicate.id} ('{duplicate.full_name}') into '{keep.full_name}' ({moved} donation(s) reassigned)",
+    )
     db.session.commit()
 
     flash(f"Merged {moved} donation(s) from the duplicate record into {keep.full_name}.")
@@ -1184,6 +1288,10 @@ def cancel_donation(donation_id):
     donation.cancelled_at = datetime.datetime.utcnow()
     donation.cancelled_by = current_user.username
     donation.cancellation_reason = reason
+    log_activity(
+        "donation_cancel", target_type="donation", target_id=donation.id,
+        details=f"Cancelled donation {donation.receipt_number or ('#' + str(donation.id))} (Rs. {donation.amount}) -- reason: {reason}",
+    )
     db.session.commit()
 
     flash(f"Donation {donation.receipt_number or ('#' + str(donation.id))} has been cancelled.")
@@ -1207,6 +1315,10 @@ def restore_donation(donation_id):
     donation.cancelled_at = None
     donation.cancelled_by = None
     donation.cancellation_reason = None
+    log_activity(
+        "donation_restore", target_type="donation", target_id=donation.id,
+        details=f"Restored donation {donation.receipt_number or ('#' + str(donation.id))} (Rs. {donation.amount})",
+    )
     db.session.commit()
 
     flash(f"Donation {donation.receipt_number or ('#' + str(donation.id))} has been restored.")
@@ -2149,6 +2261,8 @@ def campaigns():
             target_amount=float(form["target_amount"]) if form.get("target_amount") else None,
         )
         db.session.add(campaign)
+        db.session.flush()
+        log_activity("campaign_create", target_type="campaign", target_id=campaign.id, details=f"Created campaign '{campaign.name}'")
         db.session.commit()
         flash(f"Campaign '{campaign.name}' created.")
         return redirect(url_for("admin.campaigns"))
@@ -2163,6 +2277,10 @@ def campaigns():
 def toggle_campaign(campaign_id):
     campaign = Campaign.query.get_or_404(campaign_id)
     campaign.is_active = not campaign.is_active
+    log_activity(
+        "campaign_toggle", target_type="campaign", target_id=campaign.id,
+        details=f"'{campaign.name}' set to {'active' if campaign.is_active else 'inactive'}",
+    )
     db.session.commit()
     return redirect(url_for("admin.campaigns"))
 
@@ -2188,6 +2306,7 @@ def campaign_edit(campaign_id):
         campaign.is_80g = form.get("is_80g") == "on"
         campaign.description = form.get("description", "").strip() or None
         campaign.target_amount = float(form["target_amount"]) if form.get("target_amount") else None
+        log_activity("campaign_edit", target_type="campaign", target_id=campaign.id, details=f"Edited campaign '{campaign.name}'")
         db.session.commit()
         flash(f"Campaign '{campaign.name}' updated.")
         return redirect(url_for("admin.campaigns"))
@@ -2208,9 +2327,11 @@ def campaign_delete(campaign_id):
         )
         return redirect(url_for("admin.campaigns"))
 
+    deleted_id, deleted_name = campaign.id, campaign.name
     db.session.delete(campaign)
+    log_activity("campaign_delete", target_type="campaign", target_id=deleted_id, details=f"Deleted campaign '{deleted_name}'")
     db.session.commit()
-    flash(f"Campaign '{campaign.name}' deleted.")
+    flash(f"Campaign '{deleted_name}' deleted.")
     return redirect(url_for("admin.campaigns"))
 
 
@@ -2783,6 +2904,28 @@ def download_backup():
         zip_bytes, mimetype="application/zip",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+@bp.route("/settings/backup/run", methods=["POST"])
+@login_required
+@admin_role_required
+def trigger_backup():
+    """"Run Backup Now" button on the Data Backup page -- runs the exact
+    same save-to-disk + prune + email routine as the weekly backup_data.py
+    Cron Job (see backup_utils.run_backup), but on demand from this web
+    service's own filesystem instead of waiting for Sunday 2 AM UTC."""
+    result = run_backup(current_app, send_email=True)
+
+    size_mb = result["size_bytes"] / (1024 * 1024)
+    flash(f"Backup created: {result['filename']} ({size_mb:.2f} MB), saved to instance/backups/.")
+    if result["pruned"]:
+        flash(f"Pruned {len(result['pruned'])} old backup(s) beyond retention limit.")
+    if result["email_sent"]:
+        flash(f"Emailed backup to {result['emailed_to']}.")
+    elif result["email_skipped_reason"]:
+        flash(f"Backup not emailed: {result['email_skipped_reason']}.")
+
+    return redirect(url_for("admin.data_backup"))
 
 
 @bp.route("/export/10bd")

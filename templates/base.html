@@ -5,6 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Temple Donations{% endblock %}</title>
   <meta name="csrf-token" content="{{ csrf_token() }}">
+
+  {% set meta_desc = self.meta_description() | trim if self.meta_description() | trim else (org_about_text or '')[:160] %}
+  <meta name="description" content="{{ meta_desc }}">
+  <link rel="canonical" href="{{ request.url }}">
+
+  {% set share_image = self.og_image() | trim if self.og_image() | trim else url_for('static', filename='images/temple/front-view.jpg', _external=True) %}
+  <meta property="og:site_name" content="{{ org_name or 'ISKCON Dwarka Delhi' }}">
+  <meta property="og:title" content="{% block og_title %}{{ self.title() }}{% endblock %}">
+  <meta property="og:description" content="{{ meta_desc }}">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="{{ request.url }}">
+  <meta property="og:image" content="{{ share_image }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ self.og_title() }}">
+  <meta name="twitter:description" content="{{ meta_desc }}">
+  <meta name="twitter:image" content="{{ share_image }}">
+  {% block meta_description %}{% endblock %}
+  {% block og_image %}{% endblock %}
+
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='branding/iskcon_dwarka_logo.png') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='branding/iskcon_dwarka_logo.png') }}">
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">

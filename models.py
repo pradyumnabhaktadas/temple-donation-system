@@ -483,6 +483,36 @@ class DonorLoginOTP(db.Model):
         return check_password_hash(self.otp_hash, otp)
 
 
+class AdminActivityLog(db.Model):
+    """Audit trail of mutating admin actions -- who did what, to which
+    record, and when. Covers the actions most likely to matter for
+    accountability: donor edits/merges, donation cancel/restore, campaign
+    CRUD, and admin user management (add/reset-password/unlock/role-
+    change/delete). Deliberately does NOT log every read-only page view --
+    only actions that actually change data, so this stays a signal-dense
+    "what changed" log rather than a full request log.
+
+    `admin_username` is stored as a plain string snapshot (not a foreign
+    key to AdminUser) so a log entry survives that account being deleted
+    later -- same reasoning as Donation.cancelled_by/recorded_by
+    elsewhere in this codebase. See admin.py's log_activity() for how
+    rows get written, and admin.activity_log() for the admin-only page
+    that lists them."""
+
+    __tablename__ = "admin_activity_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    admin_username = db.Column(db.String(80), nullable=False)
+    action = db.Column(db.String(50), nullable=False)  # e.g. "donor_edit", "donation_cancel"
+    target_type = db.Column(db.String(50))  # e.g. "donor", "donation", "campaign", "admin_user"
+    target_id = db.Column(db.Integer)
+    details = db.Column(db.String(500))  # free-text summary of what changed
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False, index=True)
+
+    def __repr__(self):
+        return f"<AdminActivityLog {self.action} by {self.admin_username}>"
+
+
 class AdminUser(UserMixin, db.Model):
     __tablename__ = "admin_users"
 

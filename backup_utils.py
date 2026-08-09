@@ -21,6 +21,7 @@ Two intentional exclusions, both documented inline below:
 import csv
 import datetime
 import io
+import os
 import zipfile
 
 from models import (
@@ -74,3 +75,75 @@ def build_backup_zip():
         )
 
     return filename, zip_buf.getvalue()
+
+
+def run_backup(app, dest_dir=None, send_email=True):
+    """Runs a full backup end-to-end: build the ZIP, save it to disk,
+    prune old backups beyond BACKUP_RETENTION_COUNT, and (optionally) email
+    it. Shared by backup_data.py (the weekly Cron Job script) and the
+    admin "Run Backup Now" button (admin.trigger_backup) so both go through
+    the exact same routine instead of two copies drifting apart.
+
+    Must be called inside an app context (or pass the already-created
+    `app` and call from within `with app.app_context():` -- either way
+    `app` is used only for its .config, not to push a context itself,
+    since the caller may already be inside one).
+
+    Returns a dict describing what happened -- callers decide how to show
+    it (print() for the CLI, flash messages for the admin UI):
+        {
+            "filename": str,
+            "size_bytes": int,
+            "saved_path": str,
+            "pruned": [str, ...],
+            "emailed_to": str | None,
+            "email_sent": bool,
+            "email_skipped_reason": str | None,
+        }
+    """
+    from email_utils import send_backup_email
+
+    filename, zip_bytes = build_backup_zip()
+
+    dest = dest_dir or os.path.join(app.root_path, "instance", "backups")
+    os.makedirs(dest, exist_ok=True)
+    saved_path = os.path.join(dest, filename)
+    with open(saved_path, "wb") as f:
+        f.write(zip_bytes)
+
+    keep = app.config.get("BACKUP_RETENTION_COUNT", 12)
+    backups = sorted(
+        (f for f in os.listdir(dest) if f.startswith("temple_data_backup_") and f.endswith(".zip")),
+        reverse=True,
+    )
+    pruned = []
+    for old in backups[keep:]:
+        os.remove(os.path.join(dest, old))
+        pruned.append(old)
+
+    result = {
+        "filename": filename,
+        "size_bytes": len(zip_bytes),
+        "saved_path": saved_path,
+        "pruned": pruned,
+        "emailed_to": None,
+        "email_sent": False,
+        "email_skipped_reason": None,
+    }
+
+    if send_email:
+        to_email = app.config.get("BACKUP_EMAIL") or app.config.get("ORG_CONTACT_EMAIL")
+        if not app.config.get("SMTP_HOST"):
+            result["email_skipped_reason"] = "SMTP not configured"
+        elif not to_email:
+            result["email_skipped_reason"] = "No BACKUP_EMAIL/ORG_CONTACT_EMAIL configured"
+        else:
+            sent = send_backup_email(app.config, to_email, filename, zip_bytes)
+            result["emailed_to"] = to_email
+            result["email_sent"] = sent
+            if not sent:
+                result["email_skipped_reason"] = "SMTP send failed -- see logs"
+    else:
+        result["email_skipped_reason"] = "Email skipped (--no-email)"
+
+    return result

@@ -10,8 +10,17 @@
     Admin login credentials and stored receipt PDFs are deliberately left out -- receipt PDFs can always
     be regenerated from a donation's own data, and login credentials shouldn't leave the database.
   </p>
-  <p class="mb-0">
+  <p class="mb-0 d-flex flex-wrap gap-2">
     <a href="{{ url_for('admin.download_backup') }}" class="btn btn-gold">⬇ Download Backup Now</a>
+    <form method="post" action="{{ url_for('admin.trigger_backup') }}" class="d-inline">
+      <button type="submit" class="btn btn-outline-secondary">🗄 Run Backup Now (save + email)</button>
+    </form>
+  </p>
+  <p class="text-muted small mt-2 mb-0">
+    "Download Backup Now" streams a fresh ZIP straight to your browser and doesn't touch this server's disk.
+    "Run Backup Now" does the full weekly-job routine on demand -- saves a copy to
+    <code>instance/backups/</code> on this server, prunes old ones beyond the retention limit, and emails it
+    {% if smtp_configured and backup_email %}to <strong>{{ backup_email }}</strong>{% else %}(if SMTP is configured below){% endif %}.
   </p>
 </div>
 

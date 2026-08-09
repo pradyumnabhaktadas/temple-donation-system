@@ -276,6 +276,46 @@ def live_to_give_form():
     return redirect(url_for("public.donate_form"), code=301)
 
 
+@bp.route("/robots.txt")
+def robots_txt():
+    """Allows every public page to be crawled/indexed, points crawlers at
+    the sitemap below, and explicitly keeps admin/donor-account/API/
+    webhook paths out of search results -- none of those are meant for
+    the public web, and there's no benefit (and some risk) to a search
+    engine indexing an admin login page or a raw JSON endpoint."""
+    lines = [
+        "User-agent: *",
+        "Disallow: /admin/",
+        "Disallow: /api/",
+        "Disallow: /webhooks/",
+        "Disallow: /donor/",
+        "Disallow: /receipt/",
+        f"Sitemap: {url_for('public.sitemap_xml', _external=True)}",
+    ]
+    return current_app.response_class("\n".join(lines) + "\n", mimetype="text/plain")
+
+
+@bp.route("/sitemap.xml")
+def sitemap_xml():
+    """Static list of the handful of public-facing pages actually meant to
+    be indexed -- there's no dynamic/per-donor public content on this
+    site (donation forms and the About page are the entire public
+    surface), so a hand-maintained list is simpler and more reliable than
+    generating one from the URL map, which would also pick up admin/API/
+    donor-portal routes that shouldn't be here."""
+    pages = [
+        {"loc": url_for("public.donate_form", _external=True), "priority": "1.0"},
+        {"loc": url_for("public.about_us", _external=True), "priority": "0.8"},
+        {"loc": url_for("public.festival_seva_form", _external=True), "priority": "0.8"},
+        {"loc": url_for("public.bace_rent_form", _external=True), "priority": "0.8"},
+    ]
+    xml_lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+    for page in pages:
+        xml_lines.append(f'  <url><loc>{page["loc"]}</loc><priority>{page["priority"]}</priority></url>')
+    xml_lines.append("</urlset>")
+    return current_app.response_class("\n".join(xml_lines) + "\n", mimetype="application/xml")
+
+
 @bp.route("/api/create-order", methods=["POST"])
 @limiter.limit("30 per hour")
 def create_order():
