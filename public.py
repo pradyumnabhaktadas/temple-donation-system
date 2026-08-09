@@ -27,6 +27,7 @@ import hashlib
 import json
 import io
 import os
+import re
 import threading
 
 from flask import (
@@ -95,26 +96,57 @@ def _validated_fk_id(data, key, model):
     return value
 
 
+def _normalize_name(name):
+    """Case/whitespace-insensitive comparison key for donor names -- used
+    to tell "same person, retyped slightly differently" apart from
+    "different person" when a phone/email is shared (see below)."""
+    return re.sub(r"\s+", " ", (name or "").strip()).lower()
+
+
 def find_or_create_donor(data):
-    """Dedup a donor by PAN first, then phone, then email. This is the
-    single-donor-database mechanism that prevents duplicate donor records
-    across separate campaign submissions."""
+    """Dedup a donor by PAN first, then phone+name, then email+name. This
+    is the single-donor-database mechanism that prevents duplicate donor
+    records across separate campaign submissions.
+
+    PAN is treated as a strong identity signal (it's legally unique to one
+    person) -- a PAN match always updates that donor's record with
+    whatever this submission supplied.
+
+    Phone and email are *contact* details, not identity -- it's common in
+    Indian households for a spouse, parents, or grown children to all
+    donate through one shared phone number (or email). So a phone/email
+    match only counts as "the same donor" if the name on this submission
+    also matches the name already on file (normalized, case/whitespace-
+    insensitive). If the phone/email matches but the name doesn't, this is
+    a *different* person who happens to share that contact detail -- a new
+    donor record is created instead of overwriting the existing one.
+    Without this check, one family member's donation could silently
+    overwrite another's name/PAN/address on file (e.g. your PAN ending up
+    attached to a relative's name, or vice versa) -- exactly the failure
+    this function is built to prevent.
+    """
     donor = None
     pan = (data.get("pan") or "").strip().upper()
     phone = (data.get("phone") or "").strip()
     email = (data.get("email") or "").strip().lower()
     whatsapp_number = (data.get("whatsapp_number") or "").strip()
+    full_name = data.get("full_name", "").strip()
+    incoming_name = _normalize_name(full_name)
 
     if pan:
         donor = Donor.query.filter_by(pan=pan).first()
-    if donor is None and phone:
-        donor = Donor.query.filter_by(phone=phone).first()
-    if donor is None and email:
-        donor = Donor.query.filter_by(email=email).first()
+
+    if donor is None and phone and incoming_name:
+        candidates = Donor.query.filter_by(phone=phone).all()
+        donor = next((d for d in candidates if _normalize_name(d.full_name) == incoming_name), None)
+
+    if donor is None and email and incoming_name:
+        candidates = Donor.query.filter_by(email=email).all()
+        donor = next((d for d in candidates if _normalize_name(d.full_name) == incoming_name), None)
 
     if donor is None:
         donor = Donor(
-            full_name=data.get("full_name", "").strip(),
+            full_name=full_name,
             email=email or None,
             phone=phone or None,
             whatsapp_number=whatsapp_number or None,
@@ -127,17 +159,13 @@ def find_or_create_donor(data):
         db.session.add(donor)
     else:
         # Update the existing record with whatever was entered on *this*
-        # donation, rather than only backfilling blanks. A shared phone
-        # number, PAN, or email is common in Indian households (spouse,
-        # parents, grown children all donating under one family contact) --
-        # if we kept the name/address from whoever donated first, every
-        # later donation under the same contact details would silently get
-        # that first person's name printed on its receipt, even though the
-        # form clearly said someone else was giving this donation. New
-        # values win whenever the form actually supplied one; a field left
-        # blank on this submission keeps whatever was already on file
-        # instead of being wiped out.
-        donor.full_name = data.get("full_name", "").strip() or donor.full_name
+        # donation, rather than only backfilling blanks -- safe to do here
+        # because we only reach this branch on a PAN match (definitely the
+        # same person) or a phone/email match where the name also agreed
+        # (see the matching logic above). A field left blank on this
+        # submission keeps whatever was already on file instead of being
+        # wiped out.
+        donor.full_name = full_name or donor.full_name
         donor.email = email or donor.email
         donor.phone = phone or donor.phone
         donor.whatsapp_number = whatsapp_number or donor.whatsapp_number

@@ -56,12 +56,13 @@ class TestDonorDedup:
         assert d1.id == d2.id
         assert d2.email == "krishna@example.com"
 
-    def test_later_donation_updates_name_and_address_for_shared_contact(self, app):
+    def test_later_donation_updates_details_for_same_person_shared_contact(self, app):
         """A shared phone/PAN/email is common in Indian households -- spouse,
         parents, or grown children all donating under one family contact.
-        Whoever's name and address were entered on the CURRENT donation must
-        end up on that donation's receipt, not whichever name happened to be
-        saved from an earlier donation under the same contact details."""
+        If the SAME person (name matches, allowing for case/whitespace
+        differences) donates again under that shared contact, their latest
+        address/city etc. should update the existing record rather than
+        being ignored."""
         from public import find_or_create_donor
 
         d1 = find_or_create_donor({
@@ -71,13 +72,71 @@ class TestDonorDedup:
         assert d1.full_name == "Ramesh Kumar"
 
         d2 = find_or_create_donor({
-            "full_name": "Sita Devi", "phone": "9123456789", "address": "45 Nehru Place", "city": "Delhi",
+            "full_name": "  ramesh   kumar ", "phone": "9123456789", "address": "45 Nehru Place", "city": "Delhi",
         })
         db.session.commit()
 
         assert d1.id == d2.id
-        assert d2.full_name == "Sita Devi"
         assert d2.address == "45 Nehru Place"
+
+    def test_shared_phone_different_name_creates_separate_donor(self, app):
+        """The core fix: a phone number shared by more than one real person
+        (spouse, parents, grown children all donating through one family
+        contact) must NOT collapse into a single donor record just because
+        the phone matches -- only a matching name (or PAN) means "same
+        person". A different name under the same phone gets its own donor
+        record, and the original donor's details are left completely
+        untouched."""
+        from public import find_or_create_donor
+
+        d1 = find_or_create_donor({
+            "full_name": "Ramesh Kumar", "phone": "9123456789", "address": "12 MG Road", "city": "Delhi",
+        })
+        db.session.commit()
+
+        d2 = find_or_create_donor({
+            "full_name": "Sita Devi", "phone": "9123456789", "address": "45 Nehru Place", "city": "Delhi",
+        })
+        db.session.commit()
+
+        assert d1.id != d2.id
+        assert Donor.query.count() == 2
+        assert d1.full_name == "Ramesh Kumar" and d1.address == "12 MG Road"
+        assert d2.full_name == "Sita Devi" and d2.address == "45 Nehru Place"
+
+    def test_shared_phone_different_name_and_pan_does_not_overwrite_original(self, app):
+        """Reported flaw #1: person A donates and their PAN is saved. Later,
+        a different family member donates through the same phone with their
+        OWN, different PAN. That must create a separate donor -- it must
+        never overwrite person A's record with person B's name/PAN."""
+        from public import find_or_create_donor
+
+        d1 = find_or_create_donor({"full_name": "Ramesh Kumar", "phone": "9123450001", "pan": "AAAAA1111A"})
+        db.session.commit()
+
+        d2 = find_or_create_donor({"full_name": "Sita Devi", "phone": "9123450001", "pan": "BBBBB2222B"})
+        db.session.commit()
+
+        assert d1.id != d2.id
+        assert d1.full_name == "Ramesh Kumar" and d1.pan == "AAAAA1111A"
+        assert d2.full_name == "Sita Devi" and d2.pan == "BBBBB2222B"
+
+    def test_shared_phone_different_name_blank_pan_does_not_inherit_pan(self, app):
+        """Reported flaw #2: a second family member donates through the same
+        shared phone but doesn't fill in a PAN. The new donor record must
+        NOT inherit the first person's PAN -- that would attach a stranger's
+        tax ID to the wrong name on their receipt."""
+        from public import find_or_create_donor
+
+        d1 = find_or_create_donor({"full_name": "Ramesh Kumar", "phone": "9123450002", "pan": "AAAAA1111A"})
+        db.session.commit()
+
+        d2 = find_or_create_donor({"full_name": "Amit Sharma", "phone": "9123450002"})
+        db.session.commit()
+
+        assert d1.id != d2.id
+        assert d2.pan is None
+        assert d1.pan == "AAAAA1111A"  # original donor's PAN is untouched too
 
     def test_blank_field_on_later_donation_does_not_erase_saved_value(self, app):
         """The flip side of the above -- if this donation's form just didn't

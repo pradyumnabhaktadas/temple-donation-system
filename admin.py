@@ -1807,11 +1807,14 @@ def import_donors():
     fields normally filled in one-by-one under Admin -> Donors -> Edit --
     from a CSV. No donation records are created here.
 
-    Existing donors are matched using the same PAN -> phone -> email
-    priority as every other donor-touching form (find_or_create_donor from
-    public.py), and a match updates that donor's fields following the same
-    "new value wins, blank leaves the existing value alone" convention used
-    everywhere donor data can be re-submitted -- so re-uploading the same
+    Existing donors are matched using the same PAN -> phone+name -> email+name
+    logic as every other donor-touching form (find_or_create_donor from
+    public.py) -- a PAN match is always treated as the same person, while a
+    phone/email match additionally requires the name on the row to agree
+    with the name already on file (a shared family phone number shouldn't
+    let one row overwrite a different family member's details). A genuine
+    match updates that donor's fields following the "new value wins, blank
+    leaves the existing value alone" convention -- so re-uploading the same
     file, or a file that only has a few columns filled in for some rows,
     never wipes out data that's already on file.
     """
