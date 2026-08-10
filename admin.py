@@ -1559,9 +1559,34 @@ def manual_donation():
         donation.financial_year = fy
         db.session.commit()
 
-        pdf_bytes = generate_receipt_pdf(donation, donor, campaign, _org_cfg())
-        donation.receipt_pdf = pdf_bytes
-        db.session.commit()
+        # The donation itself (with its receipt number) is now safely
+        # committed regardless of anything below. PDF rendering and
+        # notification-sending are wrapped defensively so that *any*
+        # unexpected exception here -- a bad image file, an unusual
+        # None field on a manually-entered donation, a transient DB
+        # hiccup on the second commit, anything -- gets caught, logged
+        # with a full traceback, and turned into a clean flash message
+        # instead of an unhandled crash that can take the whole gunicorn
+        # worker down with it (which looks to the browser like the
+        # connection was simply dropped, with nothing informative in
+        # the logs). This was previously unguarded, unlike the bulk
+        # import path a few functions down, which already had a
+        # per-row try/except covering this same span.
+        try:
+            pdf_bytes = generate_receipt_pdf(donation, donor, campaign, _org_cfg())
+            donation.receipt_pdf = pdf_bytes
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception(
+                "Receipt PDF generation failed for manual donation id=%s (receipt %s) -- donation record was "
+                "saved, but the PDF/notification step did not complete.", donation.id, receipt_number,
+            )
+            flash(
+                f"Donation recorded with receipt {receipt_number}, but generating the PDF failed. "
+                f"Check the donor's record and regenerate the receipt if needed.", "warning",
+            )
+            return redirect(url_for("admin.donor_detail", donor_id=donor.id))
 
         # Backgrounded, not sent inline -- same reasoning as public.py's
         # _finalize_success(): a slow/hanging SMTP connection or WhatsApp
@@ -1570,13 +1595,22 @@ def manual_donation():
         # response (a dropped connection in the browser, no clean error,
         # nothing in the logs) rather than a normal exception. The receipt
         # is already saved to the database at this point either way.
-        app = current_app._get_current_object()
-        if app.config.get("TESTING"):
-            _send_receipt_notifications_background(app, donation.id, pdf_bytes)
-        else:
-            threading.Thread(
-                target=_send_receipt_notifications_background, args=(app, donation.id, pdf_bytes), daemon=True
-            ).start()
+        try:
+            app = current_app._get_current_object()
+            if app.config.get("TESTING"):
+                _send_receipt_notifications_background(app, donation.id, pdf_bytes)
+            else:
+                threading.Thread(
+                    target=_send_receipt_notifications_background, args=(app, donation.id, pdf_bytes), daemon=True
+                ).start()
+        except Exception:
+            # Starting the background thread itself should never fail, but
+            # if it somehow does, don't let it take the request down --
+            # the receipt is already saved either way.
+            current_app.logger.exception(
+                "Failed to start receipt notification thread for manual donation id=%s (receipt %s).",
+                donation.id, receipt_number,
+            )
 
         flash(f"Donation recorded. Receipt {receipt_number} generated.")
         return redirect(url_for("admin.donor_detail", donor_id=donor.id))
