@@ -12,7 +12,7 @@ from models import Donor, Donation, DonorLoginOTP
 from pdf_utils import generate_annual_statement_pdf
 from public import _org_cfg
 from sms_utils import generate_otp, send_otp
-from utils import is_valid_pan
+from utils import is_valid_pan, normalize_phone
 
 bp = Blueprint("donor_portal", __name__, url_prefix="/my-donations")
 
@@ -41,7 +41,12 @@ def login():
 
 @bp.route("/send-otp", methods=["POST"])
 def send_otp_route():
-    phone = request.form.get("phone", "").strip()
+    # normalize_phone() so a donor typing "+91 88020 81265" (or any other
+    # equivalent format) still matches the plain 10-digit number their
+    # donation was recorded under -- see utils.normalize_phone's docstring.
+    # This normalized value is what flows through to /verify via the
+    # redirect below, so that route doesn't need to normalize again.
+    phone = normalize_phone(request.form.get("phone"))
 
     if not phone:
         flash("Please enter your phone number.")
@@ -84,7 +89,7 @@ def send_otp_route():
 
 @bp.route("/verify", methods=["GET"])
 def verify():
-    phone = request.args.get("phone", "").strip()
+    phone = normalize_phone(request.args.get("phone"))
     if not phone:
         return redirect(url_for("donor_portal.login"))
     return render_template("donor_verify_otp.html", phone=phone)
@@ -92,7 +97,10 @@ def verify():
 
 @bp.route("/verify", methods=["POST"])
 def verify_submit():
-    phone = request.form.get("phone", "").strip()
+    # Defensively normalized again (in case this form field was ever
+    # tampered with or reached directly) before it's used for lookups --
+    # cheap and idempotent, matches send_otp_route() above.
+    phone = normalize_phone(request.form.get("phone"))
     otp_input = request.form.get("otp", "").strip()
 
     if not phone or not otp_input:
@@ -190,7 +198,7 @@ def account_update():
     # admin can update it via Admin -> Donors -> Edit).
     donor.full_name = form.get("full_name", "").strip() or donor.full_name
     donor.email = form.get("email", "").strip().lower() or None
-    donor.whatsapp_number = form.get("whatsapp_number", "").strip() or None
+    donor.whatsapp_number = normalize_phone(form.get("whatsapp_number")) or None
     donor.pan = pan or None
     donor.address = form.get("address", "").strip() or None
     donor.city = form.get("city", "").strip() or None

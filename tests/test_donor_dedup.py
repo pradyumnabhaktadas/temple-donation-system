@@ -187,6 +187,54 @@ class TestDonorDedup:
         assert d1.whatsapp_number is None
         assert d1.whatsapp_or_phone == "9666666666"
 
+    def test_second_donation_same_phone_different_format_reuses_donor(self, app):
+        """The exact bug report this test guards against: a donor typing
+        their number as "+91 88020 81265" on one donation and plain
+        "8802081265" on another must still be recognised as the same
+        person, not silently split into two donor records (and, outside
+        this test, not silently fail donor OTP login either -- see
+        donor_portal.py, which normalizes the same way)."""
+        from public import find_or_create_donor
+
+        d1 = find_or_create_donor({"full_name": "Meera Bai", "phone": "8802081265"})
+        db.session.commit()
+
+        d2 = find_or_create_donor({"full_name": "Meera Bai", "phone": "+91 88020 81265"})
+        db.session.commit()
+
+        assert d1.id == d2.id
+        assert Donor.query.count() == 1
+        assert d2.phone == "8802081265"
+
+    def test_second_donation_same_phone_space_grouped_no_country_code_reuses_donor(self, app):
+        """Covers the other common way this number gets typed/pasted --
+        space-grouped as "88020 81265" with no +91/91 prefix at all (e.g.
+        copied straight off a business card or WhatsApp profile). Digits
+        get stripped regardless of position, so this needs no separate
+        country-code handling in normalize_phone() -- just confirming it
+        actually behaves that way."""
+        from public import find_or_create_donor
+
+        d1 = find_or_create_donor({"full_name": "Meera Bai", "phone": "8802081265"})
+        db.session.commit()
+
+        d2 = find_or_create_donor({"full_name": "Meera Bai", "phone": "88020 81265"})
+        db.session.commit()
+
+        assert d1.id == d2.id
+        assert Donor.query.count() == 1
+        assert d2.phone == "8802081265"
+
+    def test_whatsapp_number_normalized_regardless_of_format(self, app):
+        from public import find_or_create_donor
+
+        d1 = find_or_create_donor({
+            "full_name": "Shyam Sundar", "phone": "9777777777", "whatsapp_number": "+91 98888 88888",
+        })
+        db.session.commit()
+
+        assert d1.whatsapp_number == "9888888888"
+
 
 class TestReceiptNumbering:
     def test_sequential_global_counter(self, app):

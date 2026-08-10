@@ -50,6 +50,37 @@ def is_valid_pan(pan):
     return bool(PAN_RE.match(pan.strip().upper()))
 
 
+def normalize_phone(raw):
+    """Normalizes any phone number a donor/staff member might type -- with
+    or without a '+91'/'91' country code, with spaces/dashes/parens, or
+    with a leading trunk '0' -- down to the plain 10-digit local number
+    this codebase stores and matches against everywhere (Donor.phone,
+    donor OTP login, WhatsApp/SMS sends -- see whatsapp_utils._to_e164 and
+    sms_utils.py, which already assume this same plain-10-digit
+    convention on the way *out*; this is the matching normalization on
+    the way *in*).
+
+    Without this, "+91 88020 81265", "918802081265", "08802081265", and
+    "8802081265" would all get stored/compared as four different strings
+    -- silently splitting one donor into duplicate records, and breaking
+    donor login (exact phone match) if they log in with a different
+    format than the one their donation was originally recorded with.
+
+    Returns the input stripped-but-otherwise-unchanged if it doesn't look
+    like a recognisable Indian mobile number (e.g. a landline, a foreign
+    number, or garbage input) -- this only ever narrows a *recognised*
+    format down to the canonical one, it never guesses at something
+    genuinely ambiguous.
+    """
+    raw = (raw or "").strip()
+    digits = "".join(c for c in raw if c.isdigit())
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    elif len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
+    return digits if len(digits) == 10 else raw
+
+
 def get_financial_year(date=None):
     """India FY runs Apr 1 - Mar 31. Returns e.g. '2026-27'."""
     if date is None:

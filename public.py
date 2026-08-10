@@ -40,7 +40,7 @@ from models import Donor, Campaign, Donation, ReceiptCounter, BaceProperty, Fest
 from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email
 from whatsapp_utils import send_receipt_whatsapp
-from utils import is_valid_pan
+from utils import is_valid_pan, normalize_phone
 
 bp = Blueprint("public", __name__)
 
@@ -127,9 +127,15 @@ def find_or_create_donor(data):
     """
     donor = None
     pan = (data.get("pan") or "").strip().upper()
-    phone = (data.get("phone") or "").strip()
+    # Normalized to a plain 10-digit local number regardless of how it was
+    # typed ("+91 88020 81265", "918802081265", "08802081265", ...) -- see
+    # normalize_phone()'s docstring. Without this, the same donor typing
+    # their number differently across two donations (or a donor logging in
+    # with a different format than the one stored) would silently fail to
+    # match.
+    phone = normalize_phone(data.get("phone"))
     email = (data.get("email") or "").strip().lower()
-    whatsapp_number = (data.get("whatsapp_number") or "").strip()
+    whatsapp_number = normalize_phone(data.get("whatsapp_number"))
     full_name = data.get("full_name", "").strip()
     incoming_name = _normalize_name(full_name)
 

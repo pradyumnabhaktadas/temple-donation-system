@@ -20,7 +20,7 @@ from models import (
     LiveToGivePurpose, Preacher, AdminActivityLog, DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES,
     DONATION_FREQUENCY_LABELS,
 )
-from utils import get_financial_year, is_valid_pan
+from utils import get_financial_year, is_valid_pan, normalize_phone
 from pdf_utils import generate_receipt_pdf
 from email_utils import send_receipt_email
 from whatsapp_utils import send_receipt_whatsapp
@@ -1018,8 +1018,13 @@ def donor_edit(donor_id):
             return redirect(url_for("admin.donor_edit", donor_id=donor.id))
 
         donor.full_name = form.get("full_name", "").strip() or donor.full_name
-        donor.phone = form.get("phone", "").strip() or None
-        donor.whatsapp_number = form.get("whatsapp_number", "").strip() or None
+        # normalize_phone() collapses "+91 88020 81265" / "918802081265" /
+        # "08802081265" / "8802081265" down to the same plain 10-digit
+        # value this app stores/matches everywhere -- otherwise editing a
+        # donor's number into a different-but-equivalent format here would
+        # silently break donor login and future donation dedup matching.
+        donor.phone = normalize_phone(form.get("phone")) or None
+        donor.whatsapp_number = normalize_phone(form.get("whatsapp_number")) or None
         donor.email = form.get("email", "").strip().lower() or None
         donor.pan = pan or None
         donor.address = form.get("address", "").strip() or None
@@ -1087,8 +1092,11 @@ def donor_merge(donor_id):
         flash("Enter the duplicate donor's phone or email to merge.")
         return redirect(url_for("admin.donor_detail", donor_id=donor_id))
 
+    # Accept the phone half of the lookup in any format (with/without
+    # +91, spaces, leading 0) -- same normalize_phone() used everywhere
+    # else a phone number is entered or matched against.
     duplicate = Donor.query.filter(
-        Donor.id != keep.id, (Donor.phone == lookup) | (Donor.email == lookup.lower())
+        Donor.id != keep.id, (Donor.phone == normalize_phone(lookup)) | (Donor.email == lookup.lower())
     ).first()
 
     if duplicate is None:
@@ -2184,9 +2192,10 @@ def import_donors():
 
         try:
             # Mirrors find_or_create_donor's own PAN -> phone -> email
-            # matching so we know up front whether this row will create a
-            # new donor or update an existing one (for the results table).
-            phone_v = row.get("phone", "").strip()
+            # matching (including normalize_phone()) so we know up front
+            # whether this row will create a new donor or update an
+            # existing one (for the results table).
+            phone_v = normalize_phone(row.get("phone"))
             email_v = row.get("email", "").strip().lower()
             existing = None
             if pan:
