@@ -23,6 +23,10 @@
           <input type="number" class="form-control" name="target_amount">
         </div>
         <div class="mb-2">
+          <label class="form-label">Minimum Donation Amount (optional)</label>
+          <input type="number" class="form-control" name="min_amount" min="0" step="1">
+        </div>
+        <div class="mb-2">
           <label class="form-label">Description</label>
           <textarea class="form-control" name="description" rows="2"></textarea>
         </div>
@@ -40,6 +44,7 @@
           <div class="text-muted small">{{ '80G Eligible' if c.is_80g else 'Non-80G' }}
             {% if c.is_active %}<span class="badge bg-success ms-1">Active</span>{% else %}<span class="badge bg-secondary ms-1">Inactive</span>{% endif %}
           </div>
+          {% if c.min_amount %}<div class="text-muted small">Minimum: Rs. {{ c.min_amount | inr }}</div>{% endif %}
         </div>
         <div class="text-end">
           <div class="fw-bold">Rs. {{ c.total_collected | inr }}</div>

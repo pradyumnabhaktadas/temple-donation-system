@@ -17,6 +17,11 @@
     <label class="form-label">Target Amount (optional)</label>
     <input type="number" class="form-control" name="target_amount" value="{{ campaign.target_amount or '' }}">
   </div>
+  <div class="mb-2">
+    <label class="form-label">Minimum Donation Amount (optional)</label>
+    <input type="number" class="form-control" name="min_amount" value="{{ campaign.min_amount or '' }}" min="0" step="1">
+    <div class="form-text">Leave blank for no minimum beyond Rs. 1. Shown to donors and enforced when they pay online.</div>
+  </div>
   <div class="mb-3">
     <label class="form-label">Description</label>
     <textarea class="form-control" name="description" rows="2">{{ campaign.description or '' }}</textarea>

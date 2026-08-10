@@ -24,7 +24,7 @@ from utils import get_financial_year, is_valid_pan, is_valid_phone, normalize_ph
 from pdf_utils import generate_receipt_pdf
 from email_utils import send_receipt_email
 from whatsapp_utils import send_receipt_whatsapp
-from public import find_or_create_donor, _org_cfg, high_value_pan_address_error
+from public import find_or_create_donor, _org_cfg, high_value_pan_address_error, _finalize_success
 from backup_utils import build_backup_zip, run_backup
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -1359,6 +1359,46 @@ def restore_donation(donation_id):
     return redirect(url_for("admin.donor_detail", donor_id=donation.donor_id))
 
 
+@bp.route("/donations/<int:donation_id>/finalize-pending", methods=["POST"])
+@login_required
+@admin_role_required
+def finalize_pending_donation(donation_id):
+    """Manually finalizes an online donation stuck in "pending" even though
+    the donor's money was actually deducted -- covers the rare case where
+    the webhook never fired (misconfigured, down, or the request never made
+    it through) *and* the donor's browser never got a chance to report back
+    either (tab/app closed right after paying, connection dropped). Without
+    this there was no way to issue that donor a receipt short of a direct
+    database edit.
+
+    Requires the actual Razorpay Payment ID (starts "pay_...", found on the
+    Razorpay Dashboard -> Payments, searchable by amount/phone/time) typed
+    in by staff -- this isn't a "trust the donor" override, it's staff
+    confirming against Razorpay's own records that the payment genuinely
+    went through before a receipt gets issued for it.
+    """
+    donation = Donation.query.get_or_404(donation_id)
+    if donation.payment_mode != "online" or donation.status != "pending":
+        flash("This action only applies to a still-pending online donation.")
+        return redirect(url_for("admin.donations"))
+
+    payment_id = (request.form.get("razorpay_payment_id") or "").strip()
+    if not payment_id:
+        flash("Enter the Razorpay Payment ID (from the Razorpay Dashboard -> Payments) to confirm this payment actually went through.")
+        return redirect(url_for("admin.donations"))
+
+    donation.razorpay_payment_id = payment_id
+    _finalize_success(donation)
+    log_activity(
+        "donation_manual_finalize", target_type="donation", target_id=donation.id,
+        details=f"Manually finalized pending donation as paid (Payment ID {payment_id}), receipt {donation.receipt_number}",
+    )
+    db.session.commit()
+
+    flash(f"Donation marked as paid -- receipt {donation.receipt_number} generated and sent.")
+    return redirect(url_for("admin.donations"))
+
+
 def _validated_id_from_form(form, key, model, label):
     """Same idea as public.py's _validated_fk_id, but for the admin
     manual-donation form (werkzeug form data, and flash+redirect instead of
@@ -2345,6 +2385,7 @@ def campaigns():
             is_80g=(form.get("is_80g") == "on"),
             description=form.get("description", "").strip() or None,
             target_amount=float(form["target_amount"]) if form.get("target_amount") else None,
+            min_amount=float(form["min_amount"]) if form.get("min_amount") else None,
         )
         db.session.add(campaign)
         db.session.flush()
@@ -2392,6 +2433,7 @@ def campaign_edit(campaign_id):
         campaign.is_80g = form.get("is_80g") == "on"
         campaign.description = form.get("description", "").strip() or None
         campaign.target_amount = float(form["target_amount"]) if form.get("target_amount") else None
+        campaign.min_amount = float(form["min_amount"]) if form.get("min_amount") else None
         log_activity("campaign_edit", target_type="campaign", target_id=campaign.id, details=f"Edited campaign '{campaign.name}'")
         db.session.commit()
         flash(f"Campaign '{campaign.name}' updated.")

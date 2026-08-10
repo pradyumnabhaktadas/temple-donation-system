@@ -382,8 +382,12 @@ def create_order():
     campaign = Campaign.query.get_or_404(campaign_id)
     if amount <= 0:
         return jsonify({"error": "Invalid amount"}), 400
-    if campaign.name == "Live To Give" and amount < 101:
-        return jsonify({"error": "Minimum contribution for Live To Give is Rs. 101."}), 400
+    # Per-campaign floor, admin-editable from Admin -> Campaigns -> Edit
+    # (Campaign.min_amount). NULL means no floor beyond the check above.
+    if campaign.min_amount and amount < float(campaign.min_amount):
+        return jsonify({
+            "error": f"Minimum contribution for {campaign.name} is Rs. {campaign.min_amount:.0f}."
+        }), 400
 
     if not data.get("consent"):
         return jsonify({"error": "Please confirm the data-use consent to continue."}), 400

@@ -10,6 +10,16 @@ class Config:
         "DATABASE_URL", f"sqlite:///{os.path.join(BASE_DIR, 'instance', 'temple.db')}"
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    # Render's managed Postgres silently drops idle connections after a
+    # while; without this, SQLAlchemy can hand out a dead connection from
+    # its pool and the query fails with a raw driver error (e.g. "SSL
+    # error: decryption failed or bad record mac") instead of transparently
+    # reconnecting. pool_pre_ping issues a cheap "is this still alive"
+    # check before every checkout (auto-reconnects if not); pool_recycle
+    # forces connections older than 4 minutes to be recycled preemptively,
+    # comfortably under typical cloud idle-connection timeouts. No effect
+    # on SQLite (used for local/demo mode).
+    SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True, "pool_recycle": 240}
 
     # --- Razorpay ---
     # Leave these blank to run the app in DEMO MODE: the donation form will show

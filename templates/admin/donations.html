@@ -113,6 +113,8 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn btn-link btn-sm p-0 small">Restore</button>
         </form>
+        {% elif d.status == 'pending' and d.payment_mode == 'online' %}
+        <a href="#" data-bs-toggle="modal" data-bs-target="#finalizePending{{ d.id }}" class="small">Mark as Paid</a>
         {% endif %}
       </td>
       {% endif %}
@@ -205,6 +207,39 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Never mind</button>
           <button type="submit" class="btn btn-danger">Cancel Donation</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% if d.status == 'pending' and d.payment_mode == 'online' and current_user.role == 'admin' %}
+<div class="modal fade" id="finalizePending{{ d.id }}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('admin.finalize_pending_donation', donation_id=d.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="modal-header">
+          <h6 class="modal-title">Mark donation #{{ d.id }} as paid?</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted small">
+            Use this only when a donor's money was actually deducted but the payment never confirmed
+            automatically (webhook and browser confirmation both missed it) -- verify the payment on the
+            <a href="https://dashboard.razorpay.com/app/payments" target="_blank" rel="noopener">Razorpay Dashboard</a>
+            first (search by amount/phone/time), then paste its Payment ID below. This issues a real receipt,
+            so don't use it unless you've confirmed the payment on Razorpay's side.
+          </p>
+          <label class="form-label">Razorpay Payment ID</label>
+          <input type="text" class="form-control" name="razorpay_payment_id" placeholder="pay_XXXXXXXXXXXXXX" required>
+          {% if d.razorpay_order_id %}
+          <div class="form-text">Order ID on file for this donation: <code>{{ d.razorpay_order_id }}</code></div>
+          {% endif %}
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Never mind</button>
+          <button type="submit" class="btn btn-gold">Mark as Paid</button>
         </div>
       </form>
     </div>

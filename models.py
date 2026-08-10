@@ -122,6 +122,12 @@ class Campaign(db.Model):
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     description = db.Column(db.String(500))
     target_amount = db.Column(db.Numeric(12, 2))
+    # Smallest amount accepted for a donation against this campaign, admin-
+    # editable from Admin -> Campaigns -> Edit. NULL means no campaign-
+    # specific floor beyond the universal "amount must be > 0" check in
+    # public.py's create_order(). Currently only "Live To Give" has one set
+    # (Rs. 101, migrated in from the old hardcoded check).
+    min_amount = db.Column(db.Numeric(12, 2))
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
     donations = db.relationship("Donation", backref="campaign", lazy="dynamic")
