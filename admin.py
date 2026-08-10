@@ -2488,6 +2488,147 @@ def bace_property_delete(property_id):
     return redirect(url_for("admin.bace_properties"))
 
 
+def _bace_campaign_or_none():
+    """The single "BACE Contribution" campaign that public.bace_rent_form()
+    fixes every BACE donation to -- see that route for the same lookup.
+    None if the campaign hasn't been set up yet, in which case the log
+    page below just shows "no campaign configured" instead of erroring."""
+    return Campaign.query.filter_by(name="BACE Contribution").first()
+
+
+def _apply_bace_contribution_filters(query):
+    """Same shape as _apply_donations_filters, but scoped to the BACE
+    Contribution campaign and with an extra bace_property_id filter so
+    staff can pull up "which BACE has made contribution" for one specific
+    property. Shared by the log page and its CSV export."""
+    status = request.args.get("status", "success")
+    if status != "all":
+        query = query.filter_by(status=status)
+
+    bace_property_id = request.args.get("bace_property_id", type=int)
+    if bace_property_id:
+        query = query.filter_by(bace_property_id=bace_property_id)
+
+    date_from_raw = request.args.get("date_from") or ""
+    date_to_raw = request.args.get("date_to") or ""
+    try:
+        if date_from_raw:
+            date_from = datetime.datetime.strptime(date_from_raw, "%Y-%m-%d")
+            query = query.filter(Donation.donation_date >= date_from)
+        if date_to_raw:
+            date_to = datetime.datetime.strptime(date_to_raw, "%Y-%m-%d")
+            query = query.filter(Donation.donation_date < date_to + datetime.timedelta(days=1))
+    except ValueError:
+        date_from_raw = date_to_raw = ""
+
+    return query, {
+        "status": status, "bace_property_id": bace_property_id,
+        "date_from": date_from_raw, "date_to": date_to_raw,
+    }
+
+
+@bp.route("/bace-contributions")
+@login_required
+def bace_contributions():
+    """Dedicated log for BACE Contribution donations -- unlike the general
+    Donations Log (which only shows the parent campaign name), this shows
+    which specific BACE property each contribution was for, plus a
+    per-property running total so "which BACE has made contribution" is
+    answered at a glance instead of needing to open each row."""
+    campaign = _bace_campaign_or_none()
+    properties = BaceProperty.query.order_by(BaceProperty.name).all()
+
+    if campaign is None:
+        return render_template(
+            "admin/bace_contributions.html", campaign=None, properties=properties,
+            donations=[], pagination=None, summary=[], status="success", bace_property_id=None,
+            date_from="", date_to="",
+        )
+
+    base_query = Donation.query.filter_by(campaign_id=campaign.id)
+
+    # Per-property totals -- always computed off successful donations only
+    # (a failed/pending/cancelled row never actually collected anything),
+    # independent of whatever status filter is applied to the table below.
+    summary_rows = (
+        db.session.query(
+            BaceProperty.id, BaceProperty.name, BaceProperty.is_active,
+            func.coalesce(func.sum(Donation.amount), 0),
+            func.count(Donation.id),
+        )
+        .outerjoin(Donation, (Donation.bace_property_id == BaceProperty.id) & (Donation.status == "success"))
+        .group_by(BaceProperty.id, BaceProperty.name, BaceProperty.is_active)
+        .order_by(BaceProperty.name)
+        .all()
+    )
+    summary = [
+        {"id": pid, "name": name, "is_active": is_active, "total": total, "count": count}
+        for pid, name, is_active, total, count in summary_rows
+    ]
+
+    query, filters = _apply_bace_contribution_filters(base_query)
+    query = query.order_by(Donation.donation_date.desc())
+    page = request.args.get("page", 1, type=int)
+    pagination = db.paginate(query, page=page, per_page=DONATIONS_PER_PAGE, error_out=False)
+
+    return render_template(
+        "admin/bace_contributions.html", campaign=campaign, properties=properties,
+        donations=pagination.items, pagination=pagination, summary=summary, **filters,
+    )
+
+
+@bp.route("/bace-contributions/export")
+@login_required
+def export_bace_contributions():
+    """CSV export of the BACE Contribution log, honoring whatever
+    property/status/date filters are currently applied -- same convention
+    as export_donations()."""
+    campaign = _bace_campaign_or_none()
+    if campaign is None:
+        flash("The BACE Contribution campaign isn't set up yet.")
+        return redirect(url_for("admin.bace_properties"))
+
+    query, _filters = _apply_bace_contribution_filters(Donation.query.filter_by(campaign_id=campaign.id))
+    rows = query.order_by(Donation.donation_date.desc()).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Receipt No", "Date", "Status", "BACE Property", "Donor Name", "Phone", "Email", "PAN", "Address",
+        "Amount", "Payment Mode", "Payment ID", "Order ID", "Recorded By", "Remarks",
+    ])
+    for d in rows:
+        donor = d.donor
+        date_str = (
+            d.donation_date.strftime("%d-%m-%Y %H:%M")
+            if d.payment_mode == "online"
+            else d.donation_date.strftime("%d-%m-%Y")
+        )
+        writer.writerow([
+            d.receipt_number or "",
+            date_str,
+            d.status,
+            d.bace_property.name if d.bace_property else "",
+            donor.full_name,
+            donor.phone or "",
+            donor.email or "",
+            donor.pan or "",
+            donor.address or "",
+            float(d.amount),
+            d.payment_mode,
+            d.razorpay_payment_id or "",
+            d.razorpay_order_id or "",
+            d.recorded_by or "",
+            d.remarks or "",
+        ])
+
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment;filename=BACE_Contributions.csv"},
+    )
+
+
 @bp.route("/festivals", methods=["GET", "POST"])
 @login_required
 def festivals():
