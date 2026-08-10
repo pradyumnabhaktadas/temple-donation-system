@@ -432,6 +432,21 @@ def create_order():
     else:
         is_80g_requested = None
 
+    # A donation purpose's own 80G eligibility (LiveToGivePurpose.is_80g)
+    # is a hard rule, not a donor choice -- only a fixed set of purposes
+    # (Food for Life, Charity, Donation, Life Membership, Construction,
+    # Annadan) actually qualify. Donation.effective_is_80g enforces this
+    # regardless, but reject it here too rather than silently downgrading,
+    # so a donor who explicitly asked for an 80G receipt on an ineligible
+    # purpose finds out immediately instead of being surprised later.
+    if live_to_give_purpose_id and is_80g_requested:
+        purpose = LiveToGivePurpose.query.get(live_to_give_purpose_id)
+        if purpose and not purpose.is_80g:
+            return jsonify({
+                "error": f'"{purpose.name}" isn\'t eligible for an 80G receipt. '
+                         'Please select "No" for the 80G receipt question, or choose a different purpose.'
+            }), 400
+
     remarks = (data.get("remarks") or "").strip()[:300] or None
 
     donor = find_or_create_donor(data)

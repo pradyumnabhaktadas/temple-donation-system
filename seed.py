@@ -62,18 +62,28 @@ SEVA_TYPES = [
 # editable afterwards from Admin -> Live To Give Purposes without touching
 # code. ("Sudama Seva" appeared twice in the reference list this was
 # sourced from -- seeded once here.)
+#
+# is_80g: only six purposes are actually 80G-eligible per the temple's
+# accounting rules -- Food for Life, Charity, Donation, Life Membership,
+# Construction, Annadan -- everything else is Non-80G. This only affects
+# fresh installs (seeding skips anything that already exists by name); an
+# existing deployment sets this per-purpose from Admin -> Live To Give
+# Purposes -> "Mark 80G Eligible" instead.
 LIVE_TO_GIVE_PURPOSES = [
-    "ISKCON Life Membership",
-    "Cow Protection (गौ माता की सेवा के लिए)",
-    "Temple Construction (मंदिर निर्माण के लिए)",
-    "Food for Life (भोजन/प्रसाद वितरण के लिए)",
-    "Spreading Sanatan Dharma (सनातन धर्म के प्रचार के लिए)",
-    "College Preaching",
-    "As per the Need of the Service (सेवा की आवश्यकता अनुसार)",
-    "Sudama Seva",
-    "Mango Festival",
-    "Festivals",
-    "IYF Camp / Yatra",
+    ("ISKCON Life Membership", True),
+    ("Cow Protection (गौ माता की सेवा के लिए)", False),
+    ("Temple Construction (मंदिर निर्माण के लिए)", True),
+    ("Food for Life (भोजन/प्रसाद वितरण के लिए)", True),
+    ("Spreading Sanatan Dharma (सनातन धर्म के प्रचार के लिए)", False),
+    ("College Preaching", False),
+    ("As per the Need of the Service (सेवा की आवश्यकता अनुसार)", False),
+    ("Sudama Seva", False),
+    ("Mango Festival", False),
+    ("Festivals", False),
+    ("IYF Camp / Yatra", False),
+    ("Charity", True),
+    ("Donation", True),
+    ("Annadan", True),
 ]
 
 app = create_app()
@@ -95,9 +105,9 @@ with app.app_context():
         if not SevaType.query.filter_by(name=name).first():
             db.session.add(SevaType(name=name, suggested_amount=suggested_amount))
 
-    for name in LIVE_TO_GIVE_PURPOSES:
+    for name, is_80g in LIVE_TO_GIVE_PURPOSES:
         if not LiveToGivePurpose.query.filter_by(name=name).first():
-            db.session.add(LiveToGivePurpose(name=name))
+            db.session.add(LiveToGivePurpose(name=name, is_80g=is_80g))
 
     if not AdminUser.query.filter_by(username="admin").first():
         admin = AdminUser(username="admin", role="admin", must_change_password=True)

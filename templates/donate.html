@@ -80,13 +80,26 @@
         <label class="form-label" for="live_to_give_purpose_id">Donation Purpose</label>
         <select class="form-select" name="live_to_give_purpose_id" id="live_to_give_purpose_id" required {% if not purposes %}disabled{% endif %}>
           <option value="" disabled selected>-- Select a purpose --</option>
-          {% for p in purposes %}
-            <option value="{{ p.id }}">{{ p.name }}</option>
-          {% endfor %}
+          {% set eighty_g_purposes = purposes | selectattr('is_80g') | list %}
+          {% set non_80g_purposes = purposes | rejectattr('is_80g') | list %}
+          {% if eighty_g_purposes %}
+          <optgroup label="80G Eligible">
+            {% for p in eighty_g_purposes %}
+              <option value="{{ p.id }}" data-is-80g="1">{{ p.name }}</option>
+            {% endfor %}
+          </optgroup>
+          {% endif %}
+          {% if non_80g_purposes %}
+          <optgroup label="Non-80G">
+            {% for p in non_80g_purposes %}
+              <option value="{{ p.id }}" data-is-80g="0">{{ p.name }}</option>
+            {% endfor %}
+          </optgroup>
+          {% endif %}
         </select>
       </div>
 
-      <div class="form-section">
+      <div class="form-section" id="receipt-type-section" style="display:none;">
         <label class="form-label mb-2">Do you need an 80G receipt? <span class="text-muted">(to claim tax benefits)</span></label>
         <div class="d-flex gap-4">
           <div class="form-check">
@@ -98,6 +111,10 @@
             <label class="form-check-label" for="receipt_type_non80g">No</label>
           </div>
         </div>
+        <p class="field-note text-muted mb-0 mt-1" id="non-80g-purpose-note" style="display:none;">
+          This purpose isn't eligible for an 80G tax receipt -- only Food for Life, Charity, Donation,
+          Life Membership, Construction, and Annadan qualify. You'll receive a regular donation receipt.
+        </p>
       </div>
 
       <div class="form-section" id="eightyg-fields" style="display:none;">
@@ -328,6 +345,42 @@
   }
   receiptRadios.forEach((radio) => radio.addEventListener('change', updatePanAddressRequirement));
   amountInput.addEventListener('input', updatePanAddressRequirement);
+
+  // 80G eligibility is fixed per Donation Purpose (see Admin -> Live To
+  // Give Purposes), not a free donor choice -- only Food for Life,
+  // Charity, Donation, Life Membership, Construction, and Annadan
+  // actually qualify (LiveToGivePurpose.is_80g on the server, which is
+  // what actually controls receipt numbering regardless of what happens
+  // here). Picking a non-eligible purpose hides the "Yes" option and
+  // locks the answer to "No"; picking an eligible one restores the
+  // choice so a donor who doesn't want to share PAN can still say no.
+  const purposeSelect = document.getElementById('live_to_give_purpose_id');
+  const receiptTypeSection = document.getElementById('receipt-type-section');
+  const receiptType80g = document.getElementById('receipt_type_80g');
+  const receiptType80gLabel = receiptType80g.closest('.form-check');
+  const receiptTypeNon80g = document.getElementById('receipt_type_non80g');
+  const non80gPurposeNote = document.getElementById('non-80g-purpose-note');
+
+  function updateReceiptTypeForPurpose() {
+    const selected = purposeSelect.options[purposeSelect.selectedIndex];
+    const purposeChosen = !!(selected && selected.value);
+    const isEligible = selected && selected.dataset.is80g === '1';
+
+    receiptTypeSection.style.display = purposeChosen ? '' : 'none';
+    receiptType80gLabel.style.display = isEligible ? '' : 'none';
+    non80gPurposeNote.style.display = purposeChosen && !isEligible ? '' : 'none';
+
+    if (purposeChosen && !isEligible) {
+      receiptType80g.checked = false;
+      receiptTypeNon80g.checked = true;
+    } else if (receiptType80g.checked && !isEligible) {
+      // Purpose changed out from under an existing "Yes" selection.
+      receiptType80g.checked = false;
+      receiptTypeNon80g.checked = false;
+    }
+    updatePanAddressRequirement();
+  }
+  purposeSelect.addEventListener('change', updateReceiptTypeForPurpose);
 
   // -- Small fetch helper ---------------------------------------------
   async function postJSON(url, body) {

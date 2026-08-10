@@ -1448,6 +1448,17 @@ def manual_donation():
         else:
             is_80g_requested = None
 
+        # Same hard rule as the public form -- a purpose's own 80G
+        # eligibility (LiveToGivePurpose.is_80g) can't be overridden by
+        # picking "80g" here. Donation.effective_is_80g would silently
+        # correct it anyway, but catching it here means staff find out
+        # immediately instead of a receipt quietly coming out Non-80G.
+        if live_to_give_purpose_id and is_80g_requested:
+            purpose = LiveToGivePurpose.query.get(live_to_give_purpose_id)
+            if purpose and not purpose.is_80g:
+                flash(f"'{purpose.name}' isn't 80G-eligible -- select \"No\" for the 80G receipt question, or a different purpose.")
+                return redirect(url_for("admin.manual_donation"))
+
         # Offline payment reference details -- only meaningful for their
         # matching payment_mode (cheque_number/cheque_bank_name for
         # "cheque", bank_transaction_id for "bank_transfer"), but captured
@@ -2811,7 +2822,8 @@ def live_to_give_purposes():
         if LiveToGivePurpose.query.filter_by(name=name).first():
             flash(f"A donation purpose named '{name}' already exists.")
             return redirect(url_for("admin.live_to_give_purposes"))
-        db.session.add(LiveToGivePurpose(name=name))
+        is_80g = request.form.get("is_80g") == "on"
+        db.session.add(LiveToGivePurpose(name=name, is_80g=is_80g))
         db.session.commit()
         flash(f"Donation purpose '{name}' added.")
         return redirect(url_for("admin.live_to_give_purposes"))
@@ -2827,6 +2839,25 @@ def toggle_live_to_give_purpose(purpose_id):
     purpose = LiveToGivePurpose.query.get_or_404(purpose_id)
     purpose.is_active = not purpose.is_active
     db.session.commit()
+    return redirect(url_for("admin.live_to_give_purposes"))
+
+
+@bp.route("/live-to-give-purposes/<int:purpose_id>/toggle-80g", methods=["POST"])
+@login_required
+@admin_role_required
+def toggle_live_to_give_purpose_80g(purpose_id):
+    """Flips whether this purpose is 80G-eligible -- see
+    LiveToGivePurpose.is_80g and Donation.effective_is_80g for what this
+    actually controls. Logged since it directly affects which future
+    receipts are legally issuable as 80G."""
+    purpose = LiveToGivePurpose.query.get_or_404(purpose_id)
+    purpose.is_80g = not purpose.is_80g
+    log_activity(
+        "live_to_give_purpose_80g_toggle", target_type="live_to_give_purpose", target_id=purpose.id,
+        details=f"'{purpose.name}' set to {'80G-eligible' if purpose.is_80g else 'Non-80G'}",
+    )
+    db.session.commit()
+    flash(f"'{purpose.name}' is now {'80G-eligible' if purpose.is_80g else 'Non-80G'}.")
     return redirect(url_for("admin.live_to_give_purposes"))
 
 
@@ -2848,6 +2879,7 @@ def live_to_give_purpose_edit(purpose_id):
             return redirect(url_for("admin.live_to_give_purpose_edit", purpose_id=purpose_id))
 
         purpose.name = new_name
+        purpose.is_80g = request.form.get("is_80g") == "on"
         db.session.commit()
         flash(f"Donation purpose renamed to '{purpose.name}'.")
         return redirect(url_for("admin.live_to_give_purposes"))

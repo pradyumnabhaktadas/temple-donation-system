@@ -9,6 +9,11 @@
     <label class="form-label">Name</label>
     <input type="text" class="form-control" name="name" value="{{ purpose.name }}" required>
   </div>
+  <div class="form-check mb-3">
+    <input class="form-check-input" type="checkbox" name="is_80g" id="edit-is-80g" {% if purpose.is_80g %}checked{% endif %}>
+    <label class="form-check-label" for="edit-is-80g">80G Eligible</label>
+    <div class="form-text">Whether a donation against this purpose can be issued as an 80G receipt. Not a donor choice -- fixed per purpose.</div>
+  </div>
   <button class="btn btn-gold">Save Changes</button>
 </form>
 {% endblock %}

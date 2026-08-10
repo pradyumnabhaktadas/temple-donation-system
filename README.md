@@ -12,6 +12,18 @@ receipts, a live collection dashboard, and admin tooling to manage it all.
 - **Single donor database** deduplicated on PAN, then phone, then email, so
   a repeat donor never creates a second record. PAN format is validated
   (10-character India PAN structure) before it's accepted.
+- **Per-purpose 80G eligibility (Live To Give)** — only six donation
+  purposes are actually 80G-eligible: Food for Life, Charity, Donation,
+  Life Membership, Construction, and Annadan. Every other purpose is
+  strictly Non-80G. This is set per purpose (`LiveToGivePurpose.is_80g`)
+  from **Admin → Live To Give Purposes**, not left to the donor to choose
+  freely — picking a non-eligible purpose on the donation form hides the
+  80G receipt option entirely, and `Donation.effective_is_80g` enforces
+  this server-side regardless of what a request claims. **One-time step
+  after deploying this**: existing purposes default to Non-80G (a fresh
+  column backfills to `False`), so go to Admin → Live To Give Purposes and
+  click "Mark 80G Eligible" on whichever of your existing purposes match
+  the six categories above.
 - **High-value PAN/address enforcement** — for any donation over Rs. 49,000,
   PAN and address become mandatory (not optional), in line with Income Tax
   Rule 114B's PAN-quoting requirement for transactions near the Rs. 50,000

@@ -214,6 +214,16 @@ class LiveToGivePurpose(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(150), nullable=False, unique=True)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
+    # Whether a donation against this purpose can legally get an 80G
+    # receipt -- only a fixed set of purposes actually qualify (Food for
+    # Life, Charity, Donation, Life Membership, Construction, Annadan, per
+    # the temple's accounting rules); everything else is strictly Non-80G,
+    # not a donor's choice. See Donation.effective_is_80g, which treats
+    # this as a hard override -- a donation against a purpose with
+    # is_80g=False can never come out 80G regardless of what was
+    # requested. Defaults to False (the "rest are non-80G" majority case)
+    # so a newly added purpose doesn't silently become 80G-eligible.
+    is_80g = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
     donations = db.relationship("Donation", backref="live_to_give_purpose", lazy="dynamic")
@@ -380,7 +390,19 @@ class Donation(db.Model):
         campaign fixes this via Campaign.is_80g -- the one exception is
         Live To Give, where the donor picks 80G/Non-80G per donation
         (is_80g_requested), which takes priority over the campaign default
-        when set."""
+        when set.
+
+        A donation against a specific Live To Give purpose is further
+        constrained by that purpose's own eligibility
+        (LiveToGivePurpose.is_80g) -- only a fixed set of purposes (Food
+        for Life, Charity, Donation, Life Membership, Construction,
+        Annadan) actually qualify for 80G, so a non-eligible purpose can
+        never come out 80G here even if is_80g_requested was somehow set
+        to True (the public form and admin entry points both validate
+        this at intake too, but this is the hard backstop that actually
+        controls receipt numbering/Form 10BD, so it can't be bypassed)."""
+        if self.live_to_give_purpose_id is not None and not self.live_to_give_purpose.is_80g:
+            return False
         if self.is_80g_requested is not None:
             return self.is_80g_requested
         return self.campaign.is_80g
