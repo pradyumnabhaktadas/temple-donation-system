@@ -145,12 +145,28 @@ window.TempleDonationPayment = (function () {
               });
             }
           } catch (err) {
+            // The verify-payment call itself failed at the network level
+            // (fetch() threw -- a dropped connection, not a clean error
+            // response). That does NOT mean the payment failed: the
+            // webhook (the actual source of truth, entirely independent
+            // of this browser tab) may already have recorded it as
+            // successful, and confirmed exactly that happening in
+            // production once already -- the backend had a receipt
+            // issued while the donor was still staring at this catch
+            // block with no way to know that. Falling back to polling
+            // here, same as the "verify-payment returned an error"
+            // branch above, means the donor still gets redirected to
+            // their receipt automatically once the webhook (or a retry)
+            // catches up, instead of being stuck on a dead page.
             console.error('Payment verification failed:', err);
-            showStatusNote(
-              'We could not confirm your payment automatically. If money was deducted, please note the ' +
-              'time and amount and contact the temple office, or check "My Donations" shortly -- your ' +
-              'receipt may still appear there once confirmation catches up.'
-            );
+            pollDonationStatus(order.donation_id, {
+              attempts: 40, intervalMs: 3000, quiet: false,
+              onGiveUp: () => showStatusNote(
+                'We could not confirm your payment automatically. If money was deducted, please note the ' +
+                'time and amount and contact the temple office, or check "My Donations" shortly -- your ' +
+                'receipt may still appear there once confirmation catches up.'
+              ),
+            });
           }
         },
         modal: {
