@@ -108,6 +108,32 @@ window.TempleDonationPayment = (function () {
     return new Promise(function (resolve) { setTimeout(resolve, ms); });
   }
 
+  /* Razorpay's checkout renders in an iframe, and a handful of in-app
+   * browsers don't support iframes at all -- Razorpay names Instagram,
+   * Facebook Messenger, Opera and UC Browser. In those, checkout simply
+   * never opens: the donor taps Pay and nothing happens. Their documented
+   * fix is `callback_url` + `redirect: true`, where Razorpay takes over
+   * the tab and POSTs the result back to the server instead of calling
+   * the handler in our page.
+   *
+   * Detection is by user agent, which is unreliable in general -- but the
+   * cost of being wrong is small in both directions here. A false
+   * positive gets a working redirect flow (slightly less slick); a false
+   * negative gets the handler flow that already works everywhere else.
+   * Everything else deliberately keeps the handler, which Razorpay
+   * recommends for standard web integrations.
+   *
+   * FBAN/FBAV/FB_IAB are Facebook's in-app browser tokens (the Instagram
+   * one embeds them too), OPR is Opera, UCBrowser/UCWEB is UC Browser. */
+  function needsRedirectFlow() {
+    try {
+      const ua = navigator.userAgent || '';
+      return /Instagram|FBAN|FBAV|FB_IAB|Messenger|OPR\/|UCBrowser|UCWEB/i.test(ua);
+    } catch (err) {
+      return false;
+    }
+  }
+
   /* POST JSON and always resolve to {ok, data}. Never throws for an HTTP
    * error status -- only for a true network-level failure, and even then
    * only after one retry. */
@@ -498,6 +524,18 @@ window.TempleDonationPayment = (function () {
         },
         theme: { color: '#1d3b6d' },
       };
+
+      if (needsRedirectFlow()) {
+        // Razorpay ignores `handler` once callback_url is set, so this is
+        // an either/or rather than a belt-and-braces addition. Built from
+        // the live origin so it always matches whichever domain the donor
+        // actually came in on (this domain must be allowlisted in the
+        // Razorpay dashboard). redirect:true keeps failures in the same
+        // flow instead of dropping back to a checkout popup that this
+        // browser can't render anyway.
+        options.callback_url = window.location.origin + '/api/payment-callback';
+        options.redirect = true;
+      }
 
       const rzp = new window.Razorpay(options);
       rzp.on('payment.failed', function (response) {

@@ -35,4 +35,19 @@
     </div>
   </div>
 </div>
+
+<script>
+  // The donation form leaves a "payment in progress" marker in
+  // localStorage so an outcome isn't lost if the tab is discarded during
+  // a UPI hand-off. Reaching this page means that donation has resolved,
+  // so the marker's work is done.
+  //
+  // Normally donation-payment.js clears it on its way here. It can't in
+  // the redirect flow (Instagram/Messenger/Opera/UC Browser), where
+  // Razorpay POSTs to the server and the server redirects here -- our JS
+  // never runs in between. Left behind, the marker would make the donor's
+  // next visit to a donation form start "confirming" a payment that
+  // finished long ago.
+  try { localStorage.removeItem('templeDonationPending'); } catch (e) {}
+</script>
 {% endblock %}

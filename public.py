@@ -808,11 +808,9 @@ def verify_payment():
         )
         return jsonify({"error": "Payment details don't match this donation."}), 400
 
-    key_secret = current_app.config["RAZORPAY_KEY_SECRET"]
-    payload = f"{data['razorpay_order_id']}|{data['razorpay_payment_id']}"
-    expected_sig = hmac.new(key_secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
-
-    if not hmac.compare_digest(expected_sig, data.get("razorpay_signature", "")):
+    if not _verify_checkout_signature(
+        donation, data["razorpay_payment_id"], data.get("razorpay_signature", "")
+    ):
         # Only a still-pending donation may be marked failed here. This
         # used to be unconditional, which meant an unauthenticated caller
         # sending a deliberately bad signature could flip *any* donation to
@@ -864,6 +862,89 @@ def verify_payment():
                      "Please check back in a minute or contact the temple office."
         }), 500
     return jsonify({"ok": True, "receipt_number": donation.receipt_number})
+
+
+def _verify_checkout_signature(donation, payment_id, signature):
+    """Shared by the browser fast path and the redirect callback below.
+
+    Note which order id goes into the payload: the one *we* stored when we
+    created the order, never one supplied by the caller. Razorpay's guide
+    is explicit about this ("Retrieve the order_id from your server. Do not
+    use the razorpay_order_id returned by Checkout") -- otherwise a valid
+    signature from any other payment could be replayed against a different
+    donation.
+    """
+    key_secret = current_app.config["RAZORPAY_KEY_SECRET"]
+    payload = f"{donation.razorpay_order_id}|{payment_id}"
+    expected = hmac.new(key_secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature or "")
+
+
+@bp.route("/api/payment-callback", methods=["POST"])
+@csrf.exempt
+@limiter.limit("60 per hour")
+def payment_callback():
+    """Redirect-flow counterpart to /api/verify-payment.
+
+    Razorpay's checkout renders in an iframe, and some in-app browsers --
+    Instagram, Facebook Messenger, Opera, UC Browser -- don't support
+    iframes at all, so checkout simply never opens there. Razorpay's fix
+    is `callback_url` + `redirect: true`: instead of calling the handler
+    in our page, they take over the whole tab and POST the result back
+    here as a normal form submission. Only those browsers get this flow
+    (see needsRedirectFlow() in donation-payment.js); everywhere else
+    keeps the handler, which Razorpay recommends for standard web.
+
+    CSRF-exempt because this is a cross-origin form POST from Razorpay,
+    with no session or token of ours. The signature check is the
+    authentication, exactly as on the webhook.
+
+    Not wrapped in _safe_json_route: a donor's browser lands here, so
+    every exit has to be a page they can look at, never JSON.
+    """
+    order_id = (request.form.get("razorpay_order_id") or "").strip()
+    payment_id = (request.form.get("razorpay_payment_id") or "").strip()
+    signature = (request.form.get("razorpay_signature") or "").strip()
+
+    # Looked up *by* order id rather than being told which donation this
+    # is -- same as the webhook, and inherently immune to the replay this
+    # binding exists to prevent.
+    donation = Donation.query.filter_by(razorpay_order_id=order_id).first() if order_id else None
+    if donation is None:
+        current_app.logger.warning("payment-callback for unknown order %r", order_id)
+        flash("We couldn't match that payment to a donation. Please contact the temple office.")
+        return redirect(url_for("public.donate_form"))
+
+    try:
+        if not payment_id or not _verify_checkout_signature(donation, payment_id, signature):
+            current_app.logger.warning(
+                "payment-callback signature check failed for donation %s", donation.id
+            )
+            if donation.status == "pending":
+                donation.status = "failed"
+                db.session.commit()
+            flash("We couldn't verify that payment. If money was deducted, please contact the temple office.")
+            return redirect(url_for("public.donate_form"))
+
+        donation.razorpay_payment_id = payment_id
+
+        # Same rule as everywhere else: authorized isn't good enough, since
+        # uncaptured payments are auto-refunded and the receipt would end up
+        # certifying a donation that reversed.
+        if not _payment_is_captured(payment_id):
+            db.session.commit()
+            return redirect(url_for("public.donate_success", donation_id=donation.id))
+
+        _finalize_success(donation)
+    except Exception:
+        # The donor is mid-redirect with money already taken. The webhook
+        # will still finalize this independently, so send them to the
+        # status page rather than an error page -- it shows the receipt
+        # once confirmation lands.
+        db.session.rollback()
+        current_app.logger.exception("payment-callback failed for donation %s", donation.id)
+
+    return redirect(url_for("public.donate_success", donation_id=donation.id))
 
 
 @bp.route("/api/donation-status/<int:donation_id>", methods=["GET"])
