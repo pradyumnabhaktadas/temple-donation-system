@@ -450,12 +450,19 @@ window.TempleDonationPayment = (function () {
               razorpay_signature: response.razorpay_signature,
             }, csrfToken);
 
-            if (result.ok) {
+            // Deliberately checks the payload's own ok flag, not just the
+            // HTTP status. verify-payment answers 202 when the payment is
+            // authentic but not yet captured by the bank -- a receipt
+            // can't be issued for it yet -- and 202 is inside fetch()'s
+            // `ok` range, so trusting the status alone would send the
+            // donor to a receipt page that has no receipt on it.
+            if (result.ok && result.data && result.data.ok) {
               goToReceipt(order.donation_id);
             } else {
-              // The server said no. That is *not* proof the payment
+              // Not confirmed *yet*. That is not proof the payment
               // failed -- the webhook is the source of truth and may
-              // simply not have caught up. Fall through to polling.
+              // simply not have caught up, or the bank may still be
+              // capturing. Fall through to polling.
               pollThenGiveUp(order.donation_id);
             }
           } catch (err) {

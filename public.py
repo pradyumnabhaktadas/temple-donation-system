@@ -827,6 +827,37 @@ def verify_payment():
         return jsonify({"error": "Signature verification failed"}), 400
 
     donation.razorpay_payment_id = data["razorpay_payment_id"]
+
+    # A valid signature proves the payment is authentic -- not that the
+    # money will actually settle. Razorpay's best-practices page is
+    # explicit: "Check the payment/order status, that is if the payment's
+    # status is captured and the order's status is paid, before providing
+    # the services to the customers." An "authorized" payment has been
+    # approved by the bank but not captured, and Razorpay auto-refunds
+    # uncaptured payments after a fixed period -- so finalizing one here
+    # would issue a receipt, and potentially an 80G tax certificate, for a
+    # donation that quietly reverses later.
+    #
+    # The webhook path never had this problem (it only acts on
+    # payment.captured / order.paid) and neither does the reconciliation
+    # helper above; this was the one path that finalized on the signature
+    # alone.
+    #
+    # Not fatal if the status can't be established: a failed lookup falls
+    # through to finalizing, which is the behaviour this route has always
+    # had. Refusing every receipt whenever Razorpay's API is briefly
+    # unreachable would be the worse failure -- the signature has already
+    # proven the payment is real, and the webhook will correct the record
+    # either way.
+    if not _payment_is_captured(data["razorpay_payment_id"]):
+        db.session.commit()  # keep the payment id we just recorded
+        return jsonify({
+            "ok": False,
+            "status": "pending",
+            "error": "Payment received -- waiting for the bank to confirm it. Your receipt will "
+                     "appear here automatically once that's done.",
+        }), 202
+
     if not _finalize_success(donation):
         return jsonify({
             "error": "Payment verified, but we couldn't finish issuing the receipt. "
@@ -868,6 +899,47 @@ def donation_status(donation_id):
         _reconcile_pending_with_razorpay(donation)
 
     return jsonify({"status": donation.status, "receipt_number": donation.receipt_number})
+
+
+def _payment_is_captured(payment_id):
+    """True if Razorpay says this payment is captured -- i.e. the money is
+    actually ours and won't be auto-refunded.
+
+    Returns True rather than False when the answer can't be established
+    (Razorpay unreachable, keys not configured, unexpected payload). This
+    is a deliberate fail-open: the only caller has already verified the
+    payment's signature, so the payment is known to be genuine, and
+    blocking every receipt during a transient Razorpay API outage would be
+    a worse failure than briefly trusting a signature the way this code
+    always used to. The webhook remains the authority either way.
+    """
+    if not current_app.config.get("RAZORPAY_ENABLED"):
+        return True
+
+    try:
+        import razorpay
+
+        client = razorpay.Client(
+            auth=(current_app.config["RAZORPAY_KEY_ID"], current_app.config["RAZORPAY_KEY_SECRET"])
+        )
+        payment = client.payment.fetch(payment_id) or {}
+    except Exception:
+        current_app.logger.exception(
+            "Could not fetch payment %s to confirm capture; trusting the verified "
+            "signature instead", payment_id,
+        )
+        return True
+
+    status = payment.get("status")
+    if status == "captured":
+        return True
+
+    current_app.logger.info(
+        "Payment %s is %r, not captured -- holding the receipt until it is. If this "
+        "keeps happening, check auto-capture under Razorpay Dashboard -> Account & "
+        "Settings -> Payment Capture.", payment_id, status,
+    )
+    return False
 
 
 def _reconcile_pending_with_razorpay(donation):
