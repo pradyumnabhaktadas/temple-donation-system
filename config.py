@@ -21,6 +21,18 @@ class Config:
     # on SQLite (used for local/demo mode).
     SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True, "pool_recycle": 240}
 
+    # Without this, Flask doesn't send a Cache-Control max-age on files
+    # served from /static (logo, gallery photos, style.css) -- browsers
+    # end up re-validating every one of them on every single page view
+    # instead of just reusing what they already downloaded. 7 days is a
+    # reasonable middle ground for a site with no cache-busting/content-
+    # hashed filenames set up: long enough to meaningfully speed up
+    # repeat visits within the same week (a donor browsing several pages,
+    # or admin staff who are here constantly), short enough that a real
+    # asset update (a new gallery photo, a style.css tweak) shows up for
+    # everyone within a week even without a hard cache-clear.
+    SEND_FILE_MAX_AGE_DEFAULT = timedelta(days=7)
+
     # --- Razorpay ---
     # Leave these blank to run the app in DEMO MODE: the donation form will show
     # a "Simulate Payment Success" button instead of the real Razorpay checkout,
