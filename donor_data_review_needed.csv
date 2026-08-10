@@ -1,4 +1,5 @@
 note
+Merged duplicate rows for 'Anuj Kumar' (identical name+phone appeared more than once in the sheet -- missed in the first pass)
 "Skipped non-donor row: 'COPY OF PAN DETAILS' (looks like a sheet artifact, not a donor)"
 Merged duplicate rows for 'Gaurav Sharma' (identical name+phone appeared more than once in the sheet)
 Merged duplicate rows for 'Sudhir Kumar' (identical name+phone appeared more than once in the sheet)
