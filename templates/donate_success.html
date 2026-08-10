@@ -21,6 +21,11 @@
         {% else %}
         <a class="btn btn-link" href="{{ url_for('public.donate_form') }}">Make another offering</a>
         {% endif %}
+      {% elif donation.status == 'cancelled' %}
+        <span style="font-size:2.5rem;">ⓘ</span>
+        <h3 class="mt-2" style="color: var(--saffron-dark);">Donation Cancelled</h3>
+        <p>This donation was cancelled by the temple office. If you have questions about it, please contact the office with this reference: {{ donation.id }}.</p>
+        <a class="btn btn-primary" href="{{ url_for('public.donate_form') }}">Back to Donation Page</a>
       {% else %}
         <span style="font-size:2.5rem;">⏳</span>
         <h3 class="mt-2" style="color: var(--saffron-dark);">Payment Pending</h3>

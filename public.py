@@ -702,6 +702,24 @@ def _finalize_success(donation):
         current_app.logger.exception("Failed to lock donation %s for finalization", donation.id)
         return False
 
+    if donation.status == "cancelled":
+        # An admin explicitly cancelled this donation (admin.cancel_donation
+        # -- only reachable from an already-"success" donation, and it
+        # deliberately leaves the original receipt_number in place rather
+        # than clearing it, since receipts are immutable once issued).
+        # That decision has to be sticky: Razorpay's webhook redelivery
+        # schedule can span hours after the original payment (longer if
+        # our server had any downtime), and without this check, a late
+        # redelivery -- or, less likely, a very delayed browser-side
+        # confirmation -- would silently un-cancel the donation and even
+        # overwrite its original receipt number with a freshly issued
+        # one, undoing whatever it was cancelled for. Returning True
+        # (not False) is deliberate: this donation already has a real
+        # receipt number on file from before it was cancelled, which is
+        # what True is documented to mean here -- it just must never be
+        # re-finalized once cancelled.
+        return True
+
     if donation.status == "success" and donation.receipt_number:
         return True
 
