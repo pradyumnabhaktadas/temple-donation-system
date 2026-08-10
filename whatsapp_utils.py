@@ -61,6 +61,8 @@ import uuid
 import requests
 from flask import current_app
 
+from utils import receipt_access_token
+
 
 DEFAULT_AIRTEL_BASE_URL = "https://iqwhatsapp.airtel.in/gateway/airtel-xchange/basic/whatsapp-manager/v1/template/send"
 
@@ -91,7 +93,14 @@ def send_receipt_whatsapp(donation, donor, org_cfg, pdf_bytes):
     try:
         base_url = cfg.get("WHATSAPP_AIRTEL_BASE_URL") or DEFAULT_AIRTEL_BASE_URL
         org_name = org_cfg.get("ORG_PARENT_NAME") or org_cfg.get("ORG_NAME") or "the temple"
-        receipt_url = f"{public_base_url.rstrip('/')}/receipt/{donation.id}"
+        # The signed token is required now that /receipt/<id> is no longer
+        # open to anyone who can guess an id (see utils.receipt_access_token
+        # and public._may_download_receipt). Airtel fetches this URL
+        # server-side with no session of its own, so the token in the URL
+        # is the only thing that can authorise it -- without it, every
+        # WhatsApp receipt would come back 404.
+        receipt_token = receipt_access_token(donation.id, cfg["SECRET_KEY"])
+        receipt_url = f"{public_base_url.rstrip('/')}/receipt/{donation.id}?t={receipt_token}"
 
         payload = {
             "templateId": template_id,

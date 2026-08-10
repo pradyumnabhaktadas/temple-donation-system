@@ -90,7 +90,16 @@ class TestWhatsAppReceipt:
         assert payload["from"] == "918178798462"
         assert payload["message"]["variables"] == ["Test Donor", "501.00", "Sri Sri Rukmini Dwarkadhish Temple"]
         assert payload["mediaAttachment"]["type"] == "DOCUMENT"
-        assert payload["mediaAttachment"]["URL"] == "https://givetokrishna.com/receipt/42"
+        # The signed token is not optional here: Airtel fetches this URL
+        # server-side with no session of its own, so it's the only thing
+        # authorising the download now that /receipt/<id> is no longer open
+        # to anyone who can guess an id. Without it every WhatsApp receipt
+        # would come back 404.
+        from utils import receipt_access_token
+        expected_token = receipt_access_token(42, app.config["SECRET_KEY"])
+        assert payload["mediaAttachment"]["URL"] == (
+            f"https://givetokrishna.com/receipt/42?t={expected_token}"
+        )
 
     def test_optional_cookie_header_only_sent_when_configured(self, app):
         _configure(app)

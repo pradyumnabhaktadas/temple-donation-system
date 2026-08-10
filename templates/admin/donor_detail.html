@@ -87,7 +87,7 @@
       <td class="small text-muted">{{ d.razorpay_order_id or '-' }}</td>
       <td>
         {% if d.status == 'success' and d.receipt_number %}
-          <a href="{{ url_for('public.download_receipt', donation_id=d.id) }}">{{ d.receipt_number }}</a>
+          <a href="{{ url_for('public.download_receipt', donation_id=d.id, t=receipt_token(d.id)) }}">{{ d.receipt_number }}</a>
         {% elif d.status == 'success' %}
           <span class="text-muted small">no receipt</span>
         {% else %}-{% endif %}

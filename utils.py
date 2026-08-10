@@ -1,5 +1,34 @@
 import datetime
+import hashlib
+import hmac
 import re
+
+
+def receipt_access_token(donation_id, secret_key):
+    """An unguessable per-donation token gating the /receipt/<id> download.
+
+    Receipt PDFs carry the donor's full name, address, PAN, email and
+    phone. Donation ids are sequential integers, so without this the route
+    could be walked -- /receipt/1, /receipt/2, ... -- to harvest every
+    donor's personal details, PAN included, from an unauthenticated
+    endpoint. It can't simply be put behind a login: WhatsApp receipt
+    delivery works by handing Airtel a public URL to fetch the PDF from
+    (see whatsapp_utils), and donors need the link right after paying,
+    before any account exists.
+
+    A signed token solves both: it travels in the URL, so anything holding
+    a legitimate link (the success page, a WhatsApp message) keeps
+    working, while an id alone gets you nothing.
+
+    Derived from SECRET_KEY rather than stored, so this needed no schema
+    change and no migration -- the same donation always produces the same
+    token, and rotating SECRET_KEY invalidates every old link at once
+    (which also already invalidates every session, so it's not a new
+    consideration). Truncated to 32 hex chars: 128 bits, far past
+    brute-forcing, and short enough to stay readable in a WhatsApp message.
+    """
+    message = f"receipt:{donation_id}".encode()
+    return hmac.new(secret_key.encode(), message, hashlib.sha256).hexdigest()[:32]
 
 
 def format_inr(amount, decimals=0):

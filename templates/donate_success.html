@@ -11,7 +11,7 @@
         <p>Your donation of <strong>Rs. {{ donation.amount | inr(2) }}</strong> for
           <strong>{{ donation.campaign.name }}{% if donation.bace_property %} -- {{ donation.bace_property.name }}{% endif %}{% if donation.festival %} -- {{ donation.festival.name }}{% endif %}{% if donation.seva_type %} ({{ donation.seva_type.name }}){% endif %}{% if donation.live_to_give_purpose %} -- {{ donation.live_to_give_purpose.name }}{% endif %}</strong> was received successfully.</p>
         <p class="receipt-reference">Receipt No: <strong>{{ donation.receipt_number }}</strong></p>
-        <a class="btn btn-gold success-action mb-2" href="{{ url_for('public.download_receipt', donation_id=donation.id) }}">Download receipt <span>↓</span></a>
+        <a class="btn btn-gold success-action mb-2" href="{{ url_for('public.download_receipt', donation_id=donation.id, t=receipt_token(donation.id)) }}">Download receipt <span>↓</span></a>
         {% if donation.bace_property %}
         <a class="btn btn-link" href="{{ url_for('public.bace_rent_form') }}">Make another payment</a>
         {% elif donation.festival %}

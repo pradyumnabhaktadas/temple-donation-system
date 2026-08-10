@@ -423,6 +423,33 @@ stays accurate even if you change the org's address, logo, or the receipt
 template's code later. Downloads (`/receipt/<id>`) and the email attachment
 both read straight from that column.
 
+One exception to "never regenerated": if a donation succeeded and has a
+receipt number but its stored PDF is missing (PDF generation is
+best-effort at finalization, so a failure there can never cost a donor an
+already-issued receipt number), the download route builds it on demand and
+saves it. That's a repair path for a receipt that would otherwise be
+unreachable, not a routine regeneration.
+
+### Receipt download access
+
+`/receipt/<id>` requires a signed token — `/receipt/42?t=…` — because the
+PDF carries the donor's full name, address, PAN, email and phone, and
+donation ids are sequential. Without it the route could be walked to
+harvest every donor's personal details from an unauthenticated endpoint.
+
+The token is an HMAC of the donation id under `SECRET_KEY`
+(`utils.receipt_access_token`), so it needs no schema change and no
+migration, and the same donation always produces the same token. Templates
+build links with the `receipt_token()` Jinja global; `whatsapp_utils`
+appends it so Airtel can fetch the PDF server-side. Logged-in admins and a
+donor viewing their own donations in the donor portal are allowed through
+without a token.
+
+Rotating `SECRET_KEY` invalidates every previously issued receipt link at
+once (it already invalidates all sessions, so this isn't a new
+consideration) — donors can still reach their receipts through the donor
+portal, and staff through the admin area.
+
 **Size, if you're wondering:** each receipt is about 250 KB. At 500-2,000
 donations/year for a single branch, that's roughly 120-490 MB/year —
 genuinely small, and it grows with your existing Postgres storage, which

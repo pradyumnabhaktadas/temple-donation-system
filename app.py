@@ -9,7 +9,7 @@ load_dotenv()
 from config import Config
 from extensions import db, login_manager, csrf, limiter, LIMITER_AVAILABLE
 from models import AdminUser
-from utils import format_inr, normalize_phone, to_ist
+from utils import format_inr, normalize_phone, to_ist, receipt_access_token
 
 
 def create_app(test_config=None):
@@ -168,6 +168,17 @@ def create_app(test_config=None):
     # on their wall. Usage: {{ (d.donation_date | to_ist).strftime(...) }}
     # -- chainable on an optional column since to_ist(None) is None.
     app.jinja_env.filters["to_ist"] = to_ist
+
+    # Receipt download links need a signed token (see
+    # utils.receipt_access_token) -- exposed to templates so every link is
+    # built the same way:
+    #   url_for('public.download_receipt', donation_id=d.id, t=receipt_token(d.id))
+    # Admin templates could omit it (an authenticated admin is allowed
+    # through regardless) but include it anyway, so there's exactly one
+    # correct pattern to copy rather than two that differ by context.
+    app.jinja_env.globals["receipt_token"] = lambda donation_id: receipt_access_token(
+        donation_id, app.config["SECRET_KEY"]
+    )
 
     @login_manager.user_loader
     def load_user(user_id):

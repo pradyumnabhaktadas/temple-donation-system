@@ -47,7 +47,7 @@
       </td>
       <td>
         {% if d.status == 'success' and d.receipt_number %}
-          <a href="{{ url_for('public.download_receipt', donation_id=d.id) }}">Download {{ d.receipt_number }}</a>
+          <a href="{{ url_for('public.download_receipt', donation_id=d.id, t=receipt_token(d.id)) }}">Download {{ d.receipt_number }}</a>
         {% elif d.status == 'success' %}
           <span class="text-muted small">Receipt not available</span>
         {% else %}-{% endif %}

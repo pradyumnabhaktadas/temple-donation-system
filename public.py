@@ -38,8 +38,9 @@ import threading
 
 from flask import (
     Blueprint, render_template, request, jsonify, redirect, url_for,
-    send_file, current_app, flash,
+    send_file, current_app, flash, session, abort,
 )
+from flask_login import current_user
 from werkzeug.exceptions import HTTPException
 
 from extensions import db, csrf, limiter
@@ -47,7 +48,7 @@ from models import Donor, Campaign, Donation, ReceiptCounter, BaceProperty, Fest
 from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email
 from whatsapp_utils import send_receipt_whatsapp
-from utils import is_valid_pan, is_valid_phone, normalize_phone
+from utils import is_valid_pan, is_valid_phone, normalize_phone, receipt_access_token
 
 bp = Blueprint("public", __name__)
 
@@ -1082,9 +1083,44 @@ def donate_success(donation_id):
     return render_template("donate_success.html", donation=donation)
 
 
+def _may_download_receipt(donation):
+    """Who is allowed to fetch a receipt PDF.
+
+    The PDF contains the donor's full name, address, PAN, email and phone.
+    Donation ids are sequential, so this route has to prove the requester
+    is entitled to *this* receipt rather than just able to count.
+
+    Three legitimate routes in, in order of how often they're used:
+
+    1. A signed token in the URL (see utils.receipt_access_token) -- how
+       donors reach their own receipt straight after paying, and how
+       Airtel fetches the PDF to attach to a WhatsApp message. Compared
+       with compare_digest to keep the check constant-time.
+    2. A logged-in admin, who can already see every donation in the admin
+       area anyway.
+    3. A donor logged into the donor portal, for their own donations only.
+    """
+    token = request.args.get("t") or ""
+    expected = receipt_access_token(donation.id, current_app.config["SECRET_KEY"])
+    if token and hmac.compare_digest(token, expected):
+        return True
+
+    if current_user.is_authenticated:
+        return True
+
+    return session.get("donor_id") == donation.donor_id
+
+
 @bp.route("/receipt/<int:donation_id>")
 def download_receipt(donation_id):
     donation = Donation.query.get_or_404(donation_id)
+
+    if not _may_download_receipt(donation):
+        # Deliberately the same 404 an unknown id gets: distinguishing
+        # "wrong token" from "no such donation" would confirm which ids
+        # exist, which is most of what an enumeration attempt wants.
+        abort(404)
+
     if donation.status != "success" or not donation.receipt_number:
         flash("Receipt not available for this donation.")
         return redirect(url_for("public.donate_form"))
