@@ -25,6 +25,14 @@ class TestRazorpayOrderAmountRounding:
 
         app.config["RAZORPAY_KEY_ID"] = "rzp_test_fake"
         app.config["RAZORPAY_KEY_SECRET"] = "fake_secret"
+        # RAZORPAY_ENABLED is derived from the keys *inside* create_app(),
+        # so setting the keys afterwards doesn't flip it -- it has to be
+        # set explicitly here or create_order() takes the demo-mode branch
+        # and never calls Razorpay at all. This used to pass only by
+        # accident, on machines whose .env happened to carry real Razorpay
+        # keys; conftest now pins every integration to "not configured" so
+        # the suite behaves the same everywhere.
+        app.config["RAZORPAY_ENABLED"] = True
         campaign = Campaign.query.filter_by(name="Annadan").first()
 
         mock_order = {"id": "order_fake123"}

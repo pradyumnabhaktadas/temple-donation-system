@@ -42,8 +42,11 @@ class TestWhatsAppReceipt:
     from a public URL, so sending is a single POST."""
 
     def test_demo_mode_when_not_configured(self, app):
-        # conftest's app fixture doesn't set any WHATSAPP_*/PUBLIC_BASE_URL
-        # config, so this is demo mode.
+        # conftest's app fixture pins WHATSAPP_*/PUBLIC_BASE_URL to empty,
+        # so this is demo mode. That pinning matters: app.py calls
+        # load_dotenv(), so before it this test read the developer's own
+        # .env and started failing the moment real Airtel credentials were
+        # added there -- the send genuinely wasn't in demo mode any more.
         with app.app_context(), patch("whatsapp_utils.requests.post") as mock_post:
             sent = send_receipt_whatsapp(_fake_donation(), _fake_donor(), {}, _fake_pdf_bytes())
 

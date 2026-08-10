@@ -20,6 +20,32 @@ def app():
             "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
             "WTF_CSRF_ENABLED": False,
             "SECRET_KEY": "test-secret",
+
+            # Pin every external-integration setting to "not configured".
+            #
+            # app.py calls load_dotenv() at import time and Config reads
+            # os.environ, so without this the suite inherits whatever is in
+            # the developer's own .env -- and then passes or fails
+            # depending on which integrations that developer happens to
+            # have set up locally. That's exactly what bit us: adding real
+            # Airtel credentials to .env made the WhatsApp "demo mode when
+            # not configured" test start failing, because the send really
+            # was configured, while the Razorpay amount test depended on
+            # Razorpay keys being present.
+            #
+            # Tests that need an integration switched on now say so
+            # explicitly (see test_razorpay_order_amount and
+            # test_whatsapp_receipt's _configure), which is both clearer
+            # and reproducible on any machine.
+            "RAZORPAY_KEY_ID": "",
+            "RAZORPAY_KEY_SECRET": "",
+            "RAZORPAY_WEBHOOK_SECRET": "",
+            "WHATSAPP_AIRTEL_USERNAME": "",
+            "WHATSAPP_AIRTEL_PASSWORD": "",
+            "WHATSAPP_FROM_NUMBER": "",
+            "WHATSAPP_TEMPLATE_ID": "",
+            "PUBLIC_BASE_URL": "",
+            "SMTP_HOST": "",
         }
     )
 
