@@ -134,9 +134,17 @@ window.TempleDonationPayment = (function () {
    * string, or null if it couldn't be determined right now (caller decides
    * whether that's worth reacting to -- usually it just means "try again
    * on the next tick"). */
-  async function fetchDonationStatus(donationId) {
+  /* `verify` asks the server to additionally check with Razorpay directly
+   * rather than only reporting what it has already been told (see
+   * public._reconcile_pending_with_razorpay). Reserved for the two moments
+   * where the cheap answer has already proven insufficient -- the poll
+   * giving up, and the donor pressing "Check again" -- since it costs an
+   * outbound API call, and firing it on every 3-second tick would be both
+   * wasteful and rude to Razorpay's rate limits. */
+  async function fetchDonationStatus(donationId, verify) {
     try {
-      const resp = await fetch('/api/donation-status/' + encodeURIComponent(donationId));
+      const url = '/api/donation-status/' + encodeURIComponent(donationId) + (verify ? '?verify=1' : '');
+      const resp = await fetch(url);
       if (!resp.ok) return null;
       const data = await resp.json();
       return data && data.status ? data.status : null;
@@ -205,6 +213,9 @@ window.TempleDonationPayment = (function () {
     const description = config.description;
     const orgName = config.orgName;
     const razorpayEnabled = config.razorpayEnabled;
+    // Absolute URL (Razorpay loads it from their own page, so a relative
+    // path wouldn't resolve). Optional -- checkout just shows no logo.
+    const logoUrl = config.logoUrl;
 
     const form = document.getElementById(formId);
     if (!form) return; // this page doesn't have the form (campaign not configured)
@@ -272,7 +283,7 @@ window.TempleDonationPayment = (function () {
       btn.addEventListener('click', async function () {
         btn.disabled = true;
         btn.textContent = 'Checking...';
-        const status = await fetchDonationStatus(donationId);
+        const status = await fetchDonationStatus(donationId, true);
         if (status === 'success') {
           goToReceipt(donationId);
           return;
@@ -339,10 +350,21 @@ window.TempleDonationPayment = (function () {
       }
       document.addEventListener('visibilitychange', onVisible);
 
-      const timer = setInterval(function () {
+      const timer = setInterval(async function () {
         count += 1;
         if (count > attempts) {
+          // Before giving up and showing the donor a worrying message,
+          // ask Razorpay directly. Every "we could not confirm your
+          // payment" report so far has turned out to be a donation that
+          // actually succeeded, so this is precisely the moment to stop
+          // waiting to be told and go and check.
+          const finalStatus = await fetchDonationStatus(donationId, true);
+          if (done) return;
           stop();
+          if (finalStatus === 'success') {
+            goToReceipt(donationId);
+            return;
+          }
           if (onGiveUp) onGiveUp();
           return;
         }
@@ -407,6 +429,12 @@ window.TempleDonationPayment = (function () {
         currency: 'INR',
         name: orgName,
         description: description,
+        // Razorpay's docs list `image` for the logo shown on the checkout
+        // modal. Worth having on a donation form specifically: the donor
+        // is handing money to a temple they may only know by name, and
+        // seeing the same logo carry over from the page into the payment
+        // window is reassurance that they're still in the right place.
+        image: logoUrl || undefined,
         order_id: order.order_id,
 
         handler: async function (response) {
@@ -465,9 +493,32 @@ window.TempleDonationPayment = (function () {
       };
 
       const rzp = new window.Razorpay(options);
-      rzp.on('payment.failed', function () {
-        // Razorpay shows its own failure detail in the modal; just let the
-        // donor try again.
+      rzp.on('payment.failed', function (response) {
+        // Razorpay shows the donor its own failure detail inside the
+        // modal, so nothing is displayed from here -- competing messages
+        // would only confuse. But the payload carries exactly the fields
+        // that make a failure diagnosable after the fact (code, reason,
+        // step, and the order/payment ids to look up in the Razorpay
+        // dashboard), and throwing them away is how "it sometimes fails"
+        // reports end up with nothing to go on. Logged defensively: the
+        // error object is Razorpay's, and this must never itself throw
+        // and leave the button stuck disabled.
+        try {
+          const err = (response && response.error) || {};
+          const meta = err.metadata || {};
+          console.error('Razorpay payment.failed:', {
+            code: err.code,
+            description: err.description,
+            source: err.source,
+            step: err.step,
+            reason: err.reason,
+            order_id: meta.order_id,
+            payment_id: meta.payment_id,
+            donation_id: order.donation_id,
+          });
+        } catch (e) {
+          console.error('Razorpay payment.failed (unparseable payload)');
+        }
         submitting = false;
         payBtn.disabled = false;
       });

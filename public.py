@@ -851,9 +851,80 @@ def donation_status(donation_id):
     backgrounded tab comes back, on top of the regular interval), and
     many donors on the same mobile carrier's shared IP (common in India)
     polling concurrently could otherwise collide with each other's
-    budget and see checks silently fail more than necessary."""
+    budget and see checks silently fail more than necessary.
+
+    ?verify=1 additionally asks Razorpay directly -- see
+    _reconcile_pending_with_razorpay(). Razorpay's own integration guide
+    recommends exactly this: rely on webhooks for automation, and "if a
+    critical user-facing flow requires instant status, but the webhook
+    notification has not arrived within the time mandated by your business
+    needs, perform an immediate API Fetch call to verify the status." The
+    client only sets it when the ordinary poll has run out of patience or
+    the donor pressed "Check again", so the extra API call is bounded by
+    those events rather than fired on every 3-second tick."""
     donation = Donation.query.get_or_404(donation_id)
+
+    if request.args.get("verify") == "1" and donation.status == "pending":
+        _reconcile_pending_with_razorpay(donation)
+
     return jsonify({"status": donation.status, "receipt_number": donation.receipt_number})
+
+
+def _reconcile_pending_with_razorpay(donation):
+    """Last-resort truth check for a donation still sitting at "pending".
+
+    Everything else in this flow waits to be *told* a payment succeeded:
+    the webhook is Razorpay calling us, and the browser fast path is the
+    donor's tab calling us. When both are lost -- webhook delayed or
+    misdelivered, and the tab backgrounded through a UPI hand-off or
+    closed outright -- nothing else ever asks Razorpay, who has known the
+    answer the whole time. That gap is what produced donors being shown
+    "we could not confirm your payment" for donations that had in fact
+    succeeded (confirmed more than once in Admin -> Donations Log).
+
+    So: ask. If Razorpay reports a captured payment against this
+    donation's own order, finalize it exactly as the webhook would have.
+
+    Deliberately quiet on failure -- this is a best-effort improvement on
+    top of three existing paths, and the caller only wants a status back.
+    Never raises.
+    """
+    if not current_app.config.get("RAZORPAY_ENABLED") or not donation.razorpay_order_id:
+        return
+
+    try:
+        import razorpay
+
+        client = razorpay.Client(
+            auth=(current_app.config["RAZORPAY_KEY_ID"], current_app.config["RAZORPAY_KEY_SECRET"])
+        )
+        payments = client.order.payments(donation.razorpay_order_id) or {}
+    except Exception:
+        current_app.logger.exception(
+            "Razorpay status reconciliation failed for donation %s", donation.id
+        )
+        return
+
+    # "captured" is the only state that means the money is actually ours.
+    # "authorized" is approved-but-not-settled and is auto-refunded if it
+    # is never captured, so issuing an 80G receipt against one would risk
+    # certifying a donation that later reverses. Accounts with auto-capture
+    # on (Razorpay's own recommendation) move straight to captured anyway.
+    captured = next(
+        (p for p in (payments.get("items") or []) if p.get("status") == "captured"),
+        None,
+    )
+    if not captured:
+        return
+
+    current_app.logger.info(
+        "Reconciled donation %s from Razorpay (payment %s) -- neither the webhook "
+        "nor the browser had reported it", donation.id, captured.get("id"),
+    )
+    if captured.get("id"):
+        donation.razorpay_payment_id = captured["id"]
+    _apply_payment_details(donation, captured)
+    _finalize_success(donation)
 
 
 @bp.route("/api/simulate-payment", methods=["POST"])

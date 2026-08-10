@@ -177,6 +177,9 @@
     description: 'Festival Seva',
     orgName: {{ org_name | tojson }},
     razorpayEnabled: {{ razorpay_enabled | tojson }},
+    // Absolute URL: Razorpay renders the checkout modal from their own
+    // origin, so a relative /static/... path would not resolve there.
+    logoUrl: {{ url_for('static', filename='branding/iskcon_dwarka_logo.png', _external=True) | tojson }},
   });
 })();
 </script>
