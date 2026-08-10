@@ -527,11 +527,6 @@ window.TempleDonationPayment = (function () {
         }
         const order = result.data;
 
-        // From here on a pending donation exists server-side, so record it
-        // before handing off to Razorpay -- if this tab is discarded during
-        // a UPI hand-off, the next page load resumes from this marker.
-        writePendingMarker(order.donation_id);
-
         if (!razorpayEnabled) {
           const sim = await postJSON('/api/simulate-payment', { donation_id: order.donation_id }, csrfToken);
           if (sim.ok) {
@@ -550,6 +545,17 @@ window.TempleDonationPayment = (function () {
         await sdkReady;
         clearNote();
 
+        // Deliberately set here, immediately before the checkout modal
+        // opens, and NOT earlier at create-order time. The marker means
+        // "a payment may be in progress" -- on the next page load it
+        // triggers "Confirming your payment... please don't close this
+        // page" and, failing that, "if money was deducted...". Writing it
+        // before we know checkout will actually open means any failure
+        // between here and there (most realistically the SDK wait timing
+        // out) leaves a marker behind for a donation the donor never even
+        // got the chance to pay for -- so their *next* visit opens with a
+        // confirmation message about a payment that never happened.
+        writePendingMarker(order.donation_id);
         launchCheckout(order, donorInput);
         // Deliberately leaves `submitting`/`payBtn` disabled here: the
         // checkout modal is now open and owns the interaction. They're
