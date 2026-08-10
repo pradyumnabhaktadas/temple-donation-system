@@ -355,8 +355,13 @@ body {
 .donation-hero {
   position:relative; isolation:isolate; overflow:hidden; border-radius:1.5rem;
   min-height: 318px; padding: 3.6rem 4rem; display:flex; align-items:center;
-  background: linear-gradient(90deg, rgba(10,20,38,.86) 0%, rgba(14,28,50,.68) 32%, rgba(18,38,66,.38) 58%, rgba(22,46,78,.18) 78%, rgba(22,46,78,.12) 100%),
-              url('images/temple/front-view.jpg') center 30%/cover no-repeat;
+  /* Sri Sri Rukmini Dwarkadish darshan photo -- the deities sit centered
+     in the frame (unlike the old temple-building photo, which had open
+     sky on the left for the text to sit over), so this gradient is darker
+     and reaches further right than before to keep the "Live to Give" copy
+     legible against the busier, more colorful background. */
+  background: linear-gradient(100deg, rgba(8,14,28,.93) 0%, rgba(10,18,34,.86) 30%, rgba(14,24,44,.62) 52%, rgba(18,30,52,.34) 74%, rgba(20,34,58,.2) 100%),
+              url('images/deities/rukmini-dwarkadish.jpg') center 18%/cover no-repeat;
   color:#fff; box-shadow: 0 18px 38px rgba(15,36,68,.15);
 }
 .donation-hero:before { content:""; position:absolute; inset:0; z-index:-1; background:radial-gradient(circle at 78% 38%, rgba(239,185,88,.32), transparent 18%), radial-gradient(circle at 98% 98%, rgba(255,255,255,.1), transparent 38%); }
