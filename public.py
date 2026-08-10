@@ -786,13 +786,43 @@ def verify_payment():
     if "razorpay_order_id" not in data or "razorpay_payment_id" not in data:
         return jsonify({"error": "Missing payment verification fields."}), 400
 
+    # The signature below proves only that *some* genuine Razorpay payment
+    # exists for the order_id/payment_id pair in this request -- it says
+    # nothing about which donation that pair belongs to. Both values are
+    # handed to the browser, and this endpoint is unauthenticated, so
+    # without this check anyone could take a valid triple from a payment
+    # they genuinely made (a Rs. 1 donation of their own) and re-post it
+    # with somebody else's donation_id: the signature would verify, and
+    # that donation would be finalized and issued a real receipt --
+    # including an 80G tax receipt -- for money never paid against it.
+    # Binding the request to this donation's own stored order id closes
+    # that. The webhook path never needed this because it looks the
+    # donation *up* by order_id rather than being told which one to use.
+    if not donation.razorpay_order_id or not hmac.compare_digest(
+        str(donation.razorpay_order_id), str(data["razorpay_order_id"])
+    ):
+        current_app.logger.warning(
+            "verify-payment order_id mismatch for donation %s (sent %r, expected %r)",
+            donation.id, data.get("razorpay_order_id"), donation.razorpay_order_id,
+        )
+        return jsonify({"error": "Payment details don't match this donation."}), 400
+
     key_secret = current_app.config["RAZORPAY_KEY_SECRET"]
     payload = f"{data['razorpay_order_id']}|{data['razorpay_payment_id']}"
     expected_sig = hmac.new(key_secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
     if not hmac.compare_digest(expected_sig, data.get("razorpay_signature", "")):
-        donation.status = "failed"
-        db.session.commit()
+        # Only a still-pending donation may be marked failed here. This
+        # used to be unconditional, which meant an unauthenticated caller
+        # sending a deliberately bad signature could flip *any* donation to
+        # "failed" -- including one that had already succeeded and been
+        # issued a receipt number, which cancel_donation() treats as
+        # immutable. A donation that already reached a terminal state is
+        # never downgraded by a failed verification attempt; the webhook
+        # (layer 1) remains the authority on what actually happened.
+        if donation.status == "pending":
+            donation.status = "failed"
+            db.session.commit()
         return jsonify({"error": "Signature verification failed"}), 400
 
     donation.razorpay_payment_id = data["razorpay_payment_id"]
