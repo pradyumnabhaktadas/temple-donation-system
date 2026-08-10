@@ -8,22 +8,29 @@ from extensions import db
 from models import Campaign, AdminUser, BaceProperty, Festival, SevaType, LiveToGivePurpose
 
 CAMPAIGNS = [
-    ("Temple Construction", True),
-    ("Deity Worship", True),
-    ("Youth Preaching", True),
-    ("Festivals", True),
-    ("Annadan", True),
-    ("General Donations", True),
-    ("Other Charitable Activities", True),
-    ("BACE Contribution", False),
-    ("Youth Camp Registration Fees", False),
-    ("Retreats and Event Registrations", False),
-    ("Course Fees", False),
-    ("Other Internal Collections", False),
+    # (name, is_80g, min_amount) -- min_amount is None unless noted; only
+    # Live To Give currently has a floor (Rs. 101, admin-editable from
+    # Admin -> Campaigns -> Edit). This only affects fresh installs/resets
+    # (seeding skips anything that already exists by name) -- keeping this
+    # in sync with whatever's actually configured live means a
+    # reset_data.py + seed.py cycle restores the real settings instead of
+    # silently dropping back to "no minimum".
+    ("Temple Construction", True, None),
+    ("Deity Worship", True, None),
+    ("Youth Preaching", True, None),
+    ("Festivals", True, None),
+    ("Annadan", True, None),
+    ("General Donations", True, None),
+    ("Other Charitable Activities", True, None),
+    ("BACE Contribution", False, None),
+    ("Youth Camp Registration Fees", False, None),
+    ("Retreats and Event Registrations", False, None),
+    ("Course Fees", False, None),
+    ("Other Internal Collections", False, None),
     # is_80g here is just the campaign's default -- the Live To Give form
     # lets each donor pick 80G/Non-80G per donation, which overrides this
     # (see Donation.effective_is_80g).
-    ("Live To Give", True),
+    ("Live To Give", True, 101),
 ]
 
 # Starting list for the BACE Contribution form's property dropdown -- editable
@@ -89,9 +96,9 @@ LIVE_TO_GIVE_PURPOSES = [
 app = create_app()
 
 with app.app_context():
-    for name, is_80g in CAMPAIGNS:
+    for name, is_80g, min_amount in CAMPAIGNS:
         if not Campaign.query.filter_by(name=name).first():
-            db.session.add(Campaign(name=name, is_80g=is_80g))
+            db.session.add(Campaign(name=name, is_80g=is_80g, min_amount=min_amount))
 
     for name in BACE_PROPERTIES:
         if not BaceProperty.query.filter_by(name=name).first():
