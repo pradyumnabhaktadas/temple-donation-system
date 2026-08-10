@@ -27,6 +27,7 @@ _finalize_success() is idempotent and shared by all three, so it's safe
 for more than one of them to fire for the same donation.
 """
 import datetime
+import functools
 import hmac
 import hashlib
 import json
@@ -39,6 +40,7 @@ from flask import (
     Blueprint, render_template, request, jsonify, redirect, url_for,
     send_file, current_app, flash,
 )
+from werkzeug.exceptions import HTTPException
 
 from extensions import db, csrf, limiter
 from models import Donor, Campaign, Donation, ReceiptCounter, BaceProperty, Festival, SevaType, LiveToGivePurpose
@@ -48,6 +50,52 @@ from whatsapp_utils import send_receipt_whatsapp
 from utils import is_valid_pan, is_valid_phone, normalize_phone
 
 bp = Blueprint("public", __name__)
+
+
+def _safe_json_route(view_func):
+    """Blanket safety net for every JSON API route in the payment flow.
+
+    This session found the same bug three separate times in three
+    different functions along this exact flow: an unanticipated
+    exception (an over-length field, a PDF-generation edge case, a
+    transient DB hiccup) propagating straight out of a view with nothing
+    catching it, which presents to the donor's browser not as a clean
+    error but as the connection simply dying mid-request -- a payment
+    that may have actually succeeded looking, from the donor's side,
+    indistinguishable from one that silently failed. Each occurrence got
+    its own bespoke try/except added after the fact, once someone
+    noticed.
+
+    This decorator makes that fix structural instead of incidental: any
+    view it wraps gets a final catch-all, so the *next* unanticipated
+    exception -- wherever it turns out to be, in code that doesn't exist
+    yet -- still gets a normal JSON 500 instead of a dropped connection.
+    It's a last resort, not a replacement for handling specific,
+    anticipated failure modes with their own status codes and messages
+    (invalid input -> 400, Razorpay unreachable -> 502, etc.) -- those
+    still live in the view functions themselves, closer to where they
+    actually happen, so the donor gets the most specific and useful
+    message available.
+
+    HTTPException (get_or_404, Flask-Limiter's rate-limit response, etc.)
+    is deliberately let through unmodified -- those are already Flask's
+    own clean, intentional error responses, not the "something nobody
+    anticipated" case this exists to catch.
+    """
+    @functools.wraps(view_func)
+    def wrapped(*args, **kwargs):
+        try:
+            return view_func(*args, **kwargs)
+        except HTTPException:
+            raise
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception("Unhandled error in %s", view_func.__name__)
+            return jsonify({
+                "error": "Something went wrong on our end. Please try again, or contact the "
+                         "temple office if it keeps happening."
+            }), 500
+    return wrapped
 
 
 def _org_cfg():
@@ -394,6 +442,7 @@ def sitemap_xml():
 
 @bp.route("/api/create-order", methods=["POST"])
 @limiter.limit("30 per hour")
+@_safe_json_route
 def create_order():
     data = request.get_json(silent=True)
     if not data:
@@ -668,6 +717,7 @@ def _finalize_success(donation):
 
 @bp.route("/api/verify-payment", methods=["POST"])
 @limiter.limit("30 per hour")
+@_safe_json_route
 def verify_payment():
     """Browser fast path -- see module docstring, layer 2."""
     data = request.get_json(silent=True)
@@ -703,6 +753,7 @@ def verify_payment():
 
 @bp.route("/api/donation-status/<int:donation_id>", methods=["GET"])
 @limiter.limit("60 per minute")
+@_safe_json_route
 def donation_status(donation_id):
     """Client polling target -- see module docstring, layer 3. Doesn't
     confirm anything itself; just reports whatever the webhook or the
@@ -714,6 +765,7 @@ def donation_status(donation_id):
 
 @bp.route("/api/simulate-payment", methods=["POST"])
 @limiter.limit("30 per hour")
+@_safe_json_route
 def simulate_payment():
     """Only meaningful when Razorpay keys are not configured (demo mode).
     Lets you exercise the full donor -> donation -> receipt pipeline
@@ -738,6 +790,7 @@ def simulate_payment():
 
 @bp.route("/webhooks/razorpay", methods=["POST"])
 @csrf.exempt
+@_safe_json_route
 def razorpay_webhook():
     """Server-to-server payment confirmation -- see module docstring,
     layer 1, the source of truth. Called directly by Razorpay (Dashboard ->

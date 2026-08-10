@@ -137,14 +137,13 @@
 </div>
 
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script src="{{ url_for('static', filename='js/donation-payment.js') }}"></script>
 <script>
 (function () {
-  const form = document.getElementById('festival-seva-form');
-  const payBtn = document.getElementById('pay-btn');
-  const statusNote = document.getElementById('status-note');
-  const razorpayEnabled = {{ razorpay_enabled | tojson }};
-  const orgName = {{ org_name | tojson }};
-  const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+  // Page-specific UI only -- the payment flow itself (create order, launch
+  // Razorpay checkout, verify, poll) lives in static/js/donation-payment.js,
+  // shared by all three public donation forms so it only needs to be
+  // correct in one place.
 
   // Picking a seva tier with a suggested amount pre-fills (but doesn't
   // lock) the amount field.
@@ -173,164 +172,11 @@
   }
   amountInput.addEventListener('input', updatePanAddressRequirement);
 
-  // -- Small fetch helper ---------------------------------------------
-  async function postJSON(url, body) {
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-      body: JSON.stringify(body),
-    });
-    let data = {};
-    try { data = await resp.json(); } catch (err) { /* non-JSON error page */ }
-    return { ok: resp.ok, data };
-  }
-
-  function goToReceipt(donationId) {
-    window.location.href = `/donate/success/${donationId}`;
-  }
-
-  function showStatusNote(text) {
-    statusNote.textContent = text;
-    statusNote.style.display = '';
-  }
-
-  // -- Payment confirmation --------------------------------------------
-  // Same design as the main donation form (see donate.html / public.py):
-  // the webhook is the reliable source of truth, `handler` is a fast path,
-  // and polling is the fallback that doesn't depend on any particular
-  // browser behavior.
-  function pollDonationStatus(donationId, { attempts, intervalMs, quiet, onGiveUp }) {
-    let count = 0;
-    if (!quiet) showStatusNote('Confirming your payment... this can take up to a minute. Please don\'t close this page.');
-    const timer = setInterval(async () => {
-      count += 1;
-      if (count > attempts) {
-        clearInterval(timer);
-        if (onGiveUp) onGiveUp();
-        return;
-      }
-      try {
-        const resp = await fetch(`/api/donation-status/${donationId}`);
-        const status = await resp.json();
-        if (status.status === 'success') {
-          clearInterval(timer);
-          goToReceipt(donationId);
-        }
-      } catch (err) {
-        // Transient network hiccup -- just try again on the next tick.
-      }
-    }, intervalMs);
-  }
-
-  function launchRazorpayCheckout(order, donorInput) {
-    const options = {
-      key: order.key_id,
-      amount: Math.round(order.amount * 100),
-      currency: 'INR',
-      name: orgName,
-      description: 'Festival Seva',
-      order_id: order.order_id,
-      handler: async function (response) {
-        // Wrapped in try/catch: this callback runs asynchronously, well
-        // after the form-submit handler that launched it has already
-        // returned -- an unguarded exception here (a network hiccup, a
-        // browser quirk, anything) used to just die silently with nothing
-        // shown to the donor and nothing logged that anyone would notice,
-        // leaving them stuck on this page having already paid with no
-        // indication anything went wrong.
-        try {
-          const { ok } = await postJSON('/api/verify-payment', {
-            donation_id: order.donation_id,
-            razorpay_order_id: response.razorpay_order_id,
-            razorpay_payment_id: response.razorpay_payment_id,
-            razorpay_signature: response.razorpay_signature,
-          });
-          if (ok) {
-            goToReceipt(order.donation_id);
-          } else {
-            pollDonationStatus(order.donation_id, {
-              attempts: 40, intervalMs: 3000, quiet: false,
-              onGiveUp: () => showStatusNote(
-                'Still waiting on confirmation from the payment gateway. If money was deducted, your ' +
-                'receipt will appear in "My Donations" shortly, or contact the temple office.'
-              ),
-            });
-          }
-        } catch (err) {
-          console.error('Payment verification failed:', err);
-          showStatusNote(
-            'We could not confirm your payment automatically. If money was deducted, please note the ' +
-            'time and amount and contact the temple office, or check "My Donations" shortly -- your ' +
-            'receipt may still appear there once confirmation catches up.'
-          );
-        }
-      },
-      modal: {
-        ondismiss: function () {
-          payBtn.disabled = false;
-          pollDonationStatus(order.donation_id, { attempts: 5, intervalMs: 3000, quiet: true });
-        },
-      },
-      prefill: {
-        name: donorInput.full_name,
-        email: donorInput.email,
-        contact: donorInput.phone,
-      },
-      theme: { color: '#1d3b6d' },
-    };
-    const rzp = new Razorpay(options);
-    rzp.on('payment.failed', function () { payBtn.disabled = false; });
-    rzp.open();
-  }
-
-  // -- Form submit ------------------------------------------------------
-  // The whole thing is wrapped in try/catch/finally: previously, any
-  // exception in here (a network failure creating the order, or the
-  // Razorpay checkout script not finishing loading in time -- both seen
-  // intermittently in Safari) would silently kill this async function
-  // with nothing shown to the donor and nothing logged anywhere a person
-  // would think to look -- and since payBtn.disabled was already set to
-  // true a few lines up, the button just stayed disabled forever with no
-  // explanation. Now any failure is visible (console + on-page message)
-  // and the button always gets a chance to re-enable so the donor can
-  // retry instead of being stuck.
-  form.addEventListener('submit', async function (e) {
-    e.preventDefault();
-    payBtn.disabled = true;
-    statusNote.style.display = 'none';
-
-    try {
-      const donorInput = Object.fromEntries(new FormData(form).entries());
-      const { ok, data: order } = await postJSON('/api/create-order', donorInput);
-
-      if (!ok) {
-        alert(order.error || 'Something went wrong');
-        payBtn.disabled = false;
-        return;
-      }
-
-      if (razorpayEnabled) {
-        if (typeof Razorpay === 'undefined') {
-          throw new Error('Razorpay checkout script did not load');
-        }
-        launchRazorpayCheckout(order, donorInput);
-      } else {
-        const { ok: simOk } = await postJSON('/api/simulate-payment', { donation_id: order.donation_id });
-        if (simOk) {
-          goToReceipt(order.donation_id);
-        } else {
-          alert('Simulation failed');
-          payBtn.disabled = false;
-        }
-      }
-    } catch (err) {
-      console.error('Donation submit failed:', err);
-      payBtn.disabled = false;
-      showStatusNote(
-        'Something went wrong starting the payment. Please try again -- if it keeps happening, try ' +
-        'reloading the page, a different browser, or contact the temple office.'
-      );
-    }
+  TempleDonationPayment.init({
+    formId: 'festival-seva-form',
+    description: 'Festival Seva',
+    orgName: {{ org_name | tojson }},
+    razorpayEnabled: {{ razorpay_enabled | tojson }},
   });
 })();
 </script>
