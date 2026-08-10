@@ -109,8 +109,27 @@ window.TempleDonationPayment = (function () {
     if (!form) return; // page doesn't have this form (e.g. campaign not configured yet)
 
     const payBtn = form.querySelector('#pay-btn') || document.getElementById('pay-btn');
+    if (!payBtn) {
+      // Nothing sensible to do without a submit button -- bail out here,
+      // synchronously and visibly (console), rather than letting the
+      // first `payBtn.disabled = ...` deep inside a submit handler throw
+      // uncaught the moment a donor actually tries to pay.
+      console.error('TempleDonationPayment.init: no #pay-btn found for form', formId);
+      return;
+    }
     const statusNote = document.getElementById('status-note');
-    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    if (!csrfMeta) {
+      // Every page using this module extends base.html, which always
+      // includes this tag -- but if that ever drifts (a template edit,
+      // a page that forgets to extend base.html), failing loudly here
+      // beats a bare TypeError crashing init() before the submit
+      // handler is even registered, which would silently break the
+      // entire form with no indication why.
+      console.error('TempleDonationPayment.init: no CSRF meta tag found -- payment form will not work');
+      return;
+    }
+    const csrfToken = csrfMeta.content;
 
     function showStatusNote(text) {
       if (!statusNote) return;
@@ -283,8 +302,18 @@ window.TempleDonationPayment = (function () {
         },
         modal: {
           ondismiss: function () {
-            payBtn.disabled = false;
-            pollDonationStatus(order.donation_id, { attempts: 5, intervalMs: 3000, quiet: true });
+            // Razorpay's own SDK calls this, outside of and later than
+            // the form-submit handler's try/catch above -- guarded the
+            // same way as `handler` above it, so a failure here (however
+            // unlikely given how little this does) can't surface as an
+            // uncaught exception from inside third-party code with
+            // nothing shown to the donor.
+            try {
+              payBtn.disabled = false;
+              pollDonationStatus(order.donation_id, { attempts: 5, intervalMs: 3000, quiet: true });
+            } catch (err) {
+              console.error('Error handling checkout dismissal:', err);
+            }
           },
         },
         prefill: {
