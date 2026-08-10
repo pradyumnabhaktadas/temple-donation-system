@@ -1,30 +1,56 @@
-/* Shared payment-flow logic for every public donation form (Donate / Live
- * To Give, Festival Seva, BACE Contribution).
+/* Shared payment-flow logic for every public donation form
+ * (Donate / Live To Give, Festival Seva, BACE Contribution).
  *
- * Previously each of the three form templates carried its own hand-copied
- * version of this ~150-line flow (create order -> launch Razorpay checkout
- * -> verify payment -> poll as a fallback). That duplication is exactly how
- * this flow's error handling drifted: the same "an exception here dies
- * silently, the donor is left on a dead page with no explanation" bug had
- * to be found and fixed by hand in more than one copy. This is one
- * implementation, used by all three forms -- each page only supplies the
- * handful of things that actually differ (its form element's id, and what
- * label to show on the Razorpay checkout modal).
+ * Rewritten from scratch. The previous version was functionally correct in
+ * the happy path but had one real defect that produced the long-running
+ * "have to click Continue twice" report -- see waitForRazorpay() below,
+ * which is the substantive fix in this rewrite. Everything else here is a
+ * cleaner restatement of behaviour that was already proven in production,
+ * deliberately preserved rather than reinvented, because BACE Contribution
+ * and Festival Seva were both independently confirmed working on it.
  *
- * Payment confirmation has three layers, from most to least reliable (see
- * public.py's module docstring for the full picture -- this file only
- * implements layers 2 and 3):
- *   1. Webhook -- Razorpay's server calls our server directly. The source
- *      of truth; this file has no part in it.
- *   2. Browser fast path -- Razorpay checkout's `handler` callback, below,
- *      posts to /api/verify-payment immediately after payment. Fires in
- *      most browsers, most of the time.
- *   3. Client polling -- fallback for whenever #2 doesn't fire. Doesn't
- *      confirm anything itself; just asks whether the webhook or the fast
- *      path has already recorded success.
+ * ---------------------------------------------------------------------
+ * The two-click bug
+ * ---------------------------------------------------------------------
+ * Razorpay's checkout.js is loaded from their CDN by a plain <script> tag
+ * in each form template. The old code did:
+ *
+ *     if (typeof Razorpay === 'undefined') throw new Error(...)
+ *
+ * at submit time. That treats "the SDK hasn't finished downloading yet" as
+ * a fatal error, when it's really just a race: the donor filled in the
+ * form and clicked faster than a third-party CDN script finished loading.
+ * The first click threw and showed "Something went wrong starting the
+ * payment"; by the time the donor clicked again a second or two later the
+ * script had arrived, so the second click worked. That exactly matches the
+ * reported symptom, including why it hit the Live To Give page hardest
+ * (it's by far the heaviest page -- hero image, photo gallery, "more ways
+ * to give" cards -- so checkout.js finishes later relative to the donor)
+ * and why it came and went day to day (pure network timing), and why it
+ * was unaffected by the hosting plan (nothing to do with our own server).
+ *
+ * Now: waitForRazorpay() waits for the SDK, with a visible "preparing"
+ * message, and only gives up after a genuine timeout.
+ *
+ * ---------------------------------------------------------------------
+ * Confirmation has three layers (see public.py's module docstring for the
+ * whole picture -- this file implements only layers 2 and 3):
+ *   1. Webhook -- Razorpay's server calls ours directly. Source of truth.
+ *      This file plays no part in it.
+ *   2. Browser fast path -- checkout's `handler` callback posts to
+ *      /api/verify-payment right after payment. Fires most of the time.
+ *   3. Client polling -- fallback for when #2 doesn't fire, or fires and
+ *      fails. Confirms nothing itself; only asks the server what layers 1
+ *      and 2 have already recorded.
+ * Layers 2 and 3 are both best-effort. A donation is never lost by this
+ * file failing -- worst case the donor doesn't get *redirected*, while the
+ * receipt still exists server-side. Every message shown on a failure path
+ * is written with that in mind: never tell a donor their payment failed,
+ * because this file is not in a position to know that.
  *
  * Usage, once per form template:
  *
+ *   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
  *   <script src="{{ url_for('static', filename='js/donation-payment.js') }}"></script>
  *   <script>
  *     TempleDonationPayment.init({
@@ -32,41 +58,59 @@
  *       description: 'Festival Seva',   // shown on the Razorpay modal
  *       orgName: {{ org_name | tojson }},
  *       razorpayEnabled: {{ razorpay_enabled | tojson }},
- *       beforeSubmit: function () { ... },  // optional, e.g. donate.html's
- *                                            // first/last-name -> full_name sync
+ *       beforeSubmit: function () { ... },  // optional
  *     });
  *   </script>
  */
 window.TempleDonationPayment = (function () {
   'use strict';
 
-  // How long the post-payment confirmation poll keeps trying before it
-  // gives up and shows the "couldn't confirm automatically" message.
-  // 40 attempts (2 minutes) turned out not to be long enough in practice:
-  // twice now, a donor saw that give-up message while the payment had, in
-  // fact, already succeeded on the backend (confirmed via Admin ->
-  // Donations Log) -- the webhook just hadn't caught up within that
-  // window yet, most plausibly because completing payment via a UPI app
-  // (extremely common in India) backgrounds this browser tab, and
-  // browsers throttle background timers hard, and/or the UPI app hand-off
-  // + webhook delivery simply took a little over 2 minutes. 5 minutes
-  // gives real-world confirmation delays a lot more room before a donor
-  // sees a scary message about something that actually went fine.
-  const CONFIRMATION_POLL_ATTEMPTS = 100;
-  const CONFIRMATION_POLL_INTERVAL_MS = 3000;
+  // ------------------------------------------------------------------
+  // Tunables
+  // ------------------------------------------------------------------
 
-  // localStorage key for "a donation was started and we haven't confirmed
-  // it succeeded yet" -- see resumePendingDonation() below. Not scoped per
-  // form/page since a donor only has one payment in flight at a time in
-  // one browser.
+  // Post-payment confirmation poll: 100 x 3s = 5 minutes.
+  // 2 minutes was tried first and proved too short in production more than
+  // once -- donors saw "we couldn't confirm" for donations that had in fact
+  // succeeded and been given a receipt number (verified in Admin ->
+  // Donations Log). Paying by UPI app is the norm here, and it backgrounds
+  // the browser tab, which browsers then throttle hard.
+  const POLL_ATTEMPTS = 100;
+  const POLL_INTERVAL_MS = 3000;
+
+  // How long to wait for Razorpay's checkout.js before treating it as
+  // genuinely unavailable rather than merely slow. 15s is far longer than
+  // a normal load and still short enough not to feel broken.
+  const SDK_WAIT_TIMEOUT_MS = 15000;
+  const SDK_POLL_INTERVAL_MS = 100;
+
+  // One silent retry when fetch() itself rejects (connection reset, TLS
+  // hiccup, a cold first connection). A rejected fetch means the response
+  // never arrived -- distinct from a response that arrived saying "no",
+  // which is handled as a normal error, not retried.
+  const FETCH_RETRY_DELAY_MS = 800;
+
+  // "A payment was started and hasn't been confirmed in this browser yet."
+  // Survives a full page reload, so an outcome isn't lost when the OS
+  // discards the tab during a UPI app hand-off. Not scoped per form -- a
+  // donor has at most one payment in flight at a time.
   const PENDING_KEY = 'templeDonationPending';
-  // 30 minutes, not several hours: long enough to cover a realistic UPI
-  // app hand-off + webhook delay, short enough that resuming an old
-  // marker doesn't surprise a donor who's come back to start a brand new,
-  // unrelated donation much later and gets redirected away from the form
-  // they just opened toward a receipt from something they did earlier.
+  // 30 minutes: comfortably longer than any realistic confirmation delay,
+  // short enough that a donor returning much later to start a *new*
+  // donation isn't yanked off to an old receipt.
   const PENDING_MAX_AGE_MS = 30 * 60 * 1000;
 
+  // ------------------------------------------------------------------
+  // Small helpers (module scope -- no per-form state)
+  // ------------------------------------------------------------------
+
+  function sleep(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
+  /* POST JSON and always resolve to {ok, data}. Never throws for an HTTP
+   * error status -- only for a true network-level failure, and even then
+   * only after one retry. */
   async function postJSON(url, body, csrfToken) {
     async function attempt() {
       const resp = await fetch(url, {
@@ -76,128 +120,157 @@ window.TempleDonationPayment = (function () {
       });
       let data = {};
       try { data = await resp.json(); } catch (err) { /* non-JSON error page */ }
-      return { ok: resp.ok, data };
+      return { ok: resp.ok, data: data };
     }
     try {
       return await attempt();
     } catch (err) {
-      // fetch() itself rejected -- a network-level failure (TLS handshake,
-      // connection reset, etc), not a resolved-but-non-2xx response (those
-      // don't throw). Reported specifically on Safari: "Continue to secure
-      // payment" fails on the first click with no useful reason, then
-      // works immediately on a second click with no page reload in
-      // between -- consistent with the very first connection to our own
-      // origin from a fresh page load occasionally failing at the network
-      // layer (seen with iCloud Private Relay and cold/first HTTPS
-      // connections more often on Safari than Chromium), and nothing being
-      // wrong with the request itself. One silent retry after a short
-      // pause turns that into the donor never noticing, instead of needing
-      // to click twice or seeing "something went wrong" on a connection
-      // that's actually fine a moment later.
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await sleep(FETCH_RETRY_DELAY_MS);
       return await attempt();
+    }
+  }
+
+  /* GET the current server-side status of a donation. Resolves to a status
+   * string, or null if it couldn't be determined right now (caller decides
+   * whether that's worth reacting to -- usually it just means "try again
+   * on the next tick"). */
+  async function fetchDonationStatus(donationId) {
+    try {
+      const resp = await fetch('/api/donation-status/' + encodeURIComponent(donationId));
+      if (!resp.ok) return null;
+      const data = await resp.json();
+      return data && data.status ? data.status : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function readPendingMarker() {
+    try {
+      const raw = localStorage.getItem(PENDING_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || !parsed.donationId) return null;
+      if (Date.now() - (parsed.ts || 0) > PENDING_MAX_AGE_MS) return null;
+      return parsed;
+    } catch (err) {
+      return null; // storage unavailable, or a corrupted marker
+    }
+  }
+
+  function writePendingMarker(donationId) {
+    try {
+      localStorage.setItem(PENDING_KEY, JSON.stringify({ donationId: donationId, ts: Date.now() }));
+    } catch (err) {
+      // Private browsing / storage disabled. Resume-after-reload just
+      // won't be available; not worth telling the donor about.
     }
   }
 
   function clearPendingMarker() {
-    try { localStorage.removeItem(PENDING_KEY); } catch (err) { /* storage unavailable -- nothing to clear */ }
-  }
-
-  function setPendingMarker(donationId) {
-    try {
-      localStorage.setItem(PENDING_KEY, JSON.stringify({ donationId: donationId, ts: Date.now() }));
-    } catch (err) {
-      // Privacy mode / storage disabled -- the resume-on-reload feature
-      // just won't be available this session, not worth surfacing to the
-      // donor over.
-    }
+    try { localStorage.removeItem(PENDING_KEY); } catch (err) { /* nothing to clear */ }
   }
 
   function goToReceipt(donationId) {
     clearPendingMarker();
-    window.location.href = `/donate/success/${donationId}`;
+    window.location.href = '/donate/success/' + encodeURIComponent(donationId);
   }
 
+  /* Resolve once Razorpay's checkout.js has defined the global, or reject
+   * after SDK_WAIT_TIMEOUT_MS. See the header comment -- this is the fix
+   * for the "needs two clicks" bug. */
+  function waitForRazorpay() {
+    if (typeof window.Razorpay !== 'undefined') return Promise.resolve();
+    return new Promise(function (resolve, reject) {
+      const startedAt = Date.now();
+      const timer = setInterval(function () {
+        if (typeof window.Razorpay !== 'undefined') {
+          clearInterval(timer);
+          resolve();
+        } else if (Date.now() - startedAt > SDK_WAIT_TIMEOUT_MS) {
+          clearInterval(timer);
+          reject(new Error('Razorpay checkout script did not load'));
+        }
+      }, SDK_POLL_INTERVAL_MS);
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // Per-form setup
+  // ------------------------------------------------------------------
+
   function init(config) {
-    const {
-      formId,
-      description,
-      orgName,
-      razorpayEnabled,
-    } = config;
+    config = config || {};
+    const formId = config.formId;
+    const description = config.description;
+    const orgName = config.orgName;
+    const razorpayEnabled = config.razorpayEnabled;
 
     const form = document.getElementById(formId);
-    if (!form) return; // page doesn't have this form (e.g. campaign not configured yet)
+    if (!form) return; // this page doesn't have the form (campaign not configured)
 
     const payBtn = form.querySelector('#pay-btn') || document.getElementById('pay-btn');
     if (!payBtn) {
-      // Nothing sensible to do without a submit button -- bail out here,
-      // synchronously and visibly (console), rather than letting the
-      // first `payBtn.disabled = ...` deep inside a submit handler throw
-      // uncaught the moment a donor actually tries to pay.
-      console.error('TempleDonationPayment.init: no #pay-btn found for form', formId);
+      // Bail loudly and early rather than letting the first
+      // `payBtn.disabled = true` throw from inside the submit handler,
+      // which would break the form with no clue as to why.
+      console.error('TempleDonationPayment: no #pay-btn found for form', formId);
       return;
     }
-    const statusNote = document.getElementById('status-note');
+
     const csrfMeta = document.querySelector('meta[name="csrf-token"]');
     if (!csrfMeta) {
-      // Every page using this module extends base.html, which always
-      // includes this tag -- but if that ever drifts (a template edit,
-      // a page that forgets to extend base.html), failing loudly here
-      // beats a bare TypeError crashing init() before the submit
-      // handler is even registered, which would silently break the
-      // entire form with no indication why.
-      console.error('TempleDonationPayment.init: no CSRF meta tag found -- payment form will not work');
+      console.error('TempleDonationPayment: no CSRF meta tag -- payment form will not work');
       return;
     }
     const csrfToken = csrfMeta.content;
 
-    function showStatusNote(text) {
+    const statusNote = document.getElementById('status-note');
+
+    // Guards against a donor managing to start two payments at once (double
+    // submit, Enter key while the button is mid-flight). The button's own
+    // disabled state mostly covers this; this covers the rest.
+    let submitting = false;
+    // At most one poll loop alive per page, so a dismissed-modal poll and a
+    // verify-fallback poll can't both be running and fighting each other.
+    let activePoll = null;
+
+    function setNote(text) {
       if (!statusNote) return;
       statusNote.textContent = text;
       statusNote.style.display = '';
     }
 
-    function hideStatusNote() {
+    function clearNote() {
       if (!statusNote) return;
+      statusNote.textContent = '';
       statusNote.style.display = 'none';
     }
 
-    // Used specifically when the 5-minute automatic poll gives up. Real
-    // production cases (confirmed via Admin -> Donations Log) have shown
-    // the donation succeeding and getting a receipt *after* this point --
-    // most likely explained by the hosting backend spinning down when idle
-    // and taking a while to wake back up, delaying webhook delivery past
-    // the poll window. Rather than leaving the donor with only a "contact
-    // the office" dead end, this adds a manual recheck they can tap once
-    // the delayed confirmation has had more time to land, without
-    // reloading the page or losing their place.
-    function showGiveUpNote(donationId, text) {
+    /* Shown when a poll gives up. A delayed webhook can still land after
+     * this point, so the donor gets a button to re-check rather than a
+     * dead end whose only next step is phoning the office. */
+    function setNoteWithRecheck(donationId, text) {
       if (!statusNote) return;
       statusNote.textContent = '';
       statusNote.style.display = '';
       statusNote.appendChild(document.createTextNode(text + ' '));
+
       const btn = document.createElement('button');
-      // type="button" is load-bearing here -- this element lives inside
-      // the donation <form>, and a <button> with no explicit type
-      // defaults to type="submit", which would silently re-submit the
-      // whole form (and create a second donation/order) on click instead
-      // of just checking status.
+      // type="button" matters: this lives inside the donation <form>, and a
+      // button with no explicit type defaults to submit -- which would
+      // re-submit the form and start a *second* donation instead of just
+      // checking on the first.
       btn.type = 'button';
       btn.className = 'btn btn-link p-0 align-baseline';
       btn.textContent = 'Check again';
       btn.addEventListener('click', async function () {
         btn.disabled = true;
         btn.textContent = 'Checking...';
-        try {
-          const resp = await fetch(`/api/donation-status/${donationId}`);
-          const status = await resp.json();
-          if (status.status === 'success') {
-            goToReceipt(donationId);
-            return;
-          }
-        } catch (err) {
-          // Transient network hiccup -- let the donor try again.
+        const status = await fetchDonationStatus(donationId);
+        if (status === 'success') {
+          goToReceipt(donationId);
+          return;
         }
         btn.disabled = false;
         btn.textContent = 'Check again';
@@ -205,180 +278,175 @@ window.TempleDonationPayment = (function () {
       statusNote.appendChild(btn);
     }
 
-    // Fallback for whenever the Razorpay `handler` callback below doesn't
-    // fire (browser closed the checkout tab weirdly, JS context interrupted,
-    // etc.) -- also used right after a donor dismisses the checkout modal,
-    // in case the payment actually went through moments before they closed
-    // it. Doesn't confirm anything on its own; just asks the server what
-    // the webhook or the fast path has already recorded.
-    function pollDonationStatus(donationId, { attempts, intervalMs, quiet, onGiveUp }) {
+    /* Poll until the donation resolves, we run out of attempts, or the
+     * page goes away. Returns nothing; all outcomes are side effects.
+     *
+     * `quiet` suppresses the "confirming..." message, for the speculative
+     * short poll after a donor dismisses the checkout modal -- most of
+     * those are simple "changed my mind" dismissals with no payment
+     * behind them, and shouldn't imply one is being processed. */
+    function startPoll(donationId, options) {
+      const attempts = options.attempts;
+      const intervalMs = options.intervalMs;
+      const quiet = !!options.quiet;
+      const onGiveUp = options.onGiveUp;
+
+      if (activePoll) activePoll.stop();
+
       let count = 0;
-      let finished = false;
-      if (!quiet) showStatusNote('Confirming your payment... this can take a few minutes, especially if you paid via a UPI app. Please don\'t close this page.');
+      let done = false;
+
+      if (!quiet) {
+        setNote('Confirming your payment... this can take a few minutes, especially if you paid ' +
+                'via a UPI app. Please don\'t close this page.');
+      }
+
+      function stop() {
+        if (done) return;
+        done = true;
+        clearInterval(timer);
+        document.removeEventListener('visibilitychange', onVisible);
+        if (activePoll && activePoll.stop === stop) activePoll = null;
+      }
 
       async function checkOnce() {
-        if (finished) return;
-        try {
-          const resp = await fetch(`/api/donation-status/${donationId}`);
-          const status = await resp.json();
-          if (status.status === 'success' && !finished) {
-            finished = true;
-            clearInterval(timer);
-            document.removeEventListener('visibilitychange', onVisibilityChange);
-            goToReceipt(donationId);
-          }
-        } catch (err) {
-          // Transient network hiccup -- just try again on the next tick.
+        if (done) return;
+        const status = await fetchDonationStatus(donationId);
+        if (done) return; // resolved while this request was in flight
+        if (status === 'success') {
+          stop();
+          goToReceipt(donationId);
         }
+        // 'pending' -> keep waiting. 'failed'/'cancelled' -> also keep
+        // waiting rather than declaring failure: a donation can sit at
+        // 'failed' from one attempt while the donor immediately retries
+        // and succeeds, and this file should never be the thing that
+        // tells someone their payment failed.
       }
 
-      // Completing payment via a UPI app (very common in India) typically
-      // backgrounds this browser tab for the donor to approve it in a
-      // separate app -- and browsers throttle (sometimes almost entirely
-      // pause) setInterval timers in background tabs to save battery, so
-      // the regular interval below can badly undercount real elapsed
-      // time. Checking immediately the moment the tab becomes visible
-      // again catches success right when the donor comes back, instead of
-      // waiting for a throttled timer to eventually get around to it.
-      function onVisibilityChange() {
+      // A UPI hand-off backgrounds this tab, and browsers throttle (or
+      // effectively suspend) interval timers in background tabs -- so the
+      // interval alone badly undercounts real elapsed time. Checking the
+      // instant the tab comes back catches success right when the donor
+      // returns, instead of whenever a throttled timer next fires.
+      function onVisible() {
         if (document.visibilityState === 'visible') checkOnce();
       }
-      document.addEventListener('visibilitychange', onVisibilityChange);
+      document.addEventListener('visibilitychange', onVisible);
 
-      const timer = setInterval(async () => {
+      const timer = setInterval(function () {
         count += 1;
         if (count > attempts) {
-          finished = true;
-          clearInterval(timer);
-          document.removeEventListener('visibilitychange', onVisibilityChange);
+          stop();
           if (onGiveUp) onGiveUp();
           return;
         }
-        await checkOnce();
+        checkOnce();
       }, intervalMs);
+
+      activePoll = { stop: stop };
+      // One immediate check, so an already-confirmed donation (common when
+      // resuming after a reload) redirects without waiting a full tick.
+      checkOnce();
     }
 
-    // Runs once on page load, before anything else. If a previous visit to
-    // this form started a payment whose outcome was never confirmed in the
-    // browser (the classic case: the tab got backgrounded or even reloaded
-    // by the OS while the donor was in a UPI app, and came back too late
-    // or never came back to a live poll), this picks that donation back up
-    // -- checks it once immediately, and if it's still pending, resumes
-    // polling rather than leaving the donor with no path to ever finding
-    // out except by checking with the office. Silently does nothing if
-    // there's no marker, it's stale, or the donation already resolved.
-    function resumePendingDonation() {
-      let pending;
-      try {
-        const raw = localStorage.getItem(PENDING_KEY);
-        if (!raw) return;
-        pending = JSON.parse(raw);
-      } catch (err) {
-        return; // storage unavailable or corrupted marker -- nothing to resume
-      }
-      if (!pending || !pending.donationId || (Date.now() - (pending.ts || 0)) > PENDING_MAX_AGE_MS) {
-        clearPendingMarker();
+    const GIVE_UP_TEXT =
+      'We could not confirm your payment automatically. If money was deducted, your receipt may ' +
+      'still appear in "My Donations" once confirmation catches up -- please note the time and ' +
+      'amount, and contact the temple office if it doesn\'t.';
+
+    function pollThenGiveUp(donationId) {
+      startPoll(donationId, {
+        attempts: POLL_ATTEMPTS,
+        intervalMs: POLL_INTERVAL_MS,
+        onGiveUp: function () { setNoteWithRecheck(donationId, GIVE_UP_TEXT); },
+      });
+    }
+
+    /* On page load: if a previous visit started a payment we never saw
+     * resolve, pick it back up. Covers the case where the tab was
+     * discarded entirely during a UPI hand-off -- otherwise the donor has
+     * no path to their receipt except contacting the office. */
+    (function resumePendingDonation() {
+      const pending = readPendingMarker();
+      if (!pending) {
+        clearPendingMarker(); // also clears a stale/corrupt marker
         return;
       }
+      fetchDonationStatus(pending.donationId).then(function (status) {
+        if (status === 'success') {
+          goToReceipt(pending.donationId);
+        } else if (status === 'pending') {
+          pollThenGiveUp(pending.donationId);
+        } else if (status === null) {
+          // Couldn't reach the server. Leave the marker alone so the next
+          // page load tries again.
+        } else {
+          clearPendingMarker(); // failed/cancelled -- nothing to resume
+        }
+      });
+    })();
 
-      fetch(`/api/donation-status/${pending.donationId}`)
-        .then((resp) => resp.json())
-        .then((status) => {
-          if (status.status === 'success') {
-            goToReceipt(pending.donationId);
-          } else if (status.status === 'pending') {
-            pollDonationStatus(pending.donationId, {
-              attempts: CONFIRMATION_POLL_ATTEMPTS, intervalMs: CONFIRMATION_POLL_INTERVAL_MS, quiet: false,
-              onGiveUp: () => showGiveUpNote(pending.donationId,
-                'We could not confirm a previous payment automatically. If money was deducted, please note ' +
-                'the time and amount and contact the temple office, or check "My Donations" shortly -- your ' +
-                'receipt may still appear there once confirmation catches up.'
-              ),
-            });
-          } else {
-            // failed/cancelled -- nothing left to resume
-            clearPendingMarker();
-          }
-        })
-        .catch(() => { /* couldn't check right now -- leave the marker for the next page load to try again */ });
-    }
-    resumePendingDonation();
-
-    function launchRazorpayCheckout(order, donorInput) {
+    function launchCheckout(order, donorInput) {
       const options = {
         key: order.key_id,
+        // round(), not truncation: float maths can land a hair under the
+        // intended paise value, and the amount here must match the order
+        // the server created exactly or checkout rejects it as a generic
+        // "something went wrong". public.py rounds identically.
         amount: Math.round(order.amount * 100),
         currency: 'INR',
         name: orgName,
         description: description,
         order_id: order.order_id,
+
         handler: async function (response) {
-          // Wrapped in try/catch: this callback runs asynchronously, well
-          // after the form-submit handler that launched it has already
-          // returned. An unguarded exception here (a network hiccup, a
-          // browser quirk, anything) would die silently with nothing shown
-          // to the donor and nothing logged anywhere a person would notice
-          // -- leaving them stuck on this page having already paid, with no
-          // indication anything went wrong.
+          // Razorpay calls this from its own code, long after our submit
+          // handler returned -- so it needs its own try/catch. An
+          // unguarded throw here would vanish silently, stranding a donor
+          // who has already paid on a page that looks stuck.
           try {
-            const { ok } = await postJSON('/api/verify-payment', {
+            const result = await postJSON('/api/verify-payment', {
               donation_id: order.donation_id,
               razorpay_order_id: response.razorpay_order_id,
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_signature: response.razorpay_signature,
             }, csrfToken);
-            if (ok) {
+
+            if (result.ok) {
               goToReceipt(order.donation_id);
             } else {
-              pollDonationStatus(order.donation_id, {
-                attempts: CONFIRMATION_POLL_ATTEMPTS, intervalMs: CONFIRMATION_POLL_INTERVAL_MS, quiet: false,
-                onGiveUp: () => showGiveUpNote(order.donation_id,
-                  'Still waiting on confirmation from the payment gateway. If money was deducted, your ' +
-                  'receipt will appear in "My Donations" shortly, or contact the temple office.'
-                ),
-              });
+              // The server said no. That is *not* proof the payment
+              // failed -- the webhook is the source of truth and may
+              // simply not have caught up. Fall through to polling.
+              pollThenGiveUp(order.donation_id);
             }
           } catch (err) {
-            // The verify-payment call itself failed at the network level
-            // (fetch() threw -- a dropped connection, not a clean error
-            // response). That does NOT mean the payment failed: the
-            // webhook (the actual source of truth, entirely independent
-            // of this browser tab) may already have recorded it as
-            // successful, and confirmed exactly that happening in
-            // production once already -- the backend had a receipt
-            // issued while the donor was still staring at this catch
-            // block with no way to know that. Falling back to polling
-            // here, same as the "verify-payment returned an error"
-            // branch above, means the donor still gets redirected to
-            // their receipt automatically once the webhook (or a retry)
-            // catches up, instead of being stuck on a dead page.
-            console.error('Payment verification failed:', err);
-            pollDonationStatus(order.donation_id, {
-              attempts: CONFIRMATION_POLL_ATTEMPTS, intervalMs: CONFIRMATION_POLL_INTERVAL_MS, quiet: false,
-              onGiveUp: () => showGiveUpNote(order.donation_id,
-                'We could not confirm your payment automatically. If money was deducted, please note the ' +
-                'time and amount and contact the temple office, or check "My Donations" shortly -- your ' +
-                'receipt may still appear there once confirmation catches up.'
-              ),
-            });
+            // Network-level failure, already retried once inside
+            // postJSON. Confirmed in production that the backend had
+            // issued a receipt while the browser sat here, so polling is
+            // the right response, not an error message.
+            console.error('Payment verification call failed:', err);
+            pollThenGiveUp(order.donation_id);
           }
         },
+
         modal: {
           ondismiss: function () {
-            // Razorpay's own SDK calls this, outside of and later than
-            // the form-submit handler's try/catch above -- guarded the
-            // same way as `handler` above it, so a failure here (however
-            // unlikely given how little this does) can't surface as an
-            // uncaught exception from inside third-party code with
-            // nothing shown to the donor.
             try {
+              submitting = false;
               payBtn.disabled = false;
-              pollDonationStatus(order.donation_id, { attempts: 5, intervalMs: 3000, quiet: true });
+              // Usually a "changed my mind" dismissal with no payment
+              // behind it -- but occasionally a donor closes the modal
+              // moments after paying. A short quiet poll catches that
+              // without implying anything is in progress if it isn't.
+              startPoll(order.donation_id, { attempts: 5, intervalMs: 3000, quiet: true });
             } catch (err) {
               console.error('Error handling checkout dismissal:', err);
             }
           },
         },
+
         prefill: {
           name: donorInput.full_name,
           email: donorInput.email,
@@ -386,64 +454,95 @@ window.TempleDonationPayment = (function () {
         },
         theme: { color: '#1d3b6d' },
       };
-      const rzp = new Razorpay(options);
-      rzp.on('payment.failed', function () { payBtn.disabled = false; });
+
+      const rzp = new window.Razorpay(options);
+      rzp.on('payment.failed', function () {
+        // Razorpay shows its own failure detail in the modal; just let the
+        // donor try again.
+        submitting = false;
+        payBtn.disabled = false;
+      });
       rzp.open();
     }
 
-    // The whole submit handler is wrapped in try/catch: any failure in here
-    // (a network failure creating the order, the Razorpay checkout script
-    // not finishing loading in time -- both seen intermittently in Safari,
-    // or a server-side error) is now visible (console + on-page message)
-    // and payBtn always gets a chance to re-enable, so the donor can retry
-    // instead of being stuck on a dead button with no explanation.
     form.addEventListener('submit', async function (e) {
       e.preventDefault();
-      if (typeof config.beforeSubmit === 'function') config.beforeSubmit();
+      if (submitting) return;
+
+      if (typeof config.beforeSubmit === 'function') {
+        try {
+          config.beforeSubmit();
+        } catch (err) {
+          // A page-specific hook (e.g. Live To Give's first/last name ->
+          // full_name sync) must never be able to block payment.
+          console.error('beforeSubmit hook failed:', err);
+        }
+      }
+
+      submitting = true;
       payBtn.disabled = true;
-      hideStatusNote();
+      clearNote();
 
       try {
         const donorInput = Object.fromEntries(new FormData(form).entries());
-        const { ok, data: order } = await postJSON('/api/create-order', donorInput, csrfToken);
 
-        if (!ok) {
-          alert(order.error || 'Something went wrong');
+        // Start the SDK wait *before* the network round-trip, so the two
+        // overlap instead of running back to back. By the time the order
+        // comes back, checkout.js has usually long since arrived, and this
+        // resolves instantly.
+        const sdkReady = razorpayEnabled ? waitForRazorpay() : Promise.resolve();
+        // Nothing is awaiting sdkReady yet; without this a slow SDK would
+        // count as an unhandled rejection before we get to the await below.
+        sdkReady.catch(function () { /* handled at the await */ });
+
+        const result = await postJSON('/api/create-order', donorInput, csrfToken);
+        if (!result.ok) {
+          // A real, specific, server-side "no" (amount below the minimum,
+          // bad PAN, missing consent...). Show the server's own wording --
+          // it's more useful than anything generic.
+          setNote(result.data.error || 'Something went wrong. Please check your details and try again.');
+          submitting = false;
           payBtn.disabled = false;
           return;
         }
+        const order = result.data;
 
-        // Marks this donation as "in flight" before handing off to
-        // Razorpay -- if this tab gets backgrounded or reloaded during a
-        // UPI app hand-off and the donor comes back (or opens a fresh
-        // tab) later, resumePendingDonation() on the next page load picks
-        // this back up instead of the outcome being lost entirely.
-        setPendingMarker(order.donation_id);
+        // From here on a pending donation exists server-side, so record it
+        // before handing off to Razorpay -- if this tab is discarded during
+        // a UPI hand-off, the next page load resumes from this marker.
+        writePendingMarker(order.donation_id);
 
-        if (razorpayEnabled) {
-          if (typeof Razorpay === 'undefined') {
-            throw new Error('Razorpay checkout script did not load');
-          }
-          launchRazorpayCheckout(order, donorInput);
-        } else {
-          const { ok: simOk } = await postJSON('/api/simulate-payment', { donation_id: order.donation_id }, csrfToken);
-          if (simOk) {
+        if (!razorpayEnabled) {
+          const sim = await postJSON('/api/simulate-payment', { donation_id: order.donation_id }, csrfToken);
+          if (sim.ok) {
             goToReceipt(order.donation_id);
           } else {
-            alert('Simulation failed');
+            setNote(sim.data.error || 'Simulation failed.');
+            submitting = false;
             payBtn.disabled = false;
           }
+          return;
         }
+
+        if (typeof window.Razorpay === 'undefined') {
+          setNote('Preparing secure payment...');
+        }
+        await sdkReady;
+        clearNote();
+
+        launchCheckout(order, donorInput);
+        // Deliberately leaves `submitting`/`payBtn` disabled here: the
+        // checkout modal is now open and owns the interaction. They're
+        // re-enabled by ondismiss or payment.failed.
       } catch (err) {
         console.error('Donation submit failed:', err);
+        submitting = false;
         payBtn.disabled = false;
-        showStatusNote(
-          'Something went wrong starting the payment. Please try again -- if it keeps happening, try ' +
-          'reloading the page, a different browser, or contact the temple office.'
-        );
+        setNote('Something went wrong starting the payment. Please try again -- if it keeps ' +
+                'happening, try reloading the page or contact the temple office.');
       }
     });
   }
 
-  return { init };
+  return { init: init };
 })();

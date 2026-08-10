@@ -1059,9 +1059,9 @@ def download_receipt(donation_id):
         flash("Receipt not available for this donation.")
         return redirect(url_for("public.donate_form"))
 
-    if donation.receipt_pdf:
-        pdf_bytes = donation.receipt_pdf
-    else:
+    pdf_bytes = donation.receipt_pdf
+
+    if not pdf_bytes:
         # Legacy fallback: donations issued before receipts moved into the
         # database (see README "Receipt storage") were written to disk
         # instead. Read from there if it's still around, rather than
@@ -1070,7 +1070,31 @@ def download_receipt(donation_id):
         if os.path.isfile(legacy_path):
             with open(legacy_path, "rb") as f:
                 pdf_bytes = f.read()
-        else:
+
+    if not pdf_bytes:
+        # No stored PDF and no legacy file, but the donation definitely
+        # succeeded and definitely has a receipt number (checked above).
+        # That combination is reachable: _finalize_success() deliberately
+        # treats PDF generation as best-effort and returns success even if
+        # it fails, precisely so that a PDF problem can never cost a donor
+        # their already-committed receipt number. The cost of that choice
+        # used to land here -- a dead end telling the donor to contact the
+        # office about a receipt they're entitled to and that we hold all
+        # the data for.
+        #
+        # Nothing about the receipt depends on when it's rendered (it's
+        # built entirely from stored donation/donor/campaign data, and the
+        # receipt number itself was fixed at finalization), so just build
+        # it now and keep it for next time.
+        try:
+            pdf_bytes = generate_receipt_pdf(donation, donation.donor, donation.campaign, _org_cfg())
+            donation.receipt_pdf = pdf_bytes
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception(
+                "On-demand receipt regeneration failed for donation %s", donation.id
+            )
             flash("This receipt needs to be regenerated -- please contact the office.")
             return redirect(url_for("public.donate_form"))
 
