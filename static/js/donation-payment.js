@@ -234,6 +234,11 @@ window.TempleDonationPayment = (function () {
     // At most one poll loop alive per page, so a dismissed-modal poll and a
     // verify-fallback poll can't both be running and fighting each other.
     let activePoll = null;
+    // Set once the donor starts a new payment on this page. Anything still
+    // in flight for an *earlier* donation must not redirect after this
+    // point -- see the check in resumePendingDonation() and the
+    // activePoll.stop() in the submit handler.
+    let supersededByNewPayment = false;
 
     function setNote(text) {
       if (!statusNote) return;
@@ -374,6 +379,10 @@ window.TempleDonationPayment = (function () {
         return;
       }
       fetchDonationStatus(pending.donationId).then(function (status) {
+        // This request was already in flight if the donor started a new
+        // payment in the meantime. Redirecting now would yank them off an
+        // open checkout modal to an older receipt.
+        if (supersededByNewPayment) return;
         if (status === 'success') {
           goToReceipt(pending.donationId);
         } else if (status === 'pending') {
@@ -482,6 +491,17 @@ window.TempleDonationPayment = (function () {
       submitting = true;
       payBtn.disabled = true;
       clearNote();
+
+      // Abandon anything still watching a previous, unconfirmed donation
+      // (the resume-on-load check and its poll, most likely). Those hold
+      // their own donation id in a closure, and if a late confirmation
+      // lands while the donor is part-way through this new payment, they
+      // would redirect to the *old* receipt -- pulling the page out from
+      // under an open checkout modal. Starting a new payment supersedes
+      // waiting on the old one; the pending marker below is overwritten
+      // for the same reason.
+      supersededByNewPayment = true;
+      if (activePoll) activePoll.stop();
 
       try {
         const donorInput = Object.fromEntries(new FormData(form).entries());
