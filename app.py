@@ -9,7 +9,7 @@ load_dotenv()
 from config import Config
 from extensions import db, login_manager, csrf, limiter, LIMITER_AVAILABLE
 from models import AdminUser
-from utils import format_inr, normalize_phone
+from utils import format_inr, normalize_phone, to_ist
 
 
 def create_app(test_config=None):
@@ -136,6 +136,13 @@ def create_app(test_config=None):
     # Indian-style digit grouping (12,34,567 instead of 1,234,567) for
     # rupee amounts everywhere in the templates. Usage: {{ amount | inr }}
     app.jinja_env.filters["inr"] = format_inr
+
+    # Every stored timestamp is naive UTC (datetime.datetime.utcnow()) --
+    # this converts to naive IST for display, so donation/activity/audit
+    # times shown to a Delhi-based temple office actually match the clock
+    # on their wall. Usage: {{ (d.donation_date | to_ist).strftime(...) }}
+    # -- chainable on an optional column since to_ist(None) is None.
+    app.jinja_env.filters["to_ist"] = to_ist
 
     @login_manager.user_loader
     def load_user(user_id):

@@ -50,7 +50,7 @@
       <tbody>
         {% for d in failed_abandoned_donations %}
         <tr>
-          <td>{{ d.donation_date.strftime('%d %b %Y, %I:%M %p') if d.donation_date else '-' }}</td>
+          <td>{{ (d.donation_date | to_ist).strftime('%d %b %Y, %I:%M %p') if d.donation_date else '-' }}</td>
           <td>{% if d.donor %}<a href="{{ url_for('admin.donor_detail', donor_id=d.donor.id) }}">{{ d.donor.full_name }}</a>{% else %}-{% endif %}</td>
           <td>{{ d.donor.phone or '-' if d.donor else '-' }}</td>
           <td class="text-end">Rs. {{ d.amount | inr }}</td>
@@ -83,7 +83,7 @@
       <tbody>
         {% for d in disputed_donations %}
         <tr>
-          <td>{{ d.disputed_at.strftime('%d %b %Y, %I:%M %p') if d.disputed_at else '-' }}</td>
+          <td>{{ (d.disputed_at | to_ist).strftime('%d %b %Y, %I:%M %p') if d.disputed_at else '-' }}</td>
           <td>{% if d.donor %}<a href="{{ url_for('admin.donor_detail', donor_id=d.donor.id) }}">{{ d.donor.full_name }}</a>{% else %}-{% endif %}</td>
           <td class="text-end">Rs. {{ d.amount | inr }}</td>
           <td>{{ d.receipt_number or '-' }}</td>

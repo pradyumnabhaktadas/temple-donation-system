@@ -79,7 +79,7 @@
   <tbody>
     {% for d in donations %}
     <tr>
-      <td>{{ d.donation_date.strftime('%d-%b-%Y %H:%M') if d.payment_mode == 'online' else d.donation_date.strftime('%d-%b-%Y') }}</td>
+      <td>{{ (d.donation_date | to_ist).strftime('%d-%b-%Y %H:%M') if d.payment_mode == 'online' else d.donation_date.strftime('%d-%b-%Y') }}</td>
       <td><a href="{{ url_for('admin.donor_detail', donor_id=d.donor.id) }}">{{ d.donor.full_name }}</a></td>
       <td>{{ d.campaign.name }}</td>
       <td class="small text-muted">{{ d.specific_purpose or '-' }}</td>
@@ -158,9 +158,9 @@
             <tr><th class="text-muted">Status</th><td>{{ d.status.title() }}</td></tr>
             <tr><th class="text-muted">Recorded By</th><td>{{ d.recorded_by or '-' }}</td></tr>
             <tr><th class="text-muted">Remarks</th><td>{{ d.remarks or '-' }}</td></tr>
-            <tr><th class="text-muted">Donation Date</th><td>{{ d.donation_date.strftime('%d-%b-%Y %H:%M') if d.payment_mode == 'online' else d.donation_date.strftime('%d-%b-%Y') }}</td></tr>
+            <tr><th class="text-muted">Donation Date</th><td>{{ (d.donation_date | to_ist).strftime('%d-%b-%Y %H:%M') if d.payment_mode == 'online' else d.donation_date.strftime('%d-%b-%Y') }}</td></tr>
             {% if d.status == 'cancelled' %}
-            <tr><th class="text-muted">Cancelled</th><td>{{ d.cancelled_at.strftime('%d-%b-%Y %H:%M') if d.cancelled_at else '-' }} by {{ d.cancelled_by or '-' }}<br><span class="small text-muted">{{ d.cancellation_reason or '' }}</span></td></tr>
+            <tr><th class="text-muted">Cancelled</th><td>{{ (d.cancelled_at | to_ist).strftime('%d-%b-%Y %H:%M') if d.cancelled_at else '-' }} by {{ d.cancelled_by or '-' }}<br><span class="small text-muted">{{ d.cancellation_reason or '' }}</span></td></tr>
             {% endif %}
           </tbody>
         </table>

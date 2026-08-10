@@ -20,7 +20,7 @@ from models import (
     LiveToGivePurpose, Preacher, AdminActivityLog, DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES,
     DONATION_FREQUENCY_LABELS,
 )
-from utils import get_financial_year, is_valid_pan, is_valid_phone, normalize_phone
+from utils import get_financial_year, is_valid_pan, is_valid_phone, normalize_phone, now_ist, to_ist
 from pdf_utils import generate_receipt_pdf
 from email_utils import send_receipt_email
 from whatsapp_utils import send_receipt_whatsapp
@@ -330,7 +330,11 @@ def activity_log():
 @bp.route("/dashboard")
 @login_required
 def dashboard():
-    today = datetime.date.today()
+    # now_ist(), not datetime.date.today() -- the server's own clock is UTC
+    # (e.g. on Render), so "today" would read as the wrong calendar date for
+    # the ~5.5 hours a day (roughly 12:00 AM-5:30 AM IST) where UTC hasn't
+    # rolled over to the same day yet.
+    today = now_ist().date()
     start_of_month = today.replace(day=1)
     fy = get_financial_year(today)
     fy_start_year = int(fy.split("-")[0])
@@ -595,7 +599,11 @@ def analytics():
     verify and keeps the SQL portable (no dialect-specific DISTINCT ON /
     correlated-subquery tricks needed across SQLite dev / Postgres prod).
     """
-    today = datetime.date.today()
+    # now_ist(), not datetime.date.today() -- the server's own clock is UTC
+    # (e.g. on Render), so "today" would read as the wrong calendar date for
+    # the ~5.5 hours a day (roughly 12:00 AM-5:30 AM IST) where UTC hasn't
+    # rolled over to the same day yet.
+    today = now_ist().date()
 
     # -- Global filters (apply across every section) --
     date_preset = request.args.get("date_preset", "this_month")
@@ -2653,7 +2661,7 @@ def export_bace_contributions():
     for d in rows:
         donor = d.donor
         date_str = (
-            d.donation_date.strftime("%d-%m-%Y %H:%M")
+            to_ist(d.donation_date).strftime("%d-%m-%Y %H:%M")
             if d.payment_mode == "online"
             else d.donation_date.strftime("%d-%m-%Y")
         )
@@ -3097,7 +3105,11 @@ def donor_insights():
 
     # --- upcoming birthdays / anniversaries ---
     upcoming_days = request.args.get("days", 30, type=int)
-    today = datetime.date.today()
+    # now_ist(), not datetime.date.today() -- the server's own clock is UTC
+    # (e.g. on Render), so "today" would read as the wrong calendar date for
+    # the ~5.5 hours a day (roughly 12:00 AM-5:30 AM IST) where UTC hasn't
+    # rolled over to the same day yet.
+    today = now_ist().date()
     donors_with_dates = Donor.query.filter(
         db.or_(
             Donor.dob.isnot(None), Donor.father_dob.isnot(None), Donor.mother_dob.isnot(None),
@@ -3138,7 +3150,11 @@ def birthdays():
     which covers a wider set of relationship-building dates). Today's
     birthdays are broken out separately; everything else within the
     selected window is listed soonest-first."""
-    today = datetime.date.today()
+    # now_ist(), not datetime.date.today() -- the server's own clock is UTC
+    # (e.g. on Render), so "today" would read as the wrong calendar date for
+    # the ~5.5 hours a day (roughly 12:00 AM-5:30 AM IST) where UTC hasn't
+    # rolled over to the same day yet.
+    today = now_ist().date()
     window_days = request.args.get("days", 60, type=int)
 
     donors_with_dob = Donor.query.filter(Donor.dob.isnot(None)).all()
@@ -3339,7 +3355,7 @@ def export_donations():
         # component would be misleading noise -- see the same convention
         # in the Donations Log table and detail modal.
         date_str = (
-            d.donation_date.strftime("%d-%m-%Y %H:%M")
+            to_ist(d.donation_date).strftime("%d-%m-%Y %H:%M")
             if d.payment_mode == "online"
             else d.donation_date.strftime("%d-%m-%Y")
         )
@@ -3365,7 +3381,7 @@ def export_donations():
             "Yes" if d.effective_is_80g else "No",
             d.recorded_by or "",
             d.remarks or "",
-            d.cancelled_at.strftime("%d-%m-%Y %H:%M") if d.cancelled_at else "",
+            to_ist(d.cancelled_at).strftime("%d-%m-%Y %H:%M") if d.cancelled_at else "",
             d.cancelled_by or "",
             d.cancellation_reason or "",
         ])
@@ -3393,7 +3409,11 @@ def export_monthly_report():
     status == "success" filter (see Donation.status / the cancellation
     system), same as every other export/total in this file.
     """
-    today = datetime.date.today()
+    # now_ist(), not datetime.date.today() -- the server's own clock is UTC
+    # (e.g. on Render), so "today" would read as the wrong calendar date for
+    # the ~5.5 hours a day (roughly 12:00 AM-5:30 AM IST) where UTC hasn't
+    # rolled over to the same day yet.
+    today = now_ist().date()
     year = request.args.get("year", today.year, type=int)
     month = request.args.get("month", today.month, type=int)
     if not (1 <= month <= 12):
@@ -3456,7 +3476,11 @@ def export_monthly_report():
 def lapsed_donors():
     """Donors who gave in each of the last 3 months before last month, but
     NOT last month -- i.e. likely-recurring donors who may need a follow-up."""
-    today = datetime.date.today()
+    # now_ist(), not datetime.date.today() -- the server's own clock is UTC
+    # (e.g. on Render), so "today" would read as the wrong calendar date for
+    # the ~5.5 hours a day (roughly 12:00 AM-5:30 AM IST) where UTC hasn't
+    # rolled over to the same day yet.
+    today = now_ist().date()
 
     def month_key(d):
         return (d.year, d.month)

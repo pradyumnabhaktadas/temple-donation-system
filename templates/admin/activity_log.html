@@ -42,7 +42,7 @@
     <tbody>
       {% for e in entries %}
       <tr>
-        <td class="text-nowrap">{{ e.created_at.strftime('%d %b %Y, %I:%M %p') }}</td>
+        <td class="text-nowrap">{{ (e.created_at | to_ist).strftime('%d %b %Y, %I:%M %p') }}</td>
         <td>{{ e.admin_username }}</td>
         <td><span class="badge bg-secondary">{{ e.action.replace('_', ' ').title() }}</span></td>
         <td>

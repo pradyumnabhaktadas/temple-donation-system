@@ -107,10 +107,53 @@ def is_valid_phone(raw):
     return bool(PHONE_RE.match(normalize_phone(raw)))
 
 
+IST_OFFSET = datetime.timedelta(hours=5, minutes=30)
+
+
+def to_ist(dt):
+    """Converts a naive UTC datetime -- the only kind this codebase stores;
+    every timestamp column defaults to datetime.datetime.utcnow(), and the
+    host server's own clock (e.g. Render's) is UTC too -- to naive IST for
+    display or date-boundary math. India is a fixed UTC+5:30 offset with no
+    DST, so this is just a flat addition, no timezone/tzdata dependency
+    needed.
+
+    Returns None if given None, so this can be chained directly on an
+    optional column (e.g. donation.cancelled_at) without a separate guard:
+    `{{ (d.cancelled_at | to_ist).strftime(...) if d.cancelled_at else '-' }}`.
+
+    Without this, every timestamp shown to a temple office in Delhi -- a
+    donation's "time" in the Donations Log, "today"'s collections on the
+    Dashboard, upcoming birthdays, the financial-year a near-midnight
+    donation gets filed under -- is off by 5 hours 30 minutes from what
+    actually happened in India, and "today" itself is the wrong calendar
+    date for the ~5.5 hours a day (roughly 12:00 AM-5:30 AM IST) where UTC
+    hasn't rolled over to the same day yet.
+    """
+    if dt is None:
+        return None
+    return dt + IST_OFFSET
+
+
+def now_ist():
+    """Current moment in India, as a naive datetime. Use this instead of
+    datetime.datetime.now()/datetime.date.today() (which read the server's
+    own clock -- UTC on Render and most hosts) anywhere "today"/"now" needs
+    to mean the actual India-local moment: dashboard "today" stats,
+    birthday/anniversary windows, lapsed-donor calculations, and financial-
+    year determination all depend on this being right."""
+    return to_ist(datetime.datetime.utcnow())
+
+
 def get_financial_year(date=None):
-    """India FY runs Apr 1 - Mar 31. Returns e.g. '2026-27'."""
+    """India FY runs Apr 1 - Mar 31. Returns e.g. '2026-27'.
+
+    `date` should already be IST if it's derived from a stored UTC
+    timestamp (see to_ist()/now_ist()) -- passing a raw UTC datetime can
+    misattribute a donation made just after midnight IST to the previous
+    financial year, since UTC is still on the prior calendar date then."""
     if date is None:
-        date = datetime.date.today()
+        date = now_ist().date()
     if date.month >= 4:
         start = date.year
     else:

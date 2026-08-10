@@ -3,7 +3,7 @@ from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from extensions import db
-from utils import get_financial_year
+from utils import get_financial_year, to_ist
 
 
 class Preacher(db.Model):
@@ -497,8 +497,17 @@ class ReceiptCounter(db.Model):
         SQLite is a no-op here but already serializes writers at the
         database-file level, and the unique index on Donation.receipt_number
         is the hard backstop either way).
+
+        `date` is converted to IST before determining the financial year --
+        callers pass either a genuine UTC "now" timestamp (an online
+        payment finalizing) or a midnight-anchored calendar date (an
+        explicit date typed into a manual-entry/import form); +5:30 never
+        crosses a day boundary for the latter (00:00 -> 05:30, same day),
+        so this is safe either way, and fixes the former case where a
+        donation made just after midnight IST would otherwise still read
+        as UTC's previous day and get filed under the wrong financial year.
         """
-        fy = get_financial_year(date)
+        fy = get_financial_year(to_ist(date))
         counter = (
             cls.query.filter_by(financial_year=cls._FY_KEY, series=cls._SERIES_KEY)
             .with_for_update()

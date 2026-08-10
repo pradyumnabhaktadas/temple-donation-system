@@ -88,7 +88,7 @@
   <tbody>
     {% for d in donations %}
     <tr>
-      <td>{{ d.donation_date.strftime('%d-%b-%Y %H:%M') if d.payment_mode == 'online' else d.donation_date.strftime('%d-%b-%Y') }}</td>
+      <td>{{ (d.donation_date | to_ist).strftime('%d-%b-%Y %H:%M') if d.payment_mode == 'online' else d.donation_date.strftime('%d-%b-%Y') }}</td>
       <td><a href="{{ url_for('admin.donor_detail', donor_id=d.donor.id) }}">{{ d.donor.full_name }}</a></td>
       <td>{{ d.bace_property.name if d.bace_property else '-' }}</td>
       <td class="text-end">Rs. {{ d.amount | inr }}</td>

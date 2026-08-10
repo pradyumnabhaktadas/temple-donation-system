@@ -187,12 +187,12 @@
             <tr><th class="text-muted">Checkout contact</th><td>{{ d.razorpay_contact or '-' }}</td></tr>
             <tr><th class="text-muted">Donor IP address</th><td>{{ d.donor_ip_address or '-' }}</td></tr>
             <tr><th class="text-muted">Donor browser</th><td class="small">{{ d.donor_user_agent or '-' }}</td></tr>
-            <tr><th class="text-muted">Created</th><td>{{ d.created_at.strftime('%d-%b-%Y %H:%M') if d.created_at else '-' }}</td></tr>
-            <tr><th class="text-muted">Last modified</th><td>{{ d.updated_at.strftime('%d-%b-%Y %H:%M') if d.updated_at else '-' }}</td></tr>
+            <tr><th class="text-muted">Created</th><td>{{ (d.created_at | to_ist).strftime('%d-%b-%Y %H:%M') if d.created_at else '-' }}</td></tr>
+            <tr><th class="text-muted">Last modified</th><td>{{ (d.updated_at | to_ist).strftime('%d-%b-%Y %H:%M') if d.updated_at else '-' }}</td></tr>
             {% if d.razorpay_dispute_id %}
             <tr><th class="text-muted">Dispute status</th><td><span class="badge bg-danger">{{ (d.razorpay_dispute_status or 'unknown') | replace('_', ' ') | capitalize }}</span></td></tr>
             <tr><th class="text-muted">Dispute reason</th><td>{{ d.razorpay_dispute_reason or '-' }}</td></tr>
-            <tr><th class="text-muted">Disputed on</th><td>{{ d.disputed_at.strftime('%d-%b-%Y %H:%M') if d.disputed_at else '-' }}</td></tr>
+            <tr><th class="text-muted">Disputed on</th><td>{{ (d.disputed_at | to_ist).strftime('%d-%b-%Y %H:%M') if d.disputed_at else '-' }}</td></tr>
             {% endif %}
           </tbody>
         </table>
