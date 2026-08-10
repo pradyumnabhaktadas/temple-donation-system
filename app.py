@@ -25,6 +25,29 @@ def create_app(test_config=None):
         app.config.get("RAZORPAY_KEY_ID") and app.config.get("RAZORPAY_KEY_SECRET")
     )
 
+    if app.config.get("IS_PRODUCTION") and not app.config.get("TESTING"):
+        # SECRET_KEY falls back to a placeholder that is committed to this
+        # repo in plain sight (config.py). In production that placeholder
+        # would mean anyone reading the source could forge session cookies
+        # and CSRF tokens -- and, since receipt download tokens are derived
+        # from the same key (utils.receipt_access_token), compute a valid
+        # receipt link for every donation and read every donor's name,
+        # address and PAN.
+        #
+        # render.yaml already sets this with generateValue: true, so this
+        # should never fire on the intended deployment path -- it's here
+        # for the misconfigured one. Refusing to boot is deliberate: it
+        # fails the *deploy* while the previous version keeps serving,
+        # which is far better than silently coming up insecure.
+        if app.config.get("SECRET_KEY") in (None, "", "dev-secret-change-me"):
+            raise RuntimeError(
+                "SECRET_KEY is unset or still the development placeholder, and "
+                "FLASK_ENV/ENV says production. Set SECRET_KEY to a long random "
+                "value (e.g. `python -c \"import secrets; print(secrets.token_hex(32))\"`) "
+                "before deploying -- sessions, CSRF tokens and receipt download "
+                "links are all signed with it."
+            )
+
     if app.config.get("IS_PRODUCTION"):
         # Render (and most PaaS hosts) puts a reverse proxy in front of the
         # app -- without this, request.remote_addr is the proxy's own IP
