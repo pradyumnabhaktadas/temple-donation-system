@@ -1436,8 +1436,156 @@ def _offline_donation_form_context():
         "festivals": Festival.query.filter_by(is_active=True).order_by(Festival.name).all(),
         "seva_types": SevaType.query.filter_by(is_active=True).order_by(SevaType.name).all(),
         "live_to_give_purposes": LiveToGivePurpose.query.filter_by(is_active=True).order_by(LiveToGivePurpose.name).all(),
-        "today": datetime.date.today(),
+        # now_ist(), not datetime.date.today() -- see the same fix applied
+        # throughout this file for "today"-as-server-clock bugs. This one
+        # only sets the Donation Date field's default value (staff can
+        # still change it), but during the ~5.5 IST hours a day where the
+        # server's UTC clock hasn't rolled over yet, the un-fixed version
+        # would default the field to yesterday's date.
+        "today": now_ist().date(),
     }
+
+
+# Column widths taken directly from the Donor model (models.py) -- kept
+# here as a single source of truth for the offline-donation entry points,
+# so a value that's too long for its column never reaches the database as
+# an unhandled sqlalchemy.exc.DataError (which, mid-transaction, can leave
+# the DB session broken for whatever happens next in the same request).
+# The single-entry form's Address/City/State/Remarks fields have no
+# client-side maxlength, and CSV import rows are entirely unvalidated
+# free text, so this is the actual line of defence, not a formality.
+_DONOR_FIELD_LIMITS = {"full_name": 200, "email": 200, "pan": 10, "address": 400, "city": 100, "state": 100, "pincode": 10}
+
+
+def _sanitize_donor_data(data):
+    """Builds the plain dict find_or_create_donor()/Donor(...) expect,
+    trimmed and clipped to each field's real column width. `data` can be
+    a werkzeug form (single-entry POST) or a CSV row dict (bulk import) --
+    either way, only .get() is used, so both work identically here."""
+    out = {
+        key: (data.get(key) or "").strip()
+        for key in ("full_name", "email", "pan", "address", "city", "state", "pincode")
+    }
+    for key, limit in _DONOR_FIELD_LIMITS.items():
+        out[key] = out[key][:limit]
+    # Not length-clipped: normalize_phone() (called inside
+    # find_or_create_donor) reduces these to a bounded 10-digit string,
+    # and is_valid_phone() has already rejected anything malformed before
+    # this function is ever called.
+    out["phone"] = data.get("phone")
+    out["whatsapp_number"] = data.get("whatsapp_number")
+    return out
+
+
+def _create_offline_donation(
+    *, donor_data, campaign, amount, payment_mode, donation_date, recorded_by,
+    bace_property_id=None, festival_id=None, seva_type_id=None, live_to_give_purpose_id=None,
+    is_80g_requested=None, cheque_number=None, cheque_bank_name=None, bank_transaction_id=None,
+    remarks=None, send_notifications=True,
+):
+    """The one shared path every offline donation -- single-entry form or
+    a bulk CSV row -- goes through once its own field-by-field validation
+    has already passed. Used to be two near-identical copies of this
+    logic (one in manual_donation(), one in bulk_import_donations()),
+    which is exactly how the two drifted out of sync before: bulk import
+    truncated `remarks` to fit its DB column, the single-entry form
+    didn't. One implementation now, used by both.
+
+    Three stages, each safe to fail on its own:
+      1. Find/create the donor + create the Donation row + issue a real
+         receipt number, in one DB transaction. If *anything* in this
+         stage raises -- a bad value the earlier validation missed, a
+         transient DB error, whatever -- it's caught, the transaction is
+         rolled back, and nothing is left half-written. This stage used
+         to be completely unguarded in manual_donation(), which meant any
+         exception here propagated straight out of the view function.
+      2. Generate the receipt PDF and store it on the (already-committed)
+         donation. A failure here no longer loses the donation record or
+         its receipt number -- it's reported back as `pdf_ok: False` so
+         the caller can say so, rather than crashing.
+      3. Kick off the background email/WhatsApp notification thread
+         (never inline -- see the comment at the call site below for why).
+
+    Returns a dict:
+      {"ok": False, "error": "..."} -- nothing was saved, stage 1 failed.
+      {"ok": True, "donor": Donor, "donation": Donation,
+       "receipt_number": str, "pdf_ok": bool} -- stage 1 always
+      succeeded if "ok" is True; "pdf_ok" says whether stages 2/3 did too.
+    """
+    try:
+        donor = find_or_create_donor(_sanitize_donor_data(donor_data))
+
+        donation = Donation(
+            donor_id=donor.id,
+            campaign_id=campaign.id,
+            amount=amount,
+            payment_mode=payment_mode,
+            status="success",
+            donation_date=donation_date,
+            bace_property_id=bace_property_id,
+            festival_id=festival_id,
+            seva_type_id=seva_type_id,
+            live_to_give_purpose_id=live_to_give_purpose_id,
+            is_80g_requested=is_80g_requested,
+            cheque_number=(cheque_number or "").strip()[:50] or None,
+            cheque_bank_name=(cheque_bank_name or "").strip()[:150] or None,
+            bank_transaction_id=(bank_transaction_id or "").strip()[:100] or None,
+            remarks=(remarks or "").strip()[:300] or None,
+            recorded_by=recorded_by,
+        )
+        db.session.add(donation)
+        db.session.flush()
+
+        receipt_number, fy = ReceiptCounter.next_receipt_number(donation.effective_is_80g, donation_date)
+        donation.receipt_number = receipt_number
+        donation.financial_year = fy
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Failed to create offline donation (campaign_id=%s, amount=%s, recorded_by=%s)",
+            campaign.id, amount, recorded_by,
+        )
+        return {"ok": False, "error": f"Couldn't save the donation ({exc}). Nothing was recorded -- please try again."}
+
+    result = {"ok": True, "donor": donor, "donation": donation, "receipt_number": receipt_number, "pdf_ok": True}
+
+    try:
+        pdf_bytes = generate_receipt_pdf(donation, donor, campaign, _org_cfg())
+        donation.receipt_pdf = pdf_bytes
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Receipt PDF generation failed for donation id=%s (receipt %s) -- donation record was saved, "
+            "PDF/notifications were not.", donation.id, receipt_number,
+        )
+        result["pdf_ok"] = False
+        return result
+
+    if send_notifications:
+        # Backgrounded, not sent inline -- same reasoning as public.py's
+        # _finalize_success(): a slow/hanging SMTP connection or WhatsApp
+        # API call stacked on top of PDF generation can blow past
+        # gunicorn's worker timeout, which kills the whole worker mid-
+        # response (a dropped connection in the browser, no clean error,
+        # nothing in the logs) rather than a normal exception. The
+        # receipt is already saved either way by this point.
+        try:
+            app = current_app._get_current_object()
+            if app.config.get("TESTING"):
+                _send_receipt_notifications_background(app, donation.id, pdf_bytes)
+            else:
+                threading.Thread(
+                    target=_send_receipt_notifications_background, args=(app, donation.id, pdf_bytes), daemon=True
+                ).start()
+        except Exception:
+            current_app.logger.exception(
+                "Failed to start receipt notification thread for donation id=%s (receipt %s).",
+                donation.id, receipt_number,
+            )
+
+    return result
 
 
 @bp.route("/donations/manual", methods=["GET", "POST"])
@@ -1516,11 +1664,9 @@ def manual_donation():
         # against it -- same permissive approach as the rest of this form
         # (e.g. a cheque number entered then the mode changed back to Cash
         # shouldn't block submission, just goes unused).
-        cheque_number = (form.get("cheque_number") or "").strip()[:50] or None
-        cheque_bank_name = (form.get("cheque_bank_name") or "").strip()[:150] or None
-        bank_transaction_id = (form.get("bank_transaction_id") or "").strip()[:100] or None
-
-        donor = find_or_create_donor(form)
+        cheque_number = form.get("cheque_number")
+        cheque_bank_name = form.get("cheque_bank_name")
+        bank_transaction_id = form.get("bank_transaction_id")
 
         donation_date_str = form.get("donation_date")
         try:
@@ -1533,13 +1679,13 @@ def manual_donation():
             flash("That donation date doesn't look right.")
             return redirect(url_for("admin.manual_donation"))
 
-        donation = Donation(
-            donor_id=donor.id,
-            campaign_id=campaign.id,
+        result = _create_offline_donation(
+            donor_data=form,
+            campaign=campaign,
             amount=amount,
             payment_mode=form.get("payment_mode", "cash"),
-            status="success",
             donation_date=donation_date,
+            recorded_by=current_user.username,
             bace_property_id=bace_property_id,
             festival_id=festival_id,
             seva_type_id=seva_type_id,
@@ -1549,71 +1695,19 @@ def manual_donation():
             cheque_bank_name=cheque_bank_name,
             bank_transaction_id=bank_transaction_id,
             remarks=form.get("remarks"),
-            recorded_by=current_user.username,
         )
-        db.session.add(donation)
-        db.session.flush()
+        if not result["ok"]:
+            flash(result["error"], "danger")
+            return redirect(url_for("admin.manual_donation"))
 
-        receipt_number, fy = ReceiptCounter.next_receipt_number(donation.effective_is_80g, donation_date)
-        donation.receipt_number = receipt_number
-        donation.financial_year = fy
-        db.session.commit()
-
-        # The donation itself (with its receipt number) is now safely
-        # committed regardless of anything below. PDF rendering and
-        # notification-sending are wrapped defensively so that *any*
-        # unexpected exception here -- a bad image file, an unusual
-        # None field on a manually-entered donation, a transient DB
-        # hiccup on the second commit, anything -- gets caught, logged
-        # with a full traceback, and turned into a clean flash message
-        # instead of an unhandled crash that can take the whole gunicorn
-        # worker down with it (which looks to the browser like the
-        # connection was simply dropped, with nothing informative in
-        # the logs). This was previously unguarded, unlike the bulk
-        # import path a few functions down, which already had a
-        # per-row try/except covering this same span.
-        try:
-            pdf_bytes = generate_receipt_pdf(donation, donor, campaign, _org_cfg())
-            donation.receipt_pdf = pdf_bytes
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-            current_app.logger.exception(
-                "Receipt PDF generation failed for manual donation id=%s (receipt %s) -- donation record was "
-                "saved, but the PDF/notification step did not complete.", donation.id, receipt_number,
-            )
+        if result["pdf_ok"]:
+            flash(f"Donation recorded. Receipt {result['receipt_number']} generated.")
+        else:
             flash(
-                f"Donation recorded with receipt {receipt_number}, but generating the PDF failed. "
+                f"Donation recorded with receipt {result['receipt_number']}, but generating the PDF failed. "
                 f"Check the donor's record and regenerate the receipt if needed.", "warning",
             )
-            return redirect(url_for("admin.donor_detail", donor_id=donor.id))
-
-        # Backgrounded, not sent inline -- same reasoning as public.py's
-        # _finalize_success(): a slow/hanging SMTP connection or WhatsApp
-        # API call stacked on top of PDF generation can blow past
-        # gunicorn's worker timeout, which kills the whole worker mid-
-        # response (a dropped connection in the browser, no clean error,
-        # nothing in the logs) rather than a normal exception. The receipt
-        # is already saved to the database at this point either way.
-        try:
-            app = current_app._get_current_object()
-            if app.config.get("TESTING"):
-                _send_receipt_notifications_background(app, donation.id, pdf_bytes)
-            else:
-                threading.Thread(
-                    target=_send_receipt_notifications_background, args=(app, donation.id, pdf_bytes), daemon=True
-                ).start()
-        except Exception:
-            # Starting the background thread itself should never fail, but
-            # if it somehow does, don't let it take the request down --
-            # the receipt is already saved either way.
-            current_app.logger.exception(
-                "Failed to start receipt notification thread for manual donation id=%s (receipt %s).",
-                donation.id, receipt_number,
-            )
-
-        flash(f"Donation recorded. Receipt {receipt_number} generated.")
-        return redirect(url_for("admin.donor_detail", donor_id=donor.id))
+        return redirect(url_for("admin.donor_detail", donor_id=result["donor"].id))
 
     active_tab = "bulk" if request.args.get("tab") == "bulk" else "single"
     return render_template(
@@ -1758,7 +1852,6 @@ def bulk_import_donations():
     seva_by_name = {s.name.strip().lower(): s for s in SevaType.query.all()}
     purposes_by_name = {p.name.strip().lower(): p for p in LiveToGivePurpose.query.all()}
 
-    org_cfg = _org_cfg()
     results = []
     created = 0
 
@@ -1830,64 +1923,41 @@ def bulk_import_donations():
             results.append({"line": line_num, "name": full_name or "(blank)", "ok": False, "errors": row_errors})
             continue
 
-        try:
-            donor = find_or_create_donor(row)
+        # Same shared path manual_donation() uses -- donor find/create +
+        # Donation row + receipt number in one transaction (rolled back
+        # whole on any failure, so a bad row never leaves a half-written
+        # record), then PDF generation and notification-kickoff each
+        # guarded separately. Row-level validation above has already
+        # ruled out the common mistakes (bad campaign/amount/date/PAN/
+        # phone); this call covers whatever that validation doesn't,
+        # same as it does for the single-entry form.
+        result = _create_offline_donation(
+            donor_data=row,
+            campaign=campaign,
+            amount=amount,
+            payment_mode=payment_mode,
+            donation_date=donation_date,
+            recorded_by=current_user.username,
+            bace_property_id=bace_property_id,
+            festival_id=festival_id,
+            seva_type_id=seva_type_id,
+            live_to_give_purpose_id=live_to_give_purpose_id,
+            is_80g_requested=is_80g_requested,
+            cheque_number=row.get("cheque_number"),
+            cheque_bank_name=row.get("cheque_bank_name"),
+            bank_transaction_id=row.get("bank_transaction_id"),
+            remarks=row.get("remarks"),
+            send_notifications=send_notifications,
+        )
+        if not result["ok"]:
+            results.append({"line": line_num, "name": full_name or "(blank)", "ok": False, "errors": [result["error"]]})
+            continue
 
-            donation = Donation(
-                donor_id=donor.id,
-                campaign_id=campaign.id,
-                amount=amount,
-                payment_mode=payment_mode,
-                status="success",
-                donation_date=donation_date,
-                bace_property_id=bace_property_id,
-                festival_id=festival_id,
-                seva_type_id=seva_type_id,
-                live_to_give_purpose_id=live_to_give_purpose_id,
-                is_80g_requested=is_80g_requested,
-                cheque_number=(row.get("cheque_number") or "")[:50] or None,
-                cheque_bank_name=(row.get("cheque_bank_name") or "")[:150] or None,
-                bank_transaction_id=(row.get("bank_transaction_id") or "")[:100] or None,
-                remarks=(row.get("remarks") or "")[:300] or None,
-                recorded_by=current_user.username,
-            )
-            db.session.add(donation)
-            db.session.flush()
-
-            receipt_number, fy = ReceiptCounter.next_receipt_number(donation.effective_is_80g, donation_date)
-            donation.receipt_number = receipt_number
-            donation.financial_year = fy
-            db.session.commit()
-
-            pdf_bytes = generate_receipt_pdf(donation, donor, campaign, org_cfg)
-            donation.receipt_pdf = pdf_bytes
-            db.session.commit()
-
-            # Backgrounded per row, same reasoning as manual_donation()/
-            # public.py's _finalize_success() -- send_notifications is
-            # opt-in for this importer, but a CSV with several rows and
-            # notifications on would otherwise stack that many SMTP/
-            # WhatsApp calls inline before the response can return, making
-            # a gunicorn worker-timeout kill (dropped connection, no
-            # traceback) far more likely the bigger the file is.
-            if send_notifications:
-                app = current_app._get_current_object()
-                if app.config.get("TESTING"):
-                    _send_receipt_notifications_background(app, donation.id, pdf_bytes)
-                else:
-                    threading.Thread(
-                        target=_send_receipt_notifications_background, args=(app, donation.id, pdf_bytes), daemon=True
-                    ).start()
-
-            results.append({"line": line_num, "name": full_name, "ok": True, "receipt_number": receipt_number})
-            created += 1
-        except Exception as exc:
-            db.session.rollback()
-            current_app.logger.exception("Bulk import failed on row %s", line_num)
-            results.append({
-                "line": line_num, "name": full_name or "(blank)", "ok": False,
-                "errors": [f"unexpected error -- row skipped ({exc})"],
-            })
+        row_result = {"line": line_num, "name": full_name, "ok": True, "receipt_number": result["receipt_number"]}
+        if not result["pdf_ok"]:
+            row_result["pdf_ok"] = False
+        results.append(row_result)
+        created += 1
 
     skipped = len(results) - created
     flash(f"Bulk import finished: {created} donation(s) created, {skipped} skipped.")

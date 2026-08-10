@@ -203,6 +203,10 @@
           <td>
             {% if r.ok %}
               <span class="badge bg-success">Imported</span> Receipt {{ r.receipt_number }}
+              {% if r.pdf_ok is defined and not r.pdf_ok %}
+              <span class="badge bg-warning text-dark">PDF failed</span> receipt number was issued, but the PDF
+              couldn't be generated -- regenerate it from the donor's record.
+              {% endif %}
             {% else %}
               <span class="badge bg-danger">Skipped</span> {{ r.errors | join('; ') }}
             {% endif %}
