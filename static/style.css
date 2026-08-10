@@ -384,9 +384,43 @@ body {
 }
 .photo-card img {
   position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
-  transition:.35s ease;
+  transition:.35s ease; cursor:zoom-in;
 }
 .photo-card:hover img { transform:scale(1.05); }
+
+/* Click-to-zoom lightbox for any .photo-card image (Deity Darshan, temple
+   renders, etc.) -- wired up site-wide in base.html so every gallery gets
+   it automatically, current and future. Clicking an image opens the full
+   photo with prev/next through whichever .photo-gallery-grid it belongs
+   to; Esc/backdrop/X closes it. */
+.lightbox-overlay {
+  position:fixed; inset:0; background:rgba(10,8,6,.92);
+  display:flex; align-items:center; justify-content:center;
+  z-index:2000; padding:2rem; opacity:0; visibility:hidden; transition:opacity .2s ease;
+}
+.lightbox-overlay.open { opacity:1; visibility:visible; }
+.lightbox-image { max-width:min(90vw,1100px); max-height:82vh; border-radius:10px; box-shadow:0 20px 60px rgba(0,0,0,.5); }
+.lightbox-caption {
+  position:absolute; bottom:1.5rem; left:0; right:0; text-align:center;
+  color:#fff; font-size:.92rem; font-weight:600; letter-spacing:.02em;
+}
+.lightbox-close {
+  position:absolute; top:1rem; right:1.25rem; background:none; border:none;
+  color:#fff; font-size:2.4rem; line-height:1; cursor:pointer; padding:.25rem .6rem;
+}
+.lightbox-nav {
+  position:absolute; top:50%; transform:translateY(-50%);
+  background:rgba(255,255,255,.14); border:none; color:#fff; font-size:1.8rem;
+  width:2.9rem; height:2.9rem; border-radius:50%; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; line-height:1;
+}
+.lightbox-close:hover, .lightbox-nav:hover { background:rgba(255,255,255,.24); }
+.lightbox-prev { left:1rem; }
+.lightbox-next { right:1rem; }
+@media (max-width:576px) {
+  .lightbox-nav { width:2.4rem; height:2.4rem; font-size:1.5rem; }
+  .lightbox-close { font-size:2rem; top:.5rem; right:.75rem; }
+}
 .photo-card .photo-card-icon {
   position:absolute; top:50%; left:50%; transform:translate(-50%,-58%);
   font-size:2.4rem; opacity:.85; color:#fff;
