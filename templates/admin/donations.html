@@ -67,6 +67,7 @@
     <th>{{ sort_th('date', 'Date', 'desc') }}</th>
     <th>{{ sort_th('donor', 'Donor', 'asc') }}</th>
     <th>{{ sort_th('campaign', 'Campaign', 'asc') }}</th>
+    <th>Purpose</th>
     <th>{{ sort_th('amount', 'Amount', 'desc') }}</th>
     <th>Mode</th>
     <th>Reference</th>
@@ -81,6 +82,7 @@
       <td>{{ d.donation_date.strftime('%d-%b-%Y %H:%M') if d.payment_mode == 'online' else d.donation_date.strftime('%d-%b-%Y') }}</td>
       <td><a href="{{ url_for('admin.donor_detail', donor_id=d.donor.id) }}">{{ d.donor.full_name }}</a></td>
       <td>{{ d.campaign.name }}</td>
+      <td class="small text-muted">{{ d.specific_purpose or '-' }}</td>
       <td>Rs. {{ d.amount | inr }}</td>
       <td>{{ d.payment_mode.replace('_',' ').title() }}{% if d.razorpay_method %} ({{ d.razorpay_method.upper() }}){% endif %}</td>
       <td class="small text-muted">{{ d.reference_display or '-' }}</td>
@@ -116,7 +118,7 @@
       {% endif %}
     </tr>
     {% else %}
-    <tr><td colspan="11" class="text-muted">No donations found.</td></tr>
+    <tr><td colspan="12" class="text-muted">No donations found.</td></tr>
     {% endfor %}
   </tbody>
 </table>

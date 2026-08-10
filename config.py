@@ -107,6 +107,10 @@ class Config:
         "Plot No.-4, Sub-City Level, Dwarka Sector-13, Behind Radisson Blue Hotel, Delhi-110075",
     )
     ORG_CONTACT_EMAIL = os.environ.get("ORG_CONTACT_EMAIL", "livetogive.dwarka@gmail.com")
+    # Shown in the website footer/About page as a click-to-call and
+    # click-to-WhatsApp number. Stored plain (10 digits, optionally with a
+    # leading +91) -- normalize_phone() cleans it up before use.
+    ORG_CONTACT_PHONE = os.environ.get("ORG_CONTACT_PHONE", "+91 93156 22933")
 
     # Applies to both admin sessions (Flask-Login) and donor OTP-login
     # sessions -- Flask's session lifetime is app-wide, not per-login-type.

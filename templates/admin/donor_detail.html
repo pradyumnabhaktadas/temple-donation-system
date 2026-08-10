@@ -74,15 +74,17 @@
 
 <div class="table-responsive">
 <table class="table table-sm bg-white shadow-sm">
-  <thead><tr><th>Date</th><th>Campaign</th><th>Amount</th><th>Mode</th><th>Transaction ID</th><th>Receipt</th><th>Status</th><th></th>{% if current_user.role == 'admin' %}<th></th>{% endif %}</tr></thead>
+  <thead><tr><th>Date</th><th>Campaign</th><th>Purpose</th><th>Amount</th><th>Mode</th><th>Payment ID</th><th>Order ID</th><th>Receipt</th><th>Status</th><th></th>{% if current_user.role == 'admin' %}<th></th>{% endif %}</tr></thead>
   <tbody>
     {% for d in donations %}
     <tr>
       <td>{{ d.donation_date.strftime('%d-%b-%Y') }}</td>
       <td>{{ d.campaign.name }}</td>
+      <td class="small text-muted">{{ d.specific_purpose or '-' }}</td>
       <td>Rs. {{ d.amount | inr }}</td>
       <td>{{ d.payment_mode.replace('_',' ').title() }}{% if d.razorpay_method %} ({{ d.razorpay_method.upper() }}){% endif %}</td>
-      <td class="small text-muted">{{ d.reference_display or '-' }}</td>
+      <td class="small text-muted">{{ d.razorpay_payment_id or d.reference_display or '-' }}</td>
+      <td class="small text-muted">{{ d.razorpay_order_id or '-' }}</td>
       <td>
         {% if d.status == 'success' and d.receipt_number %}
           <a href="{{ url_for('public.download_receipt', donation_id=d.id) }}">{{ d.receipt_number }}</a>

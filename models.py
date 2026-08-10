@@ -402,6 +402,26 @@ class Donation(db.Model):
             return self.bank_transaction_id
         return None
 
+    @property
+    def specific_purpose(self):
+        """The campaign-specific sub-selection for this donation, if any --
+        which BACE property, festival, seva type, or Live To Give purpose
+        it was for. Blank for campaigns with no such sub-selection (e.g. a
+        plain General Donation). Used anywhere staff need to see *which*
+        BACE property (or festival/seva) actually received a contribution,
+        not just the parent campaign name -- the Donations Log table,
+        donor detail page, and the CSV export all share this."""
+        if self.bace_property:
+            return self.bace_property.name
+        if self.festival:
+            name = self.festival.name
+            return f"{name} - {self.seva_type.name}" if self.seva_type else name
+        if self.seva_type:
+            return self.seva_type.name
+        if self.live_to_give_purpose:
+            return self.live_to_give_purpose.name
+        return ""
+
     def __repr__(self):
         return f"<Donation {self.id} {self.amount}>"
 

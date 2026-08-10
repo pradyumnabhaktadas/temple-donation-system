@@ -9,7 +9,7 @@ load_dotenv()
 from config import Config
 from extensions import db, login_manager, csrf, limiter, LIMITER_AVAILABLE
 from models import AdminUser
-from utils import format_inr
+from utils import format_inr, normalize_phone
 
 
 def create_app(test_config=None):
@@ -146,11 +146,21 @@ def create_app(test_config=None):
         # Makes org_name and the public-facing About Us/contact footer
         # details available in every template (e.g. the shared header/
         # footer in base.html) without each view needing to pass them.
+        contact_phone = app.config["ORG_CONTACT_PHONE"]
+        # wa.me needs a plain digits-only number with country code and no
+        # "+"/spaces -- normalize_phone() strips it down to 10 digits, so
+        # we just prefix "91" back on for the click-to-WhatsApp link.
+        contact_phone_digits = normalize_phone(contact_phone)
+        contact_whatsapp_number = (
+            f"91{contact_phone_digits}" if len(contact_phone_digits) == 10 else contact_phone_digits
+        )
         return {
             "org_name": app.config["ORG_NAME"],
             "org_about_text": app.config["ORG_ABOUT_TEXT"],
             "org_contact_address": app.config["ORG_CONTACT_ADDRESS"],
             "org_contact_email": app.config["ORG_CONTACT_EMAIL"],
+            "org_contact_phone": contact_phone,
+            "org_contact_whatsapp_number": contact_whatsapp_number,
         }
 
     @app.errorhandler(CSRFError)

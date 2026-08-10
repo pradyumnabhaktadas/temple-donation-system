@@ -46,7 +46,7 @@
   </p>
   <div class="table-responsive">
     <table class="table table-sm mb-0">
-      <thead><tr><th>Date</th><th>Donor</th><th>Phone</th><th class="text-end">Amount</th><th>Campaign</th><th>Status</th></tr></thead>
+      <thead><tr><th>Date</th><th>Donor</th><th>Phone</th><th class="text-end">Amount</th><th>Campaign</th><th>Payment ID</th><th>Order ID</th><th>Status</th></tr></thead>
       <tbody>
         {% for d in failed_abandoned_donations %}
         <tr>
@@ -55,6 +55,8 @@
           <td>{{ d.donor.phone or '-' if d.donor else '-' }}</td>
           <td class="text-end">Rs. {{ d.amount | inr }}</td>
           <td>{{ d.campaign.name if d.campaign else '-' }}</td>
+          <td class="small text-muted">{{ d.razorpay_payment_id or '-' }}</td>
+          <td class="small text-muted">{{ d.razorpay_order_id or '-' }}</td>
           <td><span class="badge {{ 'bg-danger' if d.status == 'failed' else 'bg-secondary' }}">{{ d.status | capitalize }}</span></td>
         </tr>
         {% endfor %}
@@ -77,7 +79,7 @@
   </p>
   <div class="table-responsive">
     <table class="table table-sm mb-0">
-      <thead><tr><th>Disputed On</th><th>Donor</th><th class="text-end">Amount</th><th>Receipt #</th><th>Status</th><th>Reason</th></tr></thead>
+      <thead><tr><th>Disputed On</th><th>Donor</th><th class="text-end">Amount</th><th>Receipt #</th><th>Payment ID</th><th>Order ID</th><th>Status</th><th>Reason</th></tr></thead>
       <tbody>
         {% for d in disputed_donations %}
         <tr>
@@ -85,6 +87,8 @@
           <td>{% if d.donor %}<a href="{{ url_for('admin.donor_detail', donor_id=d.donor.id) }}">{{ d.donor.full_name }}</a>{% else %}-{% endif %}</td>
           <td class="text-end">Rs. {{ d.amount | inr }}</td>
           <td>{{ d.receipt_number or '-' }}</td>
+          <td class="small text-muted">{{ d.razorpay_payment_id or '-' }}</td>
+          <td class="small text-muted">{{ d.razorpay_order_id or '-' }}</td>
           <td><span class="badge bg-danger">{{ (d.razorpay_dispute_status or 'unknown') | replace('_', ' ') | capitalize }}</span></td>
           <td>{{ d.razorpay_dispute_reason or '-' }}</td>
         </tr>

@@ -3117,13 +3117,7 @@ def export_donations():
     ])
     for d in rows:
         donor = d.donor
-        specific_purpose = (
-            (d.bace_property.name if d.bace_property else None)
-            or (d.festival.name if d.festival else None)
-            or (d.seva_type.name if d.seva_type else None)
-            or (d.live_to_give_purpose.name if d.live_to_give_purpose else None)
-            or ""
-        )
+        specific_purpose = d.specific_purpose
         # Online donations carry a real time-of-day (set the instant the
         # payment was confirmed); offline entries are always saved at
         # midnight since only a date is captured for those, so a time

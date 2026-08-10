@@ -477,6 +477,8 @@ body {
 .footer-text a { color:#fff; text-decoration:underline; text-decoration-color:rgba(255,255,255,.4); }
 .footer-text a:hover { color:var(--saffron-light); }
 .footer-text-note { font-size:.74rem; line-height:1.55; color:rgba(255,255,255,.58); margin:0; }
+.footer-whatsapp-link { display:inline-block; margin-left:.6rem; padding:.15rem .55rem; border-radius:999px; background:#25D366; color:#fff !important; text-decoration:none !important; font-size:.74rem; font-weight:600; }
+.footer-whatsapp-link:hover { background:#1ebe57; }
 .site-footer .site-footer-note { border-top:1px solid rgba(255,255,255,.12); padding:1.2rem 1rem; margin:0; color:rgba(255,255,255,.6); }
 .site-footer .site-footer-note span { color:rgba(255,255,255,.6); }
 .site-footer .site-footer-note .footer-admin-link,
