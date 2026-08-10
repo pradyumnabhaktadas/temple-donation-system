@@ -4,6 +4,7 @@ import os
 import re
 import secrets
 import datetime
+import threading
 from collections import defaultdict
 from functools import wraps
 
@@ -22,9 +23,10 @@ from models import (
 )
 from utils import get_financial_year, is_valid_pan, is_valid_phone, normalize_phone, now_ist, to_ist
 from pdf_utils import generate_receipt_pdf
-from email_utils import send_receipt_email
-from whatsapp_utils import send_receipt_whatsapp
-from public import find_or_create_donor, _org_cfg, high_value_pan_address_error, _finalize_success
+from public import (
+    find_or_create_donor, _org_cfg, high_value_pan_address_error, _finalize_success,
+    _send_receipt_notifications_background,
+)
 from backup_utils import build_backup_zip, run_backup
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -1560,8 +1562,21 @@ def manual_donation():
         pdf_bytes = generate_receipt_pdf(donation, donor, campaign, _org_cfg())
         donation.receipt_pdf = pdf_bytes
         db.session.commit()
-        send_receipt_email(donation, donor, _org_cfg(), pdf_bytes)
-        send_receipt_whatsapp(donation, donor, _org_cfg(), pdf_bytes)
+
+        # Backgrounded, not sent inline -- same reasoning as public.py's
+        # _finalize_success(): a slow/hanging SMTP connection or WhatsApp
+        # API call stacked on top of PDF generation can blow past
+        # gunicorn's worker timeout, which kills the whole worker mid-
+        # response (a dropped connection in the browser, no clean error,
+        # nothing in the logs) rather than a normal exception. The receipt
+        # is already saved to the database at this point either way.
+        app = current_app._get_current_object()
+        if app.config.get("TESTING"):
+            _send_receipt_notifications_background(app, donation.id, pdf_bytes)
+        else:
+            threading.Thread(
+                target=_send_receipt_notifications_background, args=(app, donation.id, pdf_bytes), daemon=True
+            ).start()
 
         flash(f"Donation recorded. Receipt {receipt_number} generated.")
         return redirect(url_for("admin.donor_detail", donor_id=donor.id))
@@ -1814,9 +1829,21 @@ def bulk_import_donations():
             donation.receipt_pdf = pdf_bytes
             db.session.commit()
 
+            # Backgrounded per row, same reasoning as manual_donation()/
+            # public.py's _finalize_success() -- send_notifications is
+            # opt-in for this importer, but a CSV with several rows and
+            # notifications on would otherwise stack that many SMTP/
+            # WhatsApp calls inline before the response can return, making
+            # a gunicorn worker-timeout kill (dropped connection, no
+            # traceback) far more likely the bigger the file is.
             if send_notifications:
-                send_receipt_email(donation, donor, org_cfg, pdf_bytes)
-                send_receipt_whatsapp(donation, donor, org_cfg, pdf_bytes)
+                app = current_app._get_current_object()
+                if app.config.get("TESTING"):
+                    _send_receipt_notifications_background(app, donation.id, pdf_bytes)
+                else:
+                    threading.Thread(
+                        target=_send_receipt_notifications_background, args=(app, donation.id, pdf_bytes), daemon=True
+                    ).start()
 
             results.append({"line": line_num, "name": full_name, "ok": True, "receipt_number": receipt_number})
             created += 1
