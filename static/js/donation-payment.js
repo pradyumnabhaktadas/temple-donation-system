@@ -60,7 +60,12 @@ window.TempleDonationPayment = (function () {
   // form/page since a donor only has one payment in flight at a time in
   // one browser.
   const PENDING_KEY = 'templeDonationPending';
-  const PENDING_MAX_AGE_MS = 6 * 60 * 60 * 1000; // 6 hours -- older than this, not worth resuming
+  // 30 minutes, not several hours: long enough to cover a realistic UPI
+  // app hand-off + webhook delay, short enough that resuming an old
+  // marker doesn't surprise a donor who's come back to start a brand new,
+  // unrelated donation much later and gets redirected away from the form
+  // they just opened toward a receipt from something they did earlier.
+  const PENDING_MAX_AGE_MS = 30 * 60 * 1000;
 
   async function postJSON(url, body, csrfToken) {
     const resp = await fetch(url, {

@@ -764,13 +764,22 @@ def verify_payment():
 
 
 @bp.route("/api/donation-status/<int:donation_id>", methods=["GET"])
-@limiter.limit("60 per minute")
+@limiter.limit("120 per minute")
 @_safe_json_route
 def donation_status(donation_id):
     """Client polling target -- see module docstring, layer 3. Doesn't
     confirm anything itself; just reports whatever the webhook or the
     browser fast path has already recorded, so a donor's tab finds out
-    even when the fast path never fires."""
+    even when the fast path never fires.
+
+    Rate limit is keyed by IP (see extensions.py), and this is a cheap,
+    read-only, unauthenticated lookup -- raised from 60/min to 120/min
+    because the client-side polling was made more aggressive this session
+    (a Page Visibility check fires an extra request the instant a
+    backgrounded tab comes back, on top of the regular interval), and
+    many donors on the same mobile carrier's shared IP (common in India)
+    polling concurrently could otherwise collide with each other's
+    budget and see checks silently fail more than necessary."""
     donation = Donation.query.get_or_404(donation_id)
     return jsonify({"status": donation.status, "receipt_number": donation.receipt_number})
 
