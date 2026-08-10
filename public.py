@@ -499,16 +499,28 @@ def create_order():
         return jsonify({"error": str(e)}), 400
 
     # Only the Live To Give form sends this -- the donor's own choice of
-    # 80G vs Non-80G receipt for this specific donation. Any other value
-    # (missing, or anything other than "80g"/"non80g") is treated as "not
-    # asked", so Donation.effective_is_80g falls back to the campaign's own
-    # is_80g flag exactly as it always has for every other form.
+    # 80G vs Non-80G receipt for this specific donation.
     receipt_type = data.get("receipt_type")
     if receipt_type == "80g":
         is_80g_requested = True
     elif receipt_type == "non80g":
         is_80g_requested = False
+    elif live_to_give_purpose_id:
+        # Live To Give donation, but no answer arrived (the donor didn't
+        # pick either option, or reached this endpoint some other way
+        # than the current form JS, which now defaults the "No" radio
+        # itself). Defaulting to Non-80G here -- rather than falling
+        # through to Campaign.is_80g below -- means a donor who has no
+        # opinion on the tax-receipt question is never blocked or
+        # surprised by whatever the campaign's own default happens to be
+        # set to; they get a regular receipt unless they actively asked
+        # for the 80G one.
+        is_80g_requested = False
     else:
+        # Every other campaign's 80G status is a fixed property of the
+        # campaign itself and never sends receipt_type at all -- leave
+        # this None so Donation.effective_is_80g falls back to
+        # Campaign.is_80g exactly as it always has.
         is_80g_requested = None
 
     # A donation purpose's own 80G eligibility (LiveToGivePurpose.is_80g)

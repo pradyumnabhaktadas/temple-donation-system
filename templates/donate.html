@@ -375,6 +375,14 @@
       // Purpose changed out from under an existing "Yes" selection.
       receiptType80g.checked = false;
       receiptTypeNon80g.checked = false;
+    } else if (purposeChosen && isEligible && !receiptType80g.checked && !receiptTypeNon80g.checked) {
+      // Neither radio has an explicit answer yet for an eligible purpose
+      // (this question was previously left with no default at all, which
+      // could read as the form being stuck if a donor didn't realize they
+      // needed to pick one). Default to "No" -- a donor who does want the
+      // 80G tax receipt can still switch to "Yes"; one who doesn't care
+      // isn't blocked on answering a question they have no opinion on.
+      receiptTypeNon80g.checked = true;
     }
     updatePanAddressRequirement();
   }
