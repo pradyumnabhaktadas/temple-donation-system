@@ -13,6 +13,7 @@
   <p class="mb-0 d-flex flex-wrap gap-2">
     <a href="{{ url_for('admin.download_backup') }}" class="btn btn-gold">⬇ Download Backup Now</a>
     <form method="post" action="{{ url_for('admin.trigger_backup') }}" class="d-inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-outline-secondary">🗄 Run Backup Now (save + email)</button>
     </form>
   </p>
