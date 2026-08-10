@@ -147,6 +147,28 @@ def high_value_pan_address_error(amount, pan, address):
     )
 
 
+# DB column widths (see models.Donor). None of the public donation forms
+# enforce a client-side maxlength on Address/City/State, so a donor who
+# pastes a long address hits sqlalchemy.exc.DataError the moment the
+# session flushes an over-length value -- and until this fix, that
+# exception had nowhere to go: it propagated straight out of every path
+# that reaches find_or_create_donor() (online create_order, offline
+# manual entry, bulk import, donor merge), none of which wrapped this
+# call. Clipping here, at the one function all of them funnel through,
+# fixes it once for every caller instead of requiring each call site to
+# remember to sanitize first -- the same class of bug already found and
+# fixed twice this session in _create_offline_donation and
+# _finalize_success, just one level further upstream.
+_DONOR_FIELD_LIMITS = {
+    "full_name": 200, "email": 200, "pan": 10,
+    "address": 400, "city": 100, "state": 100, "pincode": 10,
+}
+
+
+def _clip(value, limit):
+    return (value or "")[:limit]
+
+
 def find_or_create_donor(data):
     """Dedup a donor by PAN first, then phone+name, then email+name. This
     is the single-donor-database mechanism that prevents duplicate donor
@@ -170,7 +192,7 @@ def find_or_create_donor(data):
     this function is built to prevent.
     """
     donor = None
-    pan = (data.get("pan") or "").strip().upper()
+    pan = _clip((data.get("pan") or "").strip().upper(), _DONOR_FIELD_LIMITS["pan"])
     # Normalized to a plain 10-digit local number regardless of how it was
     # typed ("+91 88020 81265", "918802081265", "08802081265", ...) -- see
     # normalize_phone()'s docstring. Without this, the same donor typing
@@ -178,10 +200,14 @@ def find_or_create_donor(data):
     # with a different format than the one stored) would silently fail to
     # match.
     phone = normalize_phone(data.get("phone"))
-    email = (data.get("email") or "").strip().lower()
+    email = _clip((data.get("email") or "").strip().lower(), _DONOR_FIELD_LIMITS["email"])
     whatsapp_number = normalize_phone(data.get("whatsapp_number"))
-    full_name = data.get("full_name", "").strip()
+    full_name = _clip((data.get("full_name") or "").strip(), _DONOR_FIELD_LIMITS["full_name"])
     incoming_name = _normalize_name(full_name)
+    address = _clip((data.get("address") or "").strip(), _DONOR_FIELD_LIMITS["address"])
+    city = _clip((data.get("city") or "").strip(), _DONOR_FIELD_LIMITS["city"])
+    state = _clip((data.get("state") or "").strip(), _DONOR_FIELD_LIMITS["state"])
+    pincode = _clip((data.get("pincode") or "").strip(), _DONOR_FIELD_LIMITS["pincode"])
 
     if pan:
         donor = Donor.query.filter_by(pan=pan).first()
@@ -201,10 +227,10 @@ def find_or_create_donor(data):
             phone=phone or None,
             whatsapp_number=whatsapp_number or None,
             pan=pan or None,
-            address=data.get("address", "").strip() or None,
-            city=data.get("city", "").strip() or None,
-            state=data.get("state", "").strip() or None,
-            pincode=data.get("pincode", "").strip() or None,
+            address=address or None,
+            city=city or None,
+            state=state or None,
+            pincode=pincode or None,
         )
         db.session.add(donor)
     else:
@@ -220,10 +246,10 @@ def find_or_create_donor(data):
         donor.phone = phone or donor.phone
         donor.whatsapp_number = whatsapp_number or donor.whatsapp_number
         donor.pan = pan or donor.pan
-        donor.address = data.get("address", "").strip() or donor.address
-        donor.city = data.get("city", "").strip() or donor.city
-        donor.state = data.get("state", "").strip() or donor.state
-        donor.pincode = data.get("pincode", "").strip() or donor.pincode
+        donor.address = address or donor.address
+        donor.city = city or donor.city
+        donor.state = state or donor.state
+        donor.pincode = pincode or donor.pincode
 
     db.session.flush()
     return donor
@@ -453,33 +479,45 @@ def create_order():
 
     remarks = (data.get("remarks") or "").strip()[:300] or None
 
-    donor = find_or_create_donor(data)
+    # Wrapped in try/except: find_or_create_donor()/Donation(...)/flush()
+    # can still fail on something other than an over-length field (a
+    # transient DB hiccup, for instance) -- without this, that exception
+    # would propagate straight out of the request the same way the
+    # now-fixed field-length crash used to, presenting to the donor's
+    # browser as the connection simply dying instead of a normal error.
+    try:
+        donor = find_or_create_donor(data)
 
-    donation = Donation(
-        donor_id=donor.id,
-        campaign_id=campaign.id,
-        amount=amount,
-        payment_mode="online",
-        status="pending",
-        recorded_by="online",
-        bace_property_id=bace_property_id,
-        festival_id=festival_id,
-        seva_type_id=seva_type_id,
-        live_to_give_purpose_id=live_to_give_purpose_id,
-        is_80g_requested=is_80g_requested,
-        remarks=remarks,
-        consent_given=True,
-        consent_at=datetime.datetime.utcnow(),
-        consent_version=current_app.config.get("CONSENT_VERSION"),
-        # Not from Razorpay -- captured from the donor's own request to our
-        # server, for the same fraud/audit-trail purpose. request.remote_addr
-        # reflects the real client IP behind Render's proxy because
-        # ProxyFix is wired up in app.py for production.
-        donor_ip_address=(request.remote_addr or "")[:45] or None,
-        donor_user_agent=(request.headers.get("User-Agent") or "")[:300] or None,
-    )
-    db.session.add(donation)
-    db.session.flush()
+        donation = Donation(
+            donor_id=donor.id,
+            campaign_id=campaign.id,
+            amount=amount,
+            payment_mode="online",
+            status="pending",
+            recorded_by="online",
+            bace_property_id=bace_property_id,
+            festival_id=festival_id,
+            seva_type_id=seva_type_id,
+            live_to_give_purpose_id=live_to_give_purpose_id,
+            is_80g_requested=is_80g_requested,
+            remarks=remarks,
+            consent_given=True,
+            consent_at=datetime.datetime.utcnow(),
+            consent_version=current_app.config.get("CONSENT_VERSION"),
+            # Not from Razorpay -- captured from the donor's own request to
+            # our server, for the same fraud/audit-trail purpose.
+            # request.remote_addr reflects the real client IP behind
+            # Render's proxy because ProxyFix is wired up in app.py for
+            # production.
+            donor_ip_address=(request.remote_addr or "")[:45] or None,
+            donor_user_agent=(request.headers.get("User-Agent") or "")[:300] or None,
+        )
+        db.session.add(donation)
+        db.session.flush()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Failed to create donor/donation record for online donation")
+        return jsonify({"error": "Something went wrong starting the payment. Please try again."}), 500
 
     order_id = None
     if current_app.config["RAZORPAY_ENABLED"]:
