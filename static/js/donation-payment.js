@@ -40,6 +40,28 @@
 window.TempleDonationPayment = (function () {
   'use strict';
 
+  // How long the post-payment confirmation poll keeps trying before it
+  // gives up and shows the "couldn't confirm automatically" message.
+  // 40 attempts (2 minutes) turned out not to be long enough in practice:
+  // twice now, a donor saw that give-up message while the payment had, in
+  // fact, already succeeded on the backend (confirmed via Admin ->
+  // Donations Log) -- the webhook just hadn't caught up within that
+  // window yet, most plausibly because completing payment via a UPI app
+  // (extremely common in India) backgrounds this browser tab, and
+  // browsers throttle background timers hard, and/or the UPI app hand-off
+  // + webhook delivery simply took a little over 2 minutes. 5 minutes
+  // gives real-world confirmation delays a lot more room before a donor
+  // sees a scary message about something that actually went fine.
+  const CONFIRMATION_POLL_ATTEMPTS = 100;
+  const CONFIRMATION_POLL_INTERVAL_MS = 3000;
+
+  // localStorage key for "a donation was started and we haven't confirmed
+  // it succeeded yet" -- see resumePendingDonation() below. Not scoped per
+  // form/page since a donor only has one payment in flight at a time in
+  // one browser.
+  const PENDING_KEY = 'templeDonationPending';
+  const PENDING_MAX_AGE_MS = 6 * 60 * 60 * 1000; // 6 hours -- older than this, not worth resuming
+
   async function postJSON(url, body, csrfToken) {
     const resp = await fetch(url, {
       method: 'POST',
@@ -51,7 +73,22 @@ window.TempleDonationPayment = (function () {
     return { ok: resp.ok, data };
   }
 
+  function clearPendingMarker() {
+    try { localStorage.removeItem(PENDING_KEY); } catch (err) { /* storage unavailable -- nothing to clear */ }
+  }
+
+  function setPendingMarker(donationId) {
+    try {
+      localStorage.setItem(PENDING_KEY, JSON.stringify({ donationId: donationId, ts: Date.now() }));
+    } catch (err) {
+      // Privacy mode / storage disabled -- the resume-on-reload feature
+      // just won't be available this session, not worth surfacing to the
+      // donor over.
+    }
+  }
+
   function goToReceipt(donationId) {
+    clearPendingMarker();
     window.location.href = `/donate/success/${donationId}`;
   }
 
@@ -89,26 +126,96 @@ window.TempleDonationPayment = (function () {
     // the webhook or the fast path has already recorded.
     function pollDonationStatus(donationId, { attempts, intervalMs, quiet, onGiveUp }) {
       let count = 0;
-      if (!quiet) showStatusNote('Confirming your payment... this can take up to a minute. Please don\'t close this page.');
-      const timer = setInterval(async () => {
-        count += 1;
-        if (count > attempts) {
-          clearInterval(timer);
-          if (onGiveUp) onGiveUp();
-          return;
-        }
+      let finished = false;
+      if (!quiet) showStatusNote('Confirming your payment... this can take a few minutes, especially if you paid via a UPI app. Please don\'t close this page.');
+
+      async function checkOnce() {
+        if (finished) return;
         try {
           const resp = await fetch(`/api/donation-status/${donationId}`);
           const status = await resp.json();
-          if (status.status === 'success') {
+          if (status.status === 'success' && !finished) {
+            finished = true;
             clearInterval(timer);
+            document.removeEventListener('visibilitychange', onVisibilityChange);
             goToReceipt(donationId);
           }
         } catch (err) {
           // Transient network hiccup -- just try again on the next tick.
         }
+      }
+
+      // Completing payment via a UPI app (very common in India) typically
+      // backgrounds this browser tab for the donor to approve it in a
+      // separate app -- and browsers throttle (sometimes almost entirely
+      // pause) setInterval timers in background tabs to save battery, so
+      // the regular interval below can badly undercount real elapsed
+      // time. Checking immediately the moment the tab becomes visible
+      // again catches success right when the donor comes back, instead of
+      // waiting for a throttled timer to eventually get around to it.
+      function onVisibilityChange() {
+        if (document.visibilityState === 'visible') checkOnce();
+      }
+      document.addEventListener('visibilitychange', onVisibilityChange);
+
+      const timer = setInterval(async () => {
+        count += 1;
+        if (count > attempts) {
+          finished = true;
+          clearInterval(timer);
+          document.removeEventListener('visibilitychange', onVisibilityChange);
+          if (onGiveUp) onGiveUp();
+          return;
+        }
+        await checkOnce();
       }, intervalMs);
     }
+
+    // Runs once on page load, before anything else. If a previous visit to
+    // this form started a payment whose outcome was never confirmed in the
+    // browser (the classic case: the tab got backgrounded or even reloaded
+    // by the OS while the donor was in a UPI app, and came back too late
+    // or never came back to a live poll), this picks that donation back up
+    // -- checks it once immediately, and if it's still pending, resumes
+    // polling rather than leaving the donor with no path to ever finding
+    // out except by checking with the office. Silently does nothing if
+    // there's no marker, it's stale, or the donation already resolved.
+    function resumePendingDonation() {
+      let pending;
+      try {
+        const raw = localStorage.getItem(PENDING_KEY);
+        if (!raw) return;
+        pending = JSON.parse(raw);
+      } catch (err) {
+        return; // storage unavailable or corrupted marker -- nothing to resume
+      }
+      if (!pending || !pending.donationId || (Date.now() - (pending.ts || 0)) > PENDING_MAX_AGE_MS) {
+        clearPendingMarker();
+        return;
+      }
+
+      fetch(`/api/donation-status/${pending.donationId}`)
+        .then((resp) => resp.json())
+        .then((status) => {
+          if (status.status === 'success') {
+            goToReceipt(pending.donationId);
+          } else if (status.status === 'pending') {
+            pollDonationStatus(pending.donationId, {
+              attempts: CONFIRMATION_POLL_ATTEMPTS, intervalMs: CONFIRMATION_POLL_INTERVAL_MS, quiet: false,
+              onGiveUp: () => showStatusNote(
+                'We could not confirm a previous payment automatically. If money was deducted, please note ' +
+                'the time and amount and contact the temple office, or check "My Donations" shortly -- your ' +
+                'receipt may still appear there once confirmation catches up.'
+              ),
+            });
+          } else {
+            // failed/cancelled -- nothing left to resume
+            clearPendingMarker();
+          }
+        })
+        .catch(() => { /* couldn't check right now -- leave the marker for the next page load to try again */ });
+    }
+    resumePendingDonation();
 
     function launchRazorpayCheckout(order, donorInput) {
       const options = {
@@ -137,7 +244,7 @@ window.TempleDonationPayment = (function () {
               goToReceipt(order.donation_id);
             } else {
               pollDonationStatus(order.donation_id, {
-                attempts: 40, intervalMs: 3000, quiet: false,
+                attempts: CONFIRMATION_POLL_ATTEMPTS, intervalMs: CONFIRMATION_POLL_INTERVAL_MS, quiet: false,
                 onGiveUp: () => showStatusNote(
                   'Still waiting on confirmation from the payment gateway. If money was deducted, your ' +
                   'receipt will appear in "My Donations" shortly, or contact the temple office.'
@@ -160,7 +267,7 @@ window.TempleDonationPayment = (function () {
             // catches up, instead of being stuck on a dead page.
             console.error('Payment verification failed:', err);
             pollDonationStatus(order.donation_id, {
-              attempts: 40, intervalMs: 3000, quiet: false,
+              attempts: CONFIRMATION_POLL_ATTEMPTS, intervalMs: CONFIRMATION_POLL_INTERVAL_MS, quiet: false,
               onGiveUp: () => showStatusNote(
                 'We could not confirm your payment automatically. If money was deducted, please note the ' +
                 'time and amount and contact the temple office, or check "My Donations" shortly -- your ' +
@@ -208,6 +315,13 @@ window.TempleDonationPayment = (function () {
           payBtn.disabled = false;
           return;
         }
+
+        // Marks this donation as "in flight" before handing off to
+        // Razorpay -- if this tab gets backgrounded or reloaded during a
+        // UPI app hand-off and the donor comes back (or opens a fresh
+        // tab) later, resumePendingDonation() on the next page load picks
+        // this back up instead of the outcome being lost entirely.
+        setPendingMarker(order.donation_id);
 
         if (razorpayEnabled) {
           if (typeof Razorpay === 'undefined') {
