@@ -566,20 +566,43 @@ def _finalize_success(donation):
     that already succeeded -- exactly the kind of gap/duplicate that
     shouldn't show up in data that ultimately goes into the Form 10BD
     filing to the Income Tax Department.
+
+    Returns True once the donation has a receipt number (whether issued
+    just now or by an earlier call) -- that's the only part a caller
+    should treat as a hard failure if missing. PDF generation and
+    notifications are best-effort layered on top: same crash risk this
+    session already found and fixed for the offline-donation path
+    (_create_offline_donation) -- an unhandled exception here used to
+    propagate straight out of this function, past verify_payment/
+    simulate_payment/the webhook handler with no try/except of their own,
+    which can present to the donor's browser as the connection simply
+    dying mid-request instead of a normal error response. Wrapped the
+    same way here: the receipt number, once committed, is never lost or
+    reissued even if PDF generation or notifications blow up afterward.
     """
     if donation.status == "success" and donation.receipt_number:
-        return
+        return True
 
-    campaign = donation.campaign
-    receipt_number, fy = ReceiptCounter.next_receipt_number(donation.effective_is_80g, donation.donation_date)
-    donation.receipt_number = receipt_number
-    donation.financial_year = fy
-    donation.status = "success"
-    db.session.commit()
+    try:
+        campaign = donation.campaign
+        receipt_number, fy = ReceiptCounter.next_receipt_number(donation.effective_is_80g, donation.donation_date)
+        donation.receipt_number = receipt_number
+        donation.financial_year = fy
+        donation.status = "success"
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Failed to issue receipt number for donation %s", donation.id)
+        return False
 
-    pdf_bytes = generate_receipt_pdf(donation, donation.donor, campaign, _org_cfg())
-    donation.receipt_pdf = pdf_bytes
-    db.session.commit()
+    try:
+        pdf_bytes = generate_receipt_pdf(donation, donation.donor, campaign, _org_cfg())
+        donation.receipt_pdf = pdf_bytes
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Receipt PDF generation failed for donation %s", donation.id)
+        return True
 
     # Email + WhatsApp in a background thread rather than blocking the
     # request on them. A slow/hanging SMTP connection or WhatsApp API call
@@ -592,12 +615,17 @@ def _finalize_success(donation):
     # Synchronous under TESTING so the test suite can assert on the send
     # deterministically instead of racing a background thread.
     app = current_app._get_current_object()
-    if app.config.get("TESTING"):
-        _send_receipt_notifications_background(app, donation.id, pdf_bytes)
-    else:
-        threading.Thread(
-            target=_send_receipt_notifications_background, args=(app, donation.id, pdf_bytes), daemon=True
-        ).start()
+    try:
+        if app.config.get("TESTING"):
+            _send_receipt_notifications_background(app, donation.id, pdf_bytes)
+        else:
+            threading.Thread(
+                target=_send_receipt_notifications_background, args=(app, donation.id, pdf_bytes), daemon=True
+            ).start()
+    except Exception:
+        current_app.logger.exception("Failed to start receipt notification thread for donation %s", donation.id)
+
+    return True
 
 
 @bp.route("/api/verify-payment", methods=["POST"])
@@ -627,7 +655,11 @@ def verify_payment():
         return jsonify({"error": "Signature verification failed"}), 400
 
     donation.razorpay_payment_id = data["razorpay_payment_id"]
-    _finalize_success(donation)
+    if not _finalize_success(donation):
+        return jsonify({
+            "error": "Payment verified, but we couldn't finish issuing the receipt. "
+                     "Please check back in a minute or contact the temple office."
+        }), 500
     return jsonify({"ok": True, "receipt_number": donation.receipt_number})
 
 
@@ -661,7 +693,8 @@ def simulate_payment():
         return jsonify({"error": "Missing or invalid donation_id."}), 400
     donation = Donation.query.get_or_404(donation_id)
     donation.razorpay_payment_id = "SIMULATED"
-    _finalize_success(donation)
+    if not _finalize_success(donation):
+        return jsonify({"error": "Couldn't finish issuing the receipt. Please try again."}), 500
     return jsonify({"ok": True, "receipt_number": donation.receipt_number})
 
 
@@ -726,7 +759,12 @@ def _handle_payment_captured(event):
     if payment_id:
         donation.razorpay_payment_id = payment_id
     _apply_payment_details(donation, payment_entity)
-    _finalize_success(donation)
+    if not _finalize_success(donation):
+        # Returning non-200 tells Razorpay to retry this webhook delivery
+        # on its normal backoff schedule, rather than us silently
+        # swallowing a failure that means no receipt number was ever
+        # issued for a captured payment.
+        return jsonify({"error": "Failed to finalize donation"}), 500
 
     return jsonify({"ok": True, "receipt_number": donation.receipt_number}), 200
 
