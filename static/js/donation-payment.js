@@ -163,6 +163,48 @@ window.TempleDonationPayment = (function () {
       statusNote.style.display = 'none';
     }
 
+    // Used specifically when the 5-minute automatic poll gives up. Real
+    // production cases (confirmed via Admin -> Donations Log) have shown
+    // the donation succeeding and getting a receipt *after* this point --
+    // most likely explained by the hosting backend spinning down when idle
+    // and taking a while to wake back up, delaying webhook delivery past
+    // the poll window. Rather than leaving the donor with only a "contact
+    // the office" dead end, this adds a manual recheck they can tap once
+    // the delayed confirmation has had more time to land, without
+    // reloading the page or losing their place.
+    function showGiveUpNote(donationId, text) {
+      if (!statusNote) return;
+      statusNote.textContent = '';
+      statusNote.style.display = '';
+      statusNote.appendChild(document.createTextNode(text + ' '));
+      const btn = document.createElement('button');
+      // type="button" is load-bearing here -- this element lives inside
+      // the donation <form>, and a <button> with no explicit type
+      // defaults to type="submit", which would silently re-submit the
+      // whole form (and create a second donation/order) on click instead
+      // of just checking status.
+      btn.type = 'button';
+      btn.className = 'btn btn-link p-0 align-baseline';
+      btn.textContent = 'Check again';
+      btn.addEventListener('click', async function () {
+        btn.disabled = true;
+        btn.textContent = 'Checking...';
+        try {
+          const resp = await fetch(`/api/donation-status/${donationId}`);
+          const status = await resp.json();
+          if (status.status === 'success') {
+            goToReceipt(donationId);
+            return;
+          }
+        } catch (err) {
+          // Transient network hiccup -- let the donor try again.
+        }
+        btn.disabled = false;
+        btn.textContent = 'Check again';
+      });
+      statusNote.appendChild(btn);
+    }
+
     // Fallback for whenever the Razorpay `handler` callback below doesn't
     // fire (browser closed the checkout tab weirdly, JS context interrupted,
     // etc.) -- also used right after a donor dismisses the checkout modal,
@@ -247,7 +289,7 @@ window.TempleDonationPayment = (function () {
           } else if (status.status === 'pending') {
             pollDonationStatus(pending.donationId, {
               attempts: CONFIRMATION_POLL_ATTEMPTS, intervalMs: CONFIRMATION_POLL_INTERVAL_MS, quiet: false,
-              onGiveUp: () => showStatusNote(
+              onGiveUp: () => showGiveUpNote(pending.donationId,
                 'We could not confirm a previous payment automatically. If money was deducted, please note ' +
                 'the time and amount and contact the temple office, or check "My Donations" shortly -- your ' +
                 'receipt may still appear there once confirmation catches up.'
@@ -290,7 +332,7 @@ window.TempleDonationPayment = (function () {
             } else {
               pollDonationStatus(order.donation_id, {
                 attempts: CONFIRMATION_POLL_ATTEMPTS, intervalMs: CONFIRMATION_POLL_INTERVAL_MS, quiet: false,
-                onGiveUp: () => showStatusNote(
+                onGiveUp: () => showGiveUpNote(order.donation_id,
                   'Still waiting on confirmation from the payment gateway. If money was deducted, your ' +
                   'receipt will appear in "My Donations" shortly, or contact the temple office.'
                 ),
@@ -313,7 +355,7 @@ window.TempleDonationPayment = (function () {
             console.error('Payment verification failed:', err);
             pollDonationStatus(order.donation_id, {
               attempts: CONFIRMATION_POLL_ATTEMPTS, intervalMs: CONFIRMATION_POLL_INTERVAL_MS, quiet: false,
-              onGiveUp: () => showStatusNote(
+              onGiveUp: () => showGiveUpNote(order.donation_id,
                 'We could not confirm your payment automatically. If money was deducted, please note the ' +
                 'time and amount and contact the temple office, or check "My Donations" shortly -- your ' +
                 'receipt may still appear there once confirmation catches up.'
