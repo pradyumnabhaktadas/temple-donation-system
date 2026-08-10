@@ -355,13 +355,14 @@ body {
 .donation-hero {
   position:relative; isolation:isolate; overflow:hidden; border-radius:1.5rem;
   min-height: 318px; padding: 3.6rem 4rem; display:flex; align-items:center;
-  /* Sri Sri Rukmini Dwarkadish darshan photo -- the deities sit centered
-     in the frame (unlike the old temple-building photo, which had open
-     sky on the left for the text to sit over), so this gradient is darker
-     and reaches further right than before to keep the "Live to Give" copy
-     legible against the busier, more colorful background. */
-  background: linear-gradient(100deg, rgba(8,14,28,.93) 0%, rgba(10,18,34,.86) 30%, rgba(14,24,44,.62) 52%, rgba(18,30,52,.34) 74%, rgba(20,34,58,.2) 100%),
-              url('images/deities/rukmini-dwarkadish.jpg') center 18%/cover no-repeat;
+  /* Krishna (flute) darshan close-up -- the deity's face sits in the right
+     half of this photo with open, softly blurred background on the left,
+     so the gradient below only darkens that left portion (where the
+     "Live to Give" copy sits, .donation-hero-copy is capped at 610px) and
+     clears out well before the face -- unlike the earlier centered photos,
+     nothing here overlaps the deity's face. */
+  background: linear-gradient(100deg, rgba(8,14,28,.93) 0%, rgba(10,18,34,.85) 20%, rgba(14,24,44,.5) 38%, rgba(18,30,52,.14) 52%, transparent 66%),
+              url('images/deities/krishna-flute-closeup.jpg') center 35%/cover no-repeat;
   color:#fff; box-shadow: 0 18px 38px rgba(15,36,68,.15);
 }
 .donation-hero:before { content:""; position:absolute; inset:0; z-index:-1; background:radial-gradient(circle at 78% 38%, rgba(239,185,88,.32), transparent 18%), radial-gradient(circle at 98% 98%, rgba(255,255,255,.1), transparent 38%); }
@@ -504,7 +505,16 @@ body {
 .site-footer-note .footer-admin-link { color:#b4a897; font-size:.75rem; margin:0 0 0 .35rem; }.site-footer-note .footer-admin-link a { color:#b4a897; text-decoration:underline; text-decoration-color:rgba(180,168,151,.5); }.site-footer-note .footer-admin-link a:hover { color:var(--maroon); }
 
 /* ---------- Public site footer: About Us / Located On / Contact Us ---------- */
-.site-footer { background:var(--maroon-dark); margin-top:3rem; }
+.site-footer {
+  position:relative; isolation:isolate; overflow:hidden; margin-top:3rem;
+  /* Same Krishna darshan photo as the Donate page hero, as a subtle
+     textured backdrop -- heavily darkened (unlike the hero) since footer
+     text runs across the full width here with no "safe" empty zone to
+     sit in, so legibility matters more than showing the photo clearly. */
+  background:
+    linear-gradient(180deg, rgba(15,36,68,.94) 0%, rgba(15,36,68,.97) 55%, rgba(15,36,68,.99) 100%),
+    url('images/deities/krishna-flute-closeup.jpg') center 30%/cover no-repeat;
+}
 .footer-grid { display:grid; grid-template-columns:1.4fr 1fr 1fr; gap:2.2rem; padding:2.8rem 1rem 2.2rem; }
 .footer-brand { display:flex; align-items:center; gap:.7rem; margin-bottom:.85rem; }
 .footer-brand-logo { height:40px; width:auto; flex:0 0 auto; }
