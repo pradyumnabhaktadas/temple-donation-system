@@ -1880,8 +1880,16 @@ def bulk_import_donations():
             row_errors.append(f"invalid amount '{amount_raw}'")
 
         payment_mode = (row.get("payment_mode") or "cash").lower()
-        if payment_mode not in ("cash", "cheque", "bank_transfer"):
-            row_errors.append(f"payment_mode must be cash, cheque, or bank_transfer (got '{payment_mode}')")
+        # "online" is accepted here for the same reason it's offered on the
+        # single-entry form above it: a payment made online but recorded by
+        # hand (collected via a separate gateway, or one this system never
+        # saw). Kept in step with that dropdown deliberately -- a mode that
+        # can be entered one-at-a-time but rejected in bulk would be a
+        # confusing thing to discover halfway through an import.
+        if payment_mode not in ("cash", "cheque", "bank_transfer", "online"):
+            row_errors.append(
+                f"payment_mode must be cash, cheque, bank_transfer, or online (got '{payment_mode}')"
+            )
 
         donation_date = None
         date_raw = row.get("donation_date", "")

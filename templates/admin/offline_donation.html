@@ -87,6 +87,12 @@
           <option value="cash">Cash</option>
           <option value="cheque">Cheque</option>
           <option value="bank_transfer">Bank Transfer</option>
+          {# For a payment that was made online but is being recorded here
+             by hand -- e.g. collected through a separate gateway, or an
+             online payment this system never saw. Donations taken through
+             this site's own Razorpay flow record themselves as "online"
+             automatically and should not be re-entered here. #}
+          <option value="online">Online</option>
         </select>
       </div>
     </div>
@@ -103,8 +109,12 @@
     </div>
 
     <div class="mb-3" id="bank-transfer-field" style="display:none;">
-      <label class="form-label">Transaction ID / UTR Number</label>
+      <label class="form-label" id="bank-transaction-label">Transaction ID / UTR Number</label>
       <input type="text" class="form-control" name="bank_transaction_id" id="bank_transaction_id">
+      <div class="form-text" id="bank-transaction-help" style="display:none;">
+        Optional, but worth recording -- it's what lets this donation be reconciled against the
+        gateway's own report later.
+      </div>
     </div>
 
     <div class="mb-3">
@@ -172,7 +182,7 @@
         <input type="file" class="form-control" name="csv_file" accept=".csv" required>
         <div class="form-text">
           Required columns: <code>full_name</code>, <code>campaign_name</code>, <code>amount</code>,
-          <code>payment_mode</code> (cash / cheque / bank_transfer), <code>donation_date</code> (YYYY-MM-DD).
+          <code>payment_mode</code> (cash / cheque / bank_transfer / online), <code>donation_date</code> (YYYY-MM-DD).
           See the demo file for every optional column (contact details, PAN, cheque/bank reference,
           BACE property / festival / seva type / Live To Give purpose, 80G vs non-80G, remarks).
         </div>
@@ -258,10 +268,24 @@
     chequeNumberInput.required = isCheque;
     if (!isCheque) { chequeNumberInput.value = ''; document.getElementById('cheque_bank_name').value = ''; }
 
+    // The same reference field serves Bank Transfer (a UTR number) and
+    // Online (the gateway's transaction/payment id) -- both are "how do I
+    // find this payment in someone else's system later". Required for a
+    // bank transfer, where there's always a UTR; optional for Online,
+    // since staff recording one after the fact don't always have the id
+    // to hand, and blocking the entry over it would be worse than
+    // recording the donation without it.
     const isBankTransfer = mode === 'bank_transfer';
-    bankTransferField.style.display = isBankTransfer ? '' : 'none';
+    const isOnline = mode === 'online';
+    const needsReference = isBankTransfer || isOnline;
+
+    bankTransferField.style.display = needsReference ? '' : 'none';
     bankTransactionIdInput.required = isBankTransfer;
-    if (!isBankTransfer) bankTransactionIdInput.value = '';
+    if (!needsReference) bankTransactionIdInput.value = '';
+
+    document.getElementById('bank-transaction-label').textContent =
+      isOnline ? 'Transaction / Payment ID' : 'Transaction ID / UTR Number';
+    document.getElementById('bank-transaction-help').style.display = isOnline ? '' : 'none';
   }
 
   function syncConditionalFields() {
