@@ -68,9 +68,34 @@ def create_app(test_config=None):
                     "https://cdn.jsdelivr.net", "https://fonts.googleapis.com",
                 ],
                 "font-src": ["'self'", "https://fonts.gstatic.com", "https://cdn.jsdelivr.net", "data:"],
-                "img-src": ["'self'", "data:"],
-                # Razorpay's checkout.js makes its own XHR/telemetry calls.
-                "connect-src": ["'self'", "https://api.razorpay.com", "https://lumberjack.razorpay.com"],
+                # Razorpay's checkout widget draws payment-method/bank/UPI-app
+                # icons from its own CDN subdomains directly onto the page
+                # (not just inside the checkout.razorpay.com iframe, which
+                # would be governed by Razorpay's own CSP, not ours) --
+                # missing here means those icons/logos silently fail to load
+                # rather than breaking anything outright, but it's exactly
+                # the kind of gap worth closing given how much of Razorpay's
+                # widget behavior isn't independently visible to us.
+                "img-src": ["'self'", "data:", "https://*.razorpay.com"],
+                # Razorpay's checkout.js -- loaded from checkout.razorpay.com
+                # itself, per script-src above -- makes its own XHR/fetch
+                # calls back to Razorpay's API for order validation, method
+                # detection, telemetry, etc. api.razorpay.com and
+                # lumberjack.razorpay.com were already allowed, but
+                # checkout.razorpay.com itself was not -- a real gap where a
+                # call to its own origin would be silently blocked by CSP,
+                # surfacing as a thrown/rejected fetch with no useful message
+                # (different browsers enforce and report CSP violations with
+                # different strictness/timing, which is a plausible explanation
+                # for a failure that reproduces in one browser and not another
+                # given otherwise-identical code). Widened to *.razorpay.com
+                # here and in img-src above rather than enumerating each
+                # subdomain individually -- we already fully trust this
+                # domain for script execution and iframe embedding below, so
+                # extending that trust to its own subdomains for read-only
+                # resource/XHR access is proportionate, not a meaningfully
+                # larger attack surface.
+                "connect-src": ["'self'", "https://*.razorpay.com"],
                 # The actual payment popup/iframe.
                 "frame-src": ["https://api.razorpay.com", "https://checkout.razorpay.com"],
             }
