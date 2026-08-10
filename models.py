@@ -319,6 +319,19 @@ class Donation(db.Model):
     # those fields don't cover.
     razorpay_raw_payload = db.Column(db.Text)
 
+    # Populated only by the webhook's payment.dispute.* events (see
+    # public.razorpay_webhook) -- a donor disputing/charging back a
+    # payment we've already captured and possibly issued an 80G receipt
+    # for. dispute_status mirrors Razorpay's own values verbatim (created/
+    # under_review/action_required/won/lost/closed) rather than being
+    # remapped to this app's own vocabulary, so it's always exactly what
+    # Razorpay's dashboard shows. All four stay NULL for the overwhelming
+    # majority of donations that are never disputed.
+    razorpay_dispute_id = db.Column(db.String(100))
+    razorpay_dispute_status = db.Column(db.String(30))
+    razorpay_dispute_reason = db.Column(db.String(200))
+    disputed_at = db.Column(db.DateTime)
+
     # Captured from the donor's own request when they submitted the form
     # (see public.create_order) -- not from Razorpay at all. Razorpay's
     # webhook payload doesn't include the payer's IP/browser, so this is

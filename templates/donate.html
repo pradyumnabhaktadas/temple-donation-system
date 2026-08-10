@@ -101,6 +101,9 @@
       </div>
 
       <div class="form-section" id="eightyg-fields" style="display:none;">
+      <p class="field-note text-muted mb-2" id="high-value-note" style="display:none;">
+        PAN and address are mandatory for donations above Rs. 49,000, per Income Tax rules.
+      </p>
       <div class="mb-3">
         <label class="form-label">PAN <span class="text-muted">(required for 80G receipt)</span></label>
         <input type="text" class="form-control" name="pan" id="pan" style="text-transform:uppercase" maxlength="10"
@@ -109,7 +112,7 @@
 
       <div class="mb-0">
         <label class="form-label">Address</label>
-        <textarea class="form-control" name="address" rows="2"></textarea>
+        <textarea class="form-control" name="address" id="address" rows="2"></textarea>
       </div>
 
       <div class="row">
@@ -302,17 +305,29 @@
 
   // Choosing "Yes" (80G) reveals the PAN/Address fields and makes PAN
   // required (needed to actually claim the tax benefit); "No" hides that
-  // whole block again -- nothing to fill in if no receipt is needed.
+  // whole block again -- unless the amount is over the high-value
+  // threshold below, in which case PAN+address stay required either way
+  // (Income Tax rules, not an 80G-specific requirement -- see
+  // HIGH_VALUE_PAN_THRESHOLD in public.py, which is the actual source of
+  // truth this just mirrors for a better donor experience; the server
+  // enforces this regardless of what happens here).
   const panInput = document.getElementById('pan');
+  const addressInput = document.getElementById('address');
   const eightyGFields = document.getElementById('eightyg-fields');
+  const highValueNote = document.getElementById('high-value-note');
   const receiptRadios = document.querySelectorAll('input[name="receipt_type"]');
-  receiptRadios.forEach((radio) => {
-    radio.addEventListener('change', () => {
-      const is80g = radio.value === '80g' && radio.checked;
-      eightyGFields.style.display = is80g ? '' : 'none';
-      panInput.required = is80g;
-    });
-  });
+  const HIGH_VALUE_PAN_THRESHOLD = 49000;
+
+  function updatePanAddressRequirement() {
+    const wants80g = document.querySelector('input[name="receipt_type"]:checked')?.value === '80g';
+    const isHighValue = (parseFloat(amountInput.value) || 0) > HIGH_VALUE_PAN_THRESHOLD;
+    eightyGFields.style.display = (wants80g || isHighValue) ? '' : 'none';
+    panInput.required = wants80g || isHighValue;
+    addressInput.required = isHighValue;
+    highValueNote.style.display = isHighValue ? '' : 'none';
+  }
+  receiptRadios.forEach((radio) => radio.addEventListener('change', updatePanAddressRequirement));
+  amountInput.addEventListener('input', updatePanAddressRequirement);
 
   // -- Small fetch helper ---------------------------------------------
   async function postJSON(url, body) {

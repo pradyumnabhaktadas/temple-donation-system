@@ -12,6 +12,15 @@ receipts, a live collection dashboard, and admin tooling to manage it all.
 - **Single donor database** deduplicated on PAN, then phone, then email, so
   a repeat donor never creates a second record. PAN format is validated
   (10-character India PAN structure) before it's accepted.
+- **High-value PAN/address enforcement** — for any donation over Rs. 49,000,
+  PAN and address become mandatory (not optional), in line with Income Tax
+  Rule 114B's PAN-quoting requirement for transactions near the Rs. 50,000
+  mark. Enforced server-side (`high_value_pan_address_error()` in
+  `public.py`, shared by the online form, manual admin entry, and bulk CSV
+  import) with matching client-side field toggling on the donation forms.
+  Deliberately **not** applied to the legacy-donor-history importer, since
+  those rows represent receipts already issued externally under the old
+  system.
 - **Razorpay integration** for online payments (order creation + signature
   verification), with a **demo mode** that simulates payment success when no
   live keys are configured, so you can test the whole flow first.
@@ -191,8 +200,16 @@ that (not a replacement for the keys).
 
 1. In Razorpay Dashboard → **Settings → Webhooks → Add New Webhook**:
    - **Webhook URL**: `https://yourdomain.com/webhooks/razorpay`
-   - **Active events**: check `payment.captured` (and optionally
-     `order.paid`)
+   - **Active events**: `payment.captured` (and optionally `order.paid`) is
+     the minimum needed for the core donation flow. Also recommended:
+     `payment.failed` (marks a donation failed immediately instead of
+     waiting for the Dashboard's time-based "abandoned donation" alert to
+     notice) and the `payment.dispute.*` events -- `created`,
+     `under_review`, `action_required`, `won`, `lost`, `closed` (surfaces
+     a chargeback against an already-captured/receipted donation on the
+     admin Dashboard, since Razorpay won't otherwise tell you inside this
+     app). Any other event type you subscribe to is safely acknowledged
+     and ignored -- no harm in checking more than you need.
    - Razorpay shows you a **Secret** when you save it — copy that.
 2. Put it in `.env`:
    ```
@@ -215,6 +232,17 @@ is lost even if you need a field not explicitly pulled out. View it from
 Admin → Donor → **Payment details** link next to any online donation. This
 only ever gets populated by the webhook, so a donation confirmed only via
 the browser callback (webhook not set up) shows just the payment ID.
+
+**Disputes/chargebacks.** If you subscribed to the `payment.dispute.*`
+events, a dispute against an already-captured donation shows up as a red
+"Disputed / Charged-Back Donations" panel on the admin Dashboard, and in
+the same donation's Payment details modal (dispute status, reason, and
+when it was raised). Nothing about the donation's own `status` changes --
+the receipt/80G record stays exactly as issued; a dispute is Razorpay's
+own separate process layered on top, and this app just mirrors whatever
+status Razorpay reports (`created`/`under_review`/`action_required`/
+`won`/`lost`/`closed`) so staff know to look into it and can cross-
+reference Razorpay's own dashboard for next steps.
 
 ⚠️ This adds new columns to the `donations` table
 (`razorpay_method`/`razorpay_reference`/`razorpay_fee`/`razorpay_email`/

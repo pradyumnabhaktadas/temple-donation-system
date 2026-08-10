@@ -20,11 +20,11 @@ from models import (
     LiveToGivePurpose, Preacher, AdminActivityLog, DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES,
     DONATION_FREQUENCY_LABELS,
 )
-from utils import get_financial_year, is_valid_pan, normalize_phone
+from utils import get_financial_year, is_valid_pan, is_valid_phone, normalize_phone
 from pdf_utils import generate_receipt_pdf
 from email_utils import send_receipt_email
 from whatsapp_utils import send_receipt_whatsapp
-from public import find_or_create_donor, _org_cfg
+from public import find_or_create_donor, _org_cfg, high_value_pan_address_error
 from backup_utils import build_backup_zip, run_backup
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -442,6 +442,24 @@ def dashboard():
         ).count()
     )
 
+    # Disputed/charged-back donations -- populated only by the webhook's
+    # payment.dispute.* events (see public._handle_payment_dispute). A
+    # dispute against a donation we've already captured (and possibly
+    # issued an 80G receipt for) needs a human to look at it, so surface
+    # every one that isn't yet in a resolved state ("won"/"lost"/"closed")
+    # -- those stay visible in the Donations Log / donor detail page but
+    # don't need to keep occupying a Dashboard alert once Razorpay's own
+    # process has concluded.
+    disputed_donations = (
+        Donation.query.filter(
+            Donation.razorpay_dispute_id.isnot(None),
+            ~Donation.razorpay_dispute_status.in_(["won", "lost", "closed"]),
+        )
+        .order_by(Donation.disputed_at.desc())
+        .limit(15)
+        .all()
+    )
+
     return render_template(
         "admin/dashboard.html",
         today_total=float(today_total),
@@ -457,6 +475,7 @@ def dashboard():
         birthdays_today=birthdays_today,
         failed_abandoned_donations=failed_abandoned_donations,
         failed_abandoned_count=failed_abandoned_count,
+        disputed_donations=disputed_donations,
         today=today,
     )
 
@@ -1017,6 +1036,13 @@ def donor_edit(donor_id):
             flash("That PAN doesn't look right. It should be 10 characters like ABCDE1234F.")
             return redirect(url_for("admin.donor_edit", donor_id=donor.id))
 
+        if not is_valid_phone(form.get("phone")):
+            flash("That phone number doesn't look right. Please enter a 10-digit mobile number.")
+            return redirect(url_for("admin.donor_edit", donor_id=donor.id))
+        if not is_valid_phone(form.get("whatsapp_number")):
+            flash("That WhatsApp number doesn't look right. Please enter a 10-digit mobile number.")
+            return redirect(url_for("admin.donor_edit", donor_id=donor.id))
+
         donor.full_name = form.get("full_name", "").strip() or donor.full_name
         # normalize_phone() collapses "+91 88020 81265" / "918802081265" /
         # "08802081265" / "8802081265" down to the same plain 10-digit
@@ -1383,6 +1409,18 @@ def manual_donation():
             flash("That PAN doesn't look right. It should be 10 characters like ABCDE1234F.")
             return redirect(url_for("admin.manual_donation"))
 
+        if not is_valid_phone(form.get("phone")):
+            flash("That phone number doesn't look right. Please enter a 10-digit mobile number.")
+            return redirect(url_for("admin.manual_donation"))
+        if not is_valid_phone(form.get("whatsapp_number")):
+            flash("That WhatsApp number doesn't look right. Please enter a 10-digit mobile number.")
+            return redirect(url_for("admin.manual_donation"))
+
+        high_value_error = high_value_pan_address_error(amount, pan, form.get("address"))
+        if high_value_error:
+            flash(high_value_error)
+            return redirect(url_for("admin.manual_donation"))
+
         bace_property_id, error = _validated_id_from_form(form, "bace_property_id", BaceProperty, "BACE property")
         if error:
             flash(error)
@@ -1656,6 +1694,15 @@ def bulk_import_donations():
             row_errors.append(f"invalid PAN '{pan}'")
         row["pan"] = pan
 
+        if not is_valid_phone(row.get("phone")):
+            row_errors.append(f"invalid phone '{row.get('phone')}' (expected a 10-digit mobile number)")
+        if not is_valid_phone(row.get("whatsapp_number")):
+            row_errors.append(f"invalid whatsapp_number '{row.get('whatsapp_number')}' (expected a 10-digit mobile number)")
+
+        high_value_error = high_value_pan_address_error(amount, pan, row.get("address"))
+        if high_value_error:
+            row_errors.append(high_value_error)
+
         bace_property_id = _lookup_by_name(bace_by_name, row.get("bace_property_name"), "BACE property", row_errors)
         festival_id = _lookup_by_name(festivals_by_name, row.get("festival_name"), "festival", row_errors)
         seva_type_id = _lookup_by_name(seva_by_name, row.get("seva_type_name"), "seva type", row_errors)
@@ -1907,6 +1954,20 @@ def import_legacy_donations():
         if pan and not is_valid_pan(pan):
             row_errors.append(f"invalid PAN '{pan}'")
         row["pan"] = pan
+
+        if not is_valid_phone(row.get("phone")):
+            row_errors.append(f"invalid phone '{row.get('phone')}' (expected a 10-digit mobile number)")
+        if not is_valid_phone(row.get("whatsapp_number")):
+            row_errors.append(f"invalid whatsapp_number '{row.get('whatsapp_number')}' (expected a 10-digit mobile number)")
+
+        # Deliberately NOT enforcing high_value_pan_address_error() here --
+        # unlike bulk_import_donations/manual_donation (which issue a real
+        # receipt number through this app), legacy-imported rows are
+        # historical records for donations whose receipts were already
+        # issued under the old system (see existing_receipt below and
+        # generate_pdfs handling further down) -- retroactively requiring
+        # PAN/address on old external receipts wouldn't fix anything real
+        # and would just block digitizing otherwise-valid historical data.
 
         is_80g_raw = (row.get("is_80g_requested") or "").strip().lower()
         if is_80g_raw in ("yes", "y", "80g", "true", "1"):
@@ -2165,6 +2226,11 @@ def import_donors():
         if pan and not is_valid_pan(pan):
             row_errors.append(f"invalid PAN '{pan}'")
         row["pan"] = pan
+
+        if not is_valid_phone(row.get("phone")):
+            row_errors.append(f"invalid phone '{row.get('phone')}' (expected a 10-digit mobile number)")
+        if not is_valid_phone(row.get("whatsapp_number")):
+            row_errors.append(f"invalid whatsapp_number '{row.get('whatsapp_number')}' (expected a 10-digit mobile number)")
 
         donor_type_raw = row.get("donor_type", "").lower()
         if donor_type_raw and donor_type_raw not in DONOR_TYPES:
@@ -3046,7 +3112,7 @@ def export_donations():
     writer.writerow([
         "Receipt No", "Date", "Status", "Donor Name", "Phone", "WhatsApp", "Email", "PAN",
         "Address", "City", "State", "Pincode",
-        "Amount", "Payment Mode", "Reference", "Campaign", "Specific Purpose", "80G Eligible",
+        "Amount", "Payment Mode", "Reference", "Order ID", "Campaign", "Specific Purpose", "80G Eligible",
         "Recorded By", "Remarks", "Cancelled At", "Cancelled By", "Cancellation Reason",
     ])
     for d in rows:
@@ -3084,6 +3150,7 @@ def export_donations():
             float(d.amount),
             d.payment_mode,
             d.reference_display or "",
+            d.razorpay_order_id or "",
             d.campaign.name,
             specific_purpose,
             "Yes" if d.effective_is_80g else "No",

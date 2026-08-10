@@ -70,6 +70,7 @@
     <th>{{ sort_th('amount', 'Amount', 'desc') }}</th>
     <th>Mode</th>
     <th>Reference</th>
+    <th>Order ID</th>
     <th>{{ sort_th('status', 'Status', 'asc') }}</th>
     <th>Receipt</th>
     <th></th>{% if current_user.role == 'admin' %}<th></th>{% endif %}
@@ -83,6 +84,7 @@
       <td>Rs. {{ d.amount | inr }}</td>
       <td>{{ d.payment_mode.replace('_',' ').title() }}{% if d.razorpay_method %} ({{ d.razorpay_method.upper() }}){% endif %}</td>
       <td class="small text-muted">{{ d.reference_display or '-' }}</td>
+      <td class="small text-muted">{{ d.razorpay_order_id or '-' }}</td>
       <td>
         {% if d.status == 'success' %}<span class="badge bg-success">Success</span>
         {% elif d.status == 'pending' %}<span class="badge bg-warning">Pending</span>
@@ -114,7 +116,7 @@
       {% endif %}
     </tr>
     {% else %}
-    <tr><td colspan="10" class="text-muted">No donations found.</td></tr>
+    <tr><td colspan="11" class="text-muted">No donations found.</td></tr>
     {% endfor %}
   </tbody>
 </table>

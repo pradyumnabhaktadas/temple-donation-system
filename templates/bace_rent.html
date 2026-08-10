@@ -61,6 +61,23 @@
         <div class="currency-input"><span>₹</span><input type="number" min="1" step="1" class="form-control" name="amount" id="amount" placeholder="Enter an amount" required></div>
       </div>
 
+      <div class="form-section" id="high-value-fields" style="display:none;">
+        <p class="field-note text-muted mb-2" id="high-value-note">
+          PAN and address are mandatory for contributions above Rs. 49,000, per Income Tax rules.
+        </p>
+        <div class="row mb-0">
+          <div class="col-md-6 mb-3">
+            <label class="form-label">PAN</label>
+            <input type="text" class="form-control" name="pan" id="pan" style="text-transform:uppercase" maxlength="10"
+                   pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10 characters, e.g. ABCDE1234F">
+          </div>
+        </div>
+        <div class="mb-0">
+          <label class="form-label">Address</label>
+          <textarea class="form-control" name="address" id="address" rows="2"></textarea>
+        </div>
+      </div>
+
       <div class="form-section mb-0">
         <label class="form-label">Remarks <span class="text-muted">(optional)</span></label>
         <input type="text" class="form-control" name="remarks" maxlength="300" placeholder="e.g. month covered by this payment">
@@ -92,6 +109,25 @@
   const razorpayEnabled = {{ razorpay_enabled | tojson }};
   const orgName = {{ org_name | tojson }};
   const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+
+  // BACE contributions aren't 80G-eligible, so this form normally has no
+  // PAN/address fields at all -- but Income Tax rules require them above
+  // the high-value threshold regardless of 80G status, so those fields
+  // only appear (and become required) once the amount crosses it. Mirrors
+  // HIGH_VALUE_PAN_THRESHOLD in public.py (the server enforces this
+  // regardless of what happens here).
+  const amountInput = document.getElementById('amount');
+  const panInput = document.getElementById('pan');
+  const addressInput = document.getElementById('address');
+  const highValueFields = document.getElementById('high-value-fields');
+  const HIGH_VALUE_PAN_THRESHOLD = 49000;
+  function updatePanAddressRequirement() {
+    const isHighValue = (parseFloat(amountInput.value) || 0) > HIGH_VALUE_PAN_THRESHOLD;
+    highValueFields.style.display = isHighValue ? '' : 'none';
+    panInput.required = isHighValue;
+    addressInput.required = isHighValue;
+  }
+  amountInput.addEventListener('input', updatePanAddressRequirement);
 
   // -- Small fetch helper ---------------------------------------------
   async function postJSON(url, body) {

@@ -12,7 +12,7 @@ from models import Donor, Donation, DonorLoginOTP
 from pdf_utils import generate_annual_statement_pdf
 from public import _org_cfg
 from sms_utils import generate_otp, send_otp
-from utils import is_valid_pan, normalize_phone
+from utils import is_valid_pan, is_valid_phone, normalize_phone
 
 bp = Blueprint("donor_portal", __name__, url_prefix="/my-donations")
 
@@ -191,6 +191,10 @@ def account_update():
     pan = form.get("pan", "").strip().upper()
     if pan and not is_valid_pan(pan):
         flash("That PAN doesn't look right. It should be 10 characters like ABCDE1234F.")
+        return redirect(url_for("donor_portal.account"))
+
+    if not is_valid_phone(form.get("whatsapp_number")):
+        flash("That WhatsApp number doesn't look right. Please enter a 10-digit mobile number.")
         return redirect(url_for("donor_portal.account"))
 
     # Phone isn't editable here -- it's the login identity. A donor wanting

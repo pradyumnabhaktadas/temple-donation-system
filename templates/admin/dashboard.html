@@ -67,6 +67,34 @@
 </div>
 {% endif %}
 
+{% if disputed_donations %}
+<div class="card card-body shadow-sm mb-4 border-danger">
+  <h6 class="mb-2">🚩 Disputed / Charged-Back Donations</h6>
+  <p class="text-muted small mb-2">
+    A donor or their bank has disputed one of these captured payments through Razorpay -- worth reviewing (a
+    receipt/80G statement may already have been issued for it). Razorpay resolves disputes on its own timeline;
+    this list clears once a dispute is marked won, lost, or closed on their end.
+  </p>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0">
+      <thead><tr><th>Disputed On</th><th>Donor</th><th class="text-end">Amount</th><th>Receipt #</th><th>Status</th><th>Reason</th></tr></thead>
+      <tbody>
+        {% for d in disputed_donations %}
+        <tr>
+          <td>{{ d.disputed_at.strftime('%d %b %Y, %I:%M %p') if d.disputed_at else '-' }}</td>
+          <td>{% if d.donor %}<a href="{{ url_for('admin.donor_detail', donor_id=d.donor.id) }}">{{ d.donor.full_name }}</a>{% else %}-{% endif %}</td>
+          <td class="text-end">Rs. {{ d.amount | inr }}</td>
+          <td>{{ d.receipt_number or '-' }}</td>
+          <td><span class="badge bg-danger">{{ (d.razorpay_dispute_status or 'unknown') | replace('_', ' ') | capitalize }}</span></td>
+          <td>{{ d.razorpay_dispute_reason or '-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 <div class="row g-3 mb-4">
   <div class="col-md-3">
     <div class="stat-card text-center">

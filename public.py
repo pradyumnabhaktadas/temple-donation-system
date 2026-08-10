@@ -6,8 +6,13 @@ Payment confirmation has three layers, from most to least reliable:
   1. Webhook (razorpay_webhook) -- Razorpay's own server calls this
      directly, entirely independent of the donor's browser. This is the
      source of truth. Configure it under Razorpay Dashboard -> Settings ->
-     Webhooks -> https://<your-domain>/webhooks/razorpay, subscribed to
-     payment.captured.
+     Webhooks -> https://<your-domain>/webhooks/razorpay. Subscribe at
+     least payment.captured (finalizes the donation); payment.failed and
+     payment.dispute.* are also handled if subscribed (see
+     _handle_payment_failed/_handle_payment_dispute below) but aren't
+     required for the core donation flow to work. Any other event type
+     is acknowledged and ignored -- safe to subscribe to more than these
+     without code changes.
   2. Browser fast path (verify_payment) -- checkout.js's `handler` callback
      posts here immediately after payment, so most donors see their
      receipt within a second or two. Not guaranteed to fire in every
@@ -40,7 +45,7 @@ from models import Donor, Campaign, Donation, ReceiptCounter, BaceProperty, Fest
 from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email
 from whatsapp_utils import send_receipt_whatsapp
-from utils import is_valid_pan, normalize_phone
+from utils import is_valid_pan, is_valid_phone, normalize_phone
 
 bp = Blueprint("public", __name__)
 
@@ -101,6 +106,45 @@ def _normalize_name(name):
     to tell "same person, retyped slightly differently" apart from
     "different person" when a phone/email is shared (see below)."""
     return re.sub(r"\s+", " ", (name or "").strip()).lower()
+
+
+# Income Tax Rule 114B requires PAN to be quoted for various high-value
+# transactions once they reach Rs 50,000 -- this app requires PAN (and a
+# postal address, so the office can actually reach a large donor if
+# anything needs following up) starting at Rs 49,000 instead, as a safety
+# margin under that line rather than cutting it exactly at the legal
+# threshold. Applies to every donation entry point regardless of 80G
+# status (BACE Contribution payments are not tax-deductible but can still
+# be large enough to trigger this same PAN-quoting requirement).
+HIGH_VALUE_PAN_THRESHOLD = 49000
+
+
+def high_value_pan_address_error(amount, pan, address):
+    """Returns an error message if `amount` requires PAN+address (see
+    HIGH_VALUE_PAN_THRESHOLD) but either is missing, else None. Shared by
+    every donation entry point -- the public donation form (create_order),
+    admin manual entry, and the CSV importers -- so the rule can't drift
+    out of sync between them. Doesn't re-validate PAN's *format* (callers
+    already do that separately via is_valid_pan); this only checks
+    presence."""
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        return None  # a bad amount is caught elsewhere; not this function's job
+    if amount <= HIGH_VALUE_PAN_THRESHOLD:
+        return None
+    missing = []
+    if not (pan or "").strip():
+        missing.append("PAN")
+    if not (address or "").strip():
+        missing.append("address")
+    if not missing:
+        return None
+    verb = "is" if len(missing) == 1 else "are"
+    return (
+        f"{' and '.join(missing)} {verb} required for donations above "
+        f"Rs. {HIGH_VALUE_PAN_THRESHOLD:,} (Income Tax rules require PAN to be quoted for high-value transactions)."
+    )
 
 
 def find_or_create_donor(data):
@@ -347,6 +391,21 @@ def create_order():
     pan = (data.get("pan") or "").strip()
     if pan and not is_valid_pan(pan):
         return jsonify({"error": "That PAN doesn't look right. It should be 10 characters like ABCDE1234F."}), 400
+
+    # Catches a mistyped extra/missing digit or a non-mobile number before
+    # it's stored -- normalize_phone() (used later in find_or_create_donor)
+    # can only fix *recognised* formats (spaces, +91, leading 0), it can't
+    # tell a typo from a genuinely unusual number, so this needs a separate
+    # validity check. Phone is required on the form; whatsapp_number is
+    # optional and only checked if the donor actually filled it in.
+    if not is_valid_phone(data.get("phone")):
+        return jsonify({"error": "That phone number doesn't look right. Please enter a 10-digit mobile number."}), 400
+    if data.get("whatsapp_number") and not is_valid_phone(data.get("whatsapp_number")):
+        return jsonify({"error": "That WhatsApp number doesn't look right. Please enter a 10-digit mobile number."}), 400
+
+    high_value_error = high_value_pan_address_error(amount, pan, data.get("address"))
+    if high_value_error:
+        return jsonify({"error": high_value_error}), 400
 
     # Optional fields only meaningful for the dedicated BACE Contribution /
     # Festival Seva / Live To Give forms -- which campaign a request claims
@@ -616,11 +675,21 @@ def razorpay_webhook():
     event = request.get_json(silent=True) or {}
     event_type = event.get("event")
 
-    if event_type not in ("payment.captured", "order.paid"):
-        # Acknowledge (200) anything we don't act on, so Razorpay doesn't
-        # keep retrying an event we're deliberately ignoring.
-        return jsonify({"ok": True, "ignored": event_type}), 200
+    if event_type in ("payment.captured", "order.paid"):
+        return _handle_payment_captured(event)
+    if event_type == "payment.failed":
+        return _handle_payment_failed(event)
+    if event_type and event_type.startswith("payment.dispute."):
+        return _handle_payment_dispute(event, event_type)
 
+    # Acknowledge (200) anything we don't act on -- payment.authorized,
+    # the payment.downtime.* / order.notification.* infra events, etc. --
+    # so Razorpay doesn't keep retrying an event we're deliberately
+    # ignoring.
+    return jsonify({"ok": True, "ignored": event_type}), 200
+
+
+def _handle_payment_captured(event):
     payment_entity = event.get("payload", {}).get("payment", {}).get("entity", {})
     order_id = payment_entity.get("order_id")
     payment_id = payment_entity.get("id")
@@ -641,6 +710,74 @@ def razorpay_webhook():
     _finalize_success(donation)
 
     return jsonify({"ok": True, "receipt_number": donation.receipt_number}), 200
+
+
+def _handle_payment_failed(event):
+    """Marks a donation failed the moment Razorpay reports the payment
+    itself failed, instead of waiting for the Dashboard's time-based
+    "abandoned donation" heuristic (admin.dashboard) to eventually notice
+    it's been sitting in "pending" too long. Only touches donations still
+    "pending" -- if it somehow already finalized successfully (a captured
+    event racing ahead of this one) or was already cancelled, this is a
+    no-op rather than clobbering a more authoritative status."""
+    payment_entity = event.get("payload", {}).get("payment", {}).get("entity", {})
+    order_id = payment_entity.get("order_id")
+    payment_id = payment_entity.get("id")
+
+    if not order_id:
+        return jsonify({"error": "Missing order_id in payload"}), 400
+
+    donation = Donation.query.filter_by(razorpay_order_id=order_id).first()
+    if donation is None:
+        return jsonify({"ok": True, "matched": False}), 200
+
+    if donation.status == "pending":
+        donation.status = "failed"
+        if payment_id:
+            donation.razorpay_payment_id = payment_id
+        donation.razorpay_status = payment_entity.get("status") or "failed"
+        db.session.commit()
+
+    return jsonify({"ok": True, "donation_id": donation.id}), 200
+
+
+def _handle_payment_dispute(event, event_type):
+    """Records a chargeback/dispute against the donation it applies to --
+    doesn't change Donation.status (the payment itself was captured and
+    the receipt already issued; a dispute is a separate, ongoing process
+    layered on top, not an instant reversal). Surfaced on the admin
+    Dashboard (see admin.dashboard's disputed_donations) so staff notice
+    and can follow up -- Razorpay resolves the dispute on its own
+    timeline (won/lost/closed), this just keeps the donation record in
+    sync with whatever Razorpay's dashboard shows.
+    """
+    dispute_entity = event.get("payload", {}).get("dispute", {}).get("entity", {})
+    payment_id = dispute_entity.get("payment_id") or (
+        event.get("payload", {}).get("payment", {}).get("entity", {}).get("id")
+    )
+
+    if not payment_id:
+        return jsonify({"error": "Missing payment_id in dispute payload"}), 400
+
+    donation = Donation.query.filter_by(razorpay_payment_id=payment_id).first()
+    if donation is None:
+        return jsonify({"ok": True, "matched": False}), 200
+
+    donation.razorpay_dispute_id = dispute_entity.get("id")
+    # Razorpay's own status string (created/under_review/action_required/
+    # won/lost/closed) -- kept verbatim rather than remapped to this app's
+    # own vocabulary, since dispute-specific terminology is Razorpay's own
+    # domain and staff will be cross-referencing this against Razorpay's
+    # dashboard directly. Fall back to inferring one from the event name
+    # itself (e.g. "payment.dispute.won" -> "won") if the payload doesn't
+    # include a status field.
+    donation.razorpay_dispute_status = dispute_entity.get("status") or event_type.rsplit(".", 1)[-1]
+    donation.razorpay_dispute_reason = dispute_entity.get("reason_code") or dispute_entity.get("reason")
+    if donation.disputed_at is None:
+        donation.disputed_at = datetime.datetime.utcnow()
+    db.session.commit()
+
+    return jsonify({"ok": True, "donation_id": donation.id}), 200
 
 
 def _apply_payment_details(donation, payment_entity):

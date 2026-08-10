@@ -55,6 +55,33 @@ def _captured_event(order_id, payment_id="pay_test456", **entity_extra):
     }
 
 
+def _failed_event(order_id, payment_id="pay_failed456", **entity_extra):
+    entity = {
+        "id": payment_id,
+        "order_id": order_id,
+        "status": "failed",
+    }
+    entity.update(entity_extra)
+    return {
+        "event": "payment.failed",
+        "payload": {"payment": {"entity": entity}},
+    }
+
+
+def _dispute_event(event_type, payment_id, dispute_id="disp_test789", **dispute_extra):
+    entity = {
+        "id": dispute_id,
+        "payment_id": payment_id,
+        "status": event_type.rsplit(".", 1)[-1],
+        "reason_code": "goods_or_service_not_provided",
+    }
+    entity.update(dispute_extra)
+    return {
+        "event": event_type,
+        "payload": {"dispute": {"entity": entity}},
+    }
+
+
 class TestRazorpayWebhook:
     """Webhook is a server-to-server backstop for /api/verify-payment,
     verified with a separate RAZORPAY_WEBHOOK_SECRET rather than trusting
@@ -170,6 +197,103 @@ class TestRazorpayWebhook:
     def test_unknown_order_id_is_acknowledged_not_errored(self, app, client):
         app.config["RAZORPAY_WEBHOOK_SECRET"] = "whsec_correct"
         resp = _post_webhook(client, app, _captured_event("order_does_not_exist"), secret="whsec_correct")
+
+        assert resp.status_code == 200
+        assert resp.get_json()["matched"] is False
+
+
+class TestRazorpayWebhookPaymentFailed:
+    def test_marks_pending_donation_failed(self, app, client):
+        app.config["RAZORPAY_WEBHOOK_SECRET"] = "whsec_correct"
+        donation = _make_pending_donation(app)
+
+        resp = _post_webhook(
+            client, app, _failed_event(donation.razorpay_order_id, payment_id="pay_failedxyz"),
+            secret="whsec_correct",
+        )
+
+        assert resp.status_code == 200
+        db.session.refresh(donation)
+        assert donation.status == "failed"
+        assert donation.razorpay_payment_id == "pay_failedxyz"
+
+    def test_does_not_overwrite_already_successful_donation(self, app, client):
+        # A payment.captured racing ahead of a stray/duplicate
+        # payment.failed delivery must not un-finalize a completed donation.
+        app.config["RAZORPAY_WEBHOOK_SECRET"] = "whsec_correct"
+        donation = _make_pending_donation(app)
+        _post_webhook(client, app, _captured_event(donation.razorpay_order_id), secret="whsec_correct")
+        db.session.refresh(donation)
+        assert donation.status == "success"
+
+        _post_webhook(client, app, _failed_event(donation.razorpay_order_id), secret="whsec_correct")
+        db.session.refresh(donation)
+        assert donation.status == "success"
+
+    def test_unknown_order_id_is_acknowledged_not_errored(self, app, client):
+        app.config["RAZORPAY_WEBHOOK_SECRET"] = "whsec_correct"
+        resp = _post_webhook(client, app, _failed_event("order_does_not_exist"), secret="whsec_correct")
+
+        assert resp.status_code == 200
+        assert resp.get_json()["matched"] is False
+
+
+class TestRazorpayWebhookDisputes:
+    def test_records_dispute_created_against_the_right_donation(self, app, client):
+        app.config["RAZORPAY_WEBHOOK_SECRET"] = "whsec_correct"
+        donation = _make_pending_donation(app)
+        _post_webhook(
+            client, app, _captured_event(donation.razorpay_order_id, payment_id="pay_disp001"),
+            secret="whsec_correct",
+        )
+        db.session.refresh(donation)
+        assert donation.status == "success"  # captured/receipted, then disputed afterwards
+
+        resp = _post_webhook(
+            client, app, _dispute_event("payment.dispute.created", payment_id="pay_disp001"),
+            secret="whsec_correct",
+        )
+
+        assert resp.status_code == 200
+        db.session.refresh(donation)
+        assert donation.status == "success"  # a dispute doesn't reverse the donation's own status
+        assert donation.razorpay_dispute_id == "disp_test789"
+        assert donation.razorpay_dispute_status == "created"
+        assert donation.razorpay_dispute_reason == "goods_or_service_not_provided"
+        assert donation.disputed_at is not None
+
+    def test_dispute_status_updates_on_a_later_event(self, app, client):
+        app.config["RAZORPAY_WEBHOOK_SECRET"] = "whsec_correct"
+        donation = _make_pending_donation(app)
+        _post_webhook(
+            client, app, _captured_event(donation.razorpay_order_id, payment_id="pay_disp002"),
+            secret="whsec_correct",
+        )
+        _post_webhook(
+            client, app, _dispute_event("payment.dispute.created", payment_id="pay_disp002"),
+            secret="whsec_correct",
+        )
+        db.session.refresh(donation)
+        first_disputed_at = donation.disputed_at
+
+        resp = _post_webhook(
+            client, app, _dispute_event("payment.dispute.won", payment_id="pay_disp002"),
+            secret="whsec_correct",
+        )
+
+        assert resp.status_code == 200
+        db.session.refresh(donation)
+        assert donation.razorpay_dispute_status == "won"
+        # disputed_at is set once, on the first dispute event, not bumped
+        # forward on every status update.
+        assert donation.disputed_at == first_disputed_at
+
+    def test_unknown_payment_id_is_acknowledged_not_errored(self, app, client):
+        app.config["RAZORPAY_WEBHOOK_SECRET"] = "whsec_correct"
+        resp = _post_webhook(
+            client, app, _dispute_event("payment.dispute.created", payment_id="pay_does_not_exist"),
+            secret="whsec_correct",
+        )
 
         assert resp.status_code == 200
         assert resp.get_json()["matched"] is False

@@ -81,17 +81,20 @@
         </div>
       </div>
 
+      <p class="field-note text-muted mb-2" id="high-value-note" style="display:none;">
+        PAN and address are mandatory for donations above Rs. 49,000, per Income Tax rules.
+      </p>
       <div class="row mb-0">
         <div class="col-md-6 mb-3">
           <label class="form-label">PAN <span class="text-muted">(required for 80G receipt)</span></label>
-          <input type="text" class="form-control" name="pan" style="text-transform:uppercase" maxlength="10"
+          <input type="text" class="form-control" name="pan" id="pan" style="text-transform:uppercase" maxlength="10"
                  pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10 characters, e.g. ABCDE1234F">
         </div>
       </div>
 
       <div class="mb-0">
         <label class="form-label">Address</label>
-        <textarea class="form-control" name="address" rows="2"></textarea>
+        <textarea class="form-control" name="address" id="address" rows="2"></textarea>
       </div>
 
       <div class="row">
@@ -151,7 +154,24 @@
     const selected = sevaSelect.options[sevaSelect.selectedIndex];
     const suggested = selected ? selected.dataset.amount : '';
     if (suggested) amountInput.value = suggested;
+    updatePanAddressRequirement();
   });
+
+  // PAN + address are always visible here (Festivals is 80G-eligible), but
+  // above the high-value threshold they become mandatory rather than
+  // optional -- Income Tax rules, mirrors HIGH_VALUE_PAN_THRESHOLD in
+  // public.py (the server enforces this regardless of what happens here).
+  const panInput = document.getElementById('pan');
+  const addressInput = document.getElementById('address');
+  const highValueNote = document.getElementById('high-value-note');
+  const HIGH_VALUE_PAN_THRESHOLD = 49000;
+  function updatePanAddressRequirement() {
+    const isHighValue = (parseFloat(amountInput.value) || 0) > HIGH_VALUE_PAN_THRESHOLD;
+    panInput.required = isHighValue;
+    addressInput.required = isHighValue;
+    highValueNote.style.display = isHighValue ? '' : 'none';
+  }
+  amountInput.addEventListener('input', updatePanAddressRequirement);
 
   // -- Small fetch helper ---------------------------------------------
   async function postJSON(url, body) {

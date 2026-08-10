@@ -81,6 +81,32 @@ def normalize_phone(raw):
     return digits if len(digits) == 10 else raw
 
 
+PHONE_RE = re.compile(r"^[6-9]\d{9}$")
+
+
+def is_valid_phone(raw):
+    """True if `raw` normalizes (see normalize_phone above) down to a
+    plausible 10-digit Indian mobile number. Catches the two mistakes
+    normalize_phone can't fix on its own because it can't tell a typo from
+    a genuinely unusual number: wrong digit count (a stray extra digit, a
+    digit dropped, a landline/foreign number that isn't 10 digits after
+    stripping) and a non-mobile leading digit (Indian mobile numbers are
+    only ever allotted starting 6/7/8/9 -- TRAI hasn't issued 0/1-5
+    prefixes for mobiles).
+
+    Blank input is treated as *valid* here, same as is_valid_pan --
+    both fields are optional in most places this is called; the caller
+    decides separately whether blank is acceptable for that particular
+    form. Call this after normalize_phone (or on the same raw value --
+    it normalizes internally too) whenever a phone number is accepted
+    from a donor or admin, to catch a mistyped number before it's stored
+    and silently breaks OTP login / WhatsApp / SMS delivery later.
+    """
+    if not (raw or "").strip():
+        return True
+    return bool(PHONE_RE.match(normalize_phone(raw)))
+
+
 def get_financial_year(date=None):
     """India FY runs Apr 1 - Mar 31. Returns e.g. '2026-27'."""
     if date is None:
