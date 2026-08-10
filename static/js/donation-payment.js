@@ -68,14 +68,35 @@ window.TempleDonationPayment = (function () {
   const PENDING_MAX_AGE_MS = 30 * 60 * 1000;
 
   async function postJSON(url, body, csrfToken) {
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-      body: JSON.stringify(body),
-    });
-    let data = {};
-    try { data = await resp.json(); } catch (err) { /* non-JSON error page */ }
-    return { ok: resp.ok, data };
+    async function attempt() {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify(body),
+      });
+      let data = {};
+      try { data = await resp.json(); } catch (err) { /* non-JSON error page */ }
+      return { ok: resp.ok, data };
+    }
+    try {
+      return await attempt();
+    } catch (err) {
+      // fetch() itself rejected -- a network-level failure (TLS handshake,
+      // connection reset, etc), not a resolved-but-non-2xx response (those
+      // don't throw). Reported specifically on Safari: "Continue to secure
+      // payment" fails on the first click with no useful reason, then
+      // works immediately on a second click with no page reload in
+      // between -- consistent with the very first connection to our own
+      // origin from a fresh page load occasionally failing at the network
+      // layer (seen with iCloud Private Relay and cold/first HTTPS
+      // connections more often on Safari than Chromium), and nothing being
+      // wrong with the request itself. One silent retry after a short
+      // pause turns that into the donor never noticing, instead of needing
+      // to click twice or seeing "something went wrong" on a connection
+      // that's actually fine a moment later.
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      return await attempt();
+    }
   }
 
   function clearPendingMarker() {
