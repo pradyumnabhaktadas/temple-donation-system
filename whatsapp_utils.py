@@ -143,6 +143,17 @@ def _headers(cfg):
         "X-Correlation-Id": str(uuid.uuid4()),
         "X-Date": datetime.datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT"),
         "Content-Type": "application/json",
+        # `requests` defaults to "python-requests/x.x" otherwise -- a manual
+        # `curl` test against this same endpoint (same server, same Kong
+        # gateway visible in its response headers) got a clean 200, while
+        # the app's actual send got RemoteDisconnected with zero HTTP
+        # response at all. That pattern -- connection reset before any
+        # response, only from the library call -- points at a WAF/bot rule
+        # on Airtel's Kong gateway that's specifically rejecting the
+        # generic python-requests User-Agent. Overriding it here is the
+        # cheapest thing to try before assuming something deeper (TLS
+        # fingerprinting, rate limiting, etc.) is going on.
+        "User-Agent": "TempleDonationSystem/1.0 (+https://givetokrishna.com)",
     }
     # See the module docstring's ⚠️ note #2 before setting this in
     # production -- only included at all if explicitly configured.

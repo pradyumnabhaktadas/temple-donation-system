@@ -16,6 +16,16 @@ services:
                      # spins down when idle -- fine for testing, not for
                      # real donation traffic issuing legal 80G receipts.
     buildCommand: pip install -r requirements.txt
+    # Runs `flask db upgrade` against the new code+migrations before Render
+    # swaps traffic over to the new instance -- closes the race where the
+    # old instance (or this same instance's own db.create_all() call in
+    # app.py, which auto-creates any table missing from the current models
+    # on every boot) creates a table first, and a later manual
+    # `flask db upgrade` then collides with it (DuplicateTable). If your
+    # Render plan doesn't support preDeployCommand, delete this line and go
+    # back to running `flask db upgrade` by hand from the Render Shell
+    # *before* redeploying -- see README "Database migrations".
+    preDeployCommand: flask db upgrade
     startCommand: gunicorn -c gunicorn_config.py app:app
     disk:
       name: temple-data

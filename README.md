@@ -620,7 +620,14 @@ donation traffic issuing legal 80G receipts.
   ```
   From then on, whenever you change a model, run `flask db migrate -m "..."`
   then `flask db upgrade` instead of relying on `db.create_all()` to
-  hand-evolve a live database.
+  hand-evolve a live database. On Render, `render.yaml`'s web service now
+  runs `flask db upgrade` automatically as a `preDeployCommand` before
+  each deploy goes live, so a committed migration is applied for you —
+  you shouldn't normally need to run it by hand anymore. (If you do run
+  it manually and hit `DuplicateTable`, that means `app.py`'s own
+  `db.create_all()` already created the table on a prior boot before the
+  migration ran; run `flask db stamp <revision>` instead of `upgrade` to
+  just sync Alembic's version marker, no data is at risk.)
 - **Error monitoring (Sentry)** is wired up in `app.py`, off by default.
   Set `SENTRY_DSN` in `.env` (from Sentry → Settings → your project →
   Client Keys) to start reporting unhandled exceptions; leave it blank to
