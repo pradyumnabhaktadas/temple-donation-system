@@ -85,14 +85,14 @@
           {% if eighty_g_purposes %}
           <optgroup label="80G Eligible">
             {% for p in eighty_g_purposes %}
-              <option value="{{ p.id }}" data-is-80g="1">{{ p.name }}</option>
+              <option value="{{ p.id }}" data-is80g="1">{{ p.name }}</option>
             {% endfor %}
           </optgroup>
           {% endif %}
           {% if non_80g_purposes %}
           <optgroup label="Non-80G">
             {% for p in non_80g_purposes %}
-              <option value="{{ p.id }}" data-is-80g="0">{{ p.name }}</option>
+              <option value="{{ p.id }}" data-is80g="0">{{ p.name }}</option>
             {% endfor %}
           </optgroup>
           {% endif %}
