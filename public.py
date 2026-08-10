@@ -678,7 +678,30 @@ def _finalize_success(donation):
     dying mid-request instead of a normal error response. Wrapped the
     same way here: the receipt number, once committed, is never lost or
     reissued even if PDF generation or notifications blow up afterward.
+
+    Concurrency: the webhook and the browser's own verify-payment call
+    routinely arrive for the *same* donation within milliseconds of each
+    other in real usage -- Razorpay typically fires both close together.
+    Without a lock, both could read the idempotency check below as "not
+    yet finalized" before either commits, and both would proceed to call
+    ReceiptCounter.next_receipt_number() for the same donation: not a
+    duplicate receipt number (that's already guarded by the counter's own
+    row lock -- see ReceiptCounter.next_receipt_number), but a wasted
+    number and a lost update on this donation's own row, whichever commit
+    lands second silently overwriting the first. with_for_update() below
+    takes a row lock on this specific donation before the check, so a
+    second concurrent caller blocks until the first one's transaction
+    (ending at the commit a few lines down) finishes, then sees
+    status == "success" already set and returns immediately instead of
+    racing to issue a second number.
     """
+    try:
+        donation = Donation.query.filter_by(id=donation.id).with_for_update().one()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Failed to lock donation %s for finalization", donation.id)
+        return False
+
     if donation.status == "success" and donation.receipt_number:
         return True
 
