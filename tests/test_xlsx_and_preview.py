@@ -297,3 +297,95 @@ class TestPreviewTellsTheTruth:
         body = resp.data.decode()
         assert "Would update an existing donor" in body
         assert "Would be created" in body
+
+
+class TestTheExcelTemplates:
+    """A template is only worth handing out if a file filled in from it
+    imports. The types are the point: a CSV template can't carry them, so
+    Excel guesses on open, and its guesses are where the trouble starts."""
+
+    ROUTES = [
+        ("/admin/donations/bulk-import/demo.xlsx", "offline_donations_demo.xlsx"),
+        ("/admin/donations/import-legacy/demo.xlsx", "legacy_donations_demo.xlsx"),
+        ("/admin/donors/import/demo.xlsx", "donor_data_demo.xlsx"),
+        ("/admin/iyf-camps/template.xlsx", "iyf_camp_import_template.xlsx"),
+    ]
+
+    @pytest.mark.parametrize("url,filename", ROUTES)
+    def test_it_downloads_as_a_real_workbook(self, app, client, url, filename):
+        login(client)
+        resp = client.get(url)
+        assert resp.status_code == 200
+        assert resp.data[:2] == b"PK", "not a real xlsx"
+        assert filename in resp.headers.get("Content-Disposition", "")
+
+    @pytest.mark.parametrize("url,filename", ROUTES)
+    def test_dates_are_dates_and_phones_are_text(self, app, client, url, filename):
+        """The two that matter. A date typed under a date-formatted column
+        stays a date; a phone typed under a text column doesn't become
+        9.87654e+09."""
+        login(client)
+        sheet = openpyxl.load_workbook(
+            io.BytesIO(client.get(url).data)).active
+        headers = [c.value for c in sheet[1]]
+
+        for name in ("donation_date", "dob"):
+            if name in headers:
+                cell = sheet.cell(row=2, column=headers.index(name) + 1)
+                assert isinstance(cell.value, (datetime.date, datetime.datetime)), \
+                    f"{name} in {filename} is {type(cell.value).__name__}, not a date"
+
+        for name in ("phone", "pan", "pincode"):
+            if name in headers:
+                column = openpyxl.utils.get_column_letter(headers.index(name) + 1)
+                assert sheet.column_dimensions[column].number_format == "@", \
+                    f"{name} in {filename} isn't formatted as text"
+
+    @pytest.mark.parametrize("url,filename", ROUTES)
+    def test_the_file_does_not_claim_thousands_of_empty_rows(self, app, client, url, filename):
+        """Formatting a column by writing to N cells materialises N blank
+        rows; the workbook then opens looking like it holds two thousand
+        rows of nothing. The format goes on the column instead."""
+        login(client)
+        sheet = openpyxl.load_workbook(io.BytesIO(client.get(url).data)).active
+        assert sheet.max_row <= 6, f"{filename} has {sheet.max_row} rows of mostly nothing"
+
+    def test_the_template_imports_unchanged(self, app, client, campaign_id):
+        """Downloaded and uploaded straight back, with no editing. If the
+        example rows don't import, neither will anything modelled on them."""
+        from extensions import db
+        from models import Campaign, Donation, LiveToGivePurpose
+        login(client)
+        with app.app_context():
+            # Only what's missing -- the test app seeds some of these
+            # already, and a duplicate name violates the unique constraint.
+            for name in ("General Donations", "Temple Construction", "Live To Give"):
+                if not Campaign.query.filter_by(name=name).first():
+                    db.session.add(Campaign(name=name, is_80g=True))
+            purpose = "Temple Construction (मंदिर निर्माण के लिए)"
+            if not LiveToGivePurpose.query.filter_by(name=purpose).first():
+                db.session.add(LiveToGivePurpose(name=purpose, is_80g=True))
+            db.session.commit()
+
+        data = client.get("/admin/donations/bulk-import/demo.xlsx").data
+        resp = _upload(client, data, filename="demo.xlsx")
+        with app.app_context():
+            assert Donation.query.count() == 3, resp.data.decode()[:2000]
+
+    def test_the_csv_and_excel_templates_agree(self, app, client):
+        """Two templates for one importer is two things to keep in step.
+        The camp template's example rows used to be written inline in the
+        CSV route; they're a shared constant now so this can hold."""
+        import csv as csv_module
+        login(client)
+        csv_rows = list(csv_module.DictReader(
+            io.StringIO(client.get("/admin/iyf-camps/template.csv").data.decode())))
+        sheet = openpyxl.load_workbook(
+            io.BytesIO(client.get("/admin/iyf-camps/template.xlsx").data)).active
+        headers = [c.value for c in sheet[1]]
+
+        assert headers == list(csv_rows[0].keys()), "different columns"
+        assert sheet.max_row - 1 == len(csv_rows), "different number of example rows"
+        for index, csv_row in enumerate(csv_rows):
+            name_cell = sheet.cell(row=index + 2, column=headers.index("full_name") + 1)
+            assert name_cell.value == csv_row["full_name"]

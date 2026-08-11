@@ -121,7 +121,8 @@
     <div class="d-flex gap-2 align-items-center">
       <button type="submit" name="action" value="preview" class="btn btn-outline-secondary">Preview</button>
       <button type="submit" class="btn btn-gold">Upload &amp; Import</button>
-      <a class="btn btn-outline-secondary" href="{{ url_for('admin.iyf_camp_template') }}">Download template CSV</a>
+      <a class="btn btn-outline-secondary" href="{{ url_for('admin.iyf_camp_template_xlsx') }}">Download template (Excel)</a>
+      <a class="btn btn-outline-secondary" href="{{ url_for('admin.iyf_camp_template') }}">Download template (CSV)</a>
     </div>
     <p class="form-text mb-0 mt-2">
       Each row creates a donation with its own receipt number. <code>camp_name</code> must match a camp

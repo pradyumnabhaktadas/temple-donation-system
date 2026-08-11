@@ -17,7 +17,8 @@
     without wiping out existing data. No match creates a new donor.
   </p>
   <p class="mb-3">
-    <a href="{{ url_for('admin.import_donors_demo_csv') }}" class="btn btn-sm btn-outline-secondary">⬇ Download demo/template CSV</a>
+    <a href="{{ url_for('admin.import_donors_demo_xlsx') }}" class="btn btn-sm btn-outline-secondary">⬇ Download template (Excel)</a>
+    <a href="{{ url_for('admin.import_donors_demo_csv') }}" class="btn btn-sm btn-outline-secondary">⬇ Download template (CSV)</a>
   </p>
   <form method="post" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

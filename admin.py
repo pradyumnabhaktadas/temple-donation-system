@@ -2105,6 +2105,101 @@ def bulk_import_demo_csv():
     )
 
 
+@bp.route("/donations/bulk-import/demo.xlsx")
+@login_required
+@admin_role_required
+def bulk_import_demo_xlsx():
+    """The same template as an Excel workbook -- see _demo_workbook."""
+    return _demo_workbook(
+        BULK_IMPORT_COLUMNS, BULK_IMPORT_DEMO_ROWS, "offline_donations_demo.xlsx")
+
+
+# Columns whose cell *type* matters when the template is opened in Excel.
+# A CSV template can't carry this: Excel decides for itself what each
+# column is on open, and its guesses are the source of most import
+# trouble. Handing out a real workbook is the only way to fix the types
+# up front, which is the whole reason .xlsx uploads are worth having.
+_DEMO_DATE_COLUMNS = {
+    "donation_date", "dob", "father_dob", "mother_dob", "wife_dob",
+    "marriage_anniversary",
+}
+_DEMO_NUMBER_COLUMNS = {"amount"}
+# Forced to Text. Excel turns a phone number into a float and renders it
+# as 9.87654e+09; it strips the leading zero off a pincode; and a PAN or a
+# reference that happens to look numeric gets the same treatment.
+_DEMO_TEXT_COLUMNS = {
+    "phone", "whatsapp_number", "pan", "pincode", "cheque_number",
+    "bank_transaction_id", "receipt_number",
+}
+
+
+def _demo_workbook(columns, rows, filename):
+    """The same template as the demo CSV, as a real .xlsx.
+
+    Dates are written as dates and the text columns are formatted as text,
+    so a file filled in from this one arrives with nothing to guess at --
+    which is the point of uploading a workbook rather than an export of
+    one.
+    """
+    try:
+        import openpyxl
+    except ImportError:
+        abort(503, "Excel templates need openpyxl -- run pip install -r requirements.txt")
+
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "Import"
+    sheet.append(list(columns))
+    for cell in sheet[1]:
+        cell.font = openpyxl.styles.Font(bold=True)
+
+    for row in rows:
+        values = []
+        for column in columns:
+            value = row.get(column, "")
+            if column in _DEMO_DATE_COLUMNS and value:
+                try:
+                    value = datetime.datetime.strptime(value, "%Y-%m-%d").date()
+                except (TypeError, ValueError):
+                    pass  # leave whatever the demo row had; it's an example
+            elif column in _DEMO_NUMBER_COLUMNS and value:
+                try:
+                    value = float(value)
+                except (TypeError, ValueError):
+                    pass
+            values.append(value)
+        sheet.append(values)
+
+    for index, column in enumerate(columns, start=1):
+        letter = openpyxl.utils.get_column_letter(index)
+        sheet.column_dimensions[letter].width = max(12, min(len(column) + 4, 30))
+        if column in _DEMO_TEXT_COLUMNS:
+            number_format = "@"
+        elif column in _DEMO_DATE_COLUMNS:
+            number_format = "yyyy-mm-dd"
+        else:
+            continue
+        # Set on the column, so it also governs the rows someone types in
+        # underneath the examples -- which is where their real data goes.
+        #
+        # Deliberately not a loop over the first N rows setting each cell:
+        # that materialises N blank rows into the file, and the workbook
+        # then opens claiming two thousand rows of nothing.
+        sheet.column_dimensions[letter].number_format = number_format
+        for row_index in range(2, len(rows) + 2):
+            sheet.cell(row=row_index, column=index).number_format = number_format
+
+    sheet.freeze_panes = "A2"
+
+    buf = io.BytesIO()
+    workbook.save(buf)
+    return Response(
+        buf.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 def _lookup_by_name(items_by_lower_name, raw_name, label, row_errors):
     """Case-insensitive name lookup for an optional bulk-import column
     (BACE property / festival / seva type / Live To Give purpose). Blank
@@ -2406,6 +2501,14 @@ def import_legacy_demo_csv():
     )
 
 
+@bp.route("/donations/import-legacy/demo.xlsx")
+@login_required
+@admin_role_required
+def import_legacy_demo_xlsx():
+    return _demo_workbook(
+        LEGACY_IMPORT_COLUMNS, LEGACY_IMPORT_DEMO_ROWS, "legacy_donations_demo.xlsx")
+
+
 @bp.route("/donations/import-legacy", methods=["GET", "POST"])
 @login_required
 @admin_role_required
@@ -2689,6 +2792,14 @@ def import_donors_demo_csv():
         mimetype="text/csv",
         headers={"Content-Disposition": "attachment; filename=donor_data_demo.csv"},
     )
+
+
+@bp.route("/donors/import/demo.xlsx")
+@login_required
+@admin_role_required
+def import_donors_demo_xlsx():
+    return _demo_workbook(
+        DONOR_IMPORT_COLUMNS, DONOR_IMPORT_DEMO_ROWS, "donor_data_demo.xlsx")
 
 
 def _parse_import_date(raw, label, row_errors, required=False, ambiguous=None):
@@ -4155,6 +4266,23 @@ IYF_CAMP_IMPORT_COLUMNS = [
     "payment_mode", "phone", "email", "bank_transaction_id", "remarks",
 ]
 
+# Shared by the CSV template and the .xlsx one, so the two can't drift
+# into showing different examples of the same thing.
+IYF_CAMP_DEMO_ROWS = [
+    {
+        "full_name": "Ravi Sharma", "amount": "1100", "camp_name": "Utkarsha 2026",
+        "batch_name": "Batch A", "donation_date": "2026-08-01", "payment_mode": "cash",
+        "phone": "9876543210", "email": "ravi@example.com",
+        "bank_transaction_id": "", "remarks": "",
+    },
+    {
+        "full_name": "Anita Verma", "amount": "2100", "camp_name": "Utkarsha 2026",
+        "batch_name": "Batch B", "donation_date": "2026-08-02", "payment_mode": "online",
+        "phone": "9812345678", "email": "",
+        "bank_transaction_id": "pay_TO5ASGCNZOi4fP", "remarks": "Paid via Zoho",
+    },
+]
+
 
 @bp.route("/iyf-camps")
 @login_required
@@ -4425,23 +4553,19 @@ def iyf_camp_template():
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=IYF_CAMP_IMPORT_COLUMNS)
     writer.writeheader()
-    writer.writerow({
-        "full_name": "Ravi Sharma", "amount": "1100", "camp_name": "Utkarsha 2026",
-        "batch_name": "Batch A", "donation_date": "2026-08-01", "payment_mode": "cash",
-        "phone": "9876543210", "email": "ravi@example.com",
-        "bank_transaction_id": "", "remarks": "",
-    })
-    writer.writerow({
-        "full_name": "Anita Verma", "amount": "2100", "camp_name": "Utkarsha 2026",
-        "batch_name": "Batch B", "donation_date": "2026-08-02", "payment_mode": "online",
-        "phone": "9812345678", "email": "",
-        "bank_transaction_id": "pay_TO5ASGCNZOi4fP", "remarks": "Paid via Zoho",
-    })
+    writer.writerows(IYF_CAMP_DEMO_ROWS)
     return Response(
         buf.getvalue(),
         mimetype="text/csv",
         headers={"Content-Disposition": "attachment; filename=iyf_camp_import_template.csv"},
     )
+
+
+@bp.route("/iyf-camps/template.xlsx")
+@login_required
+def iyf_camp_template_xlsx():
+    return _demo_workbook(
+        IYF_CAMP_IMPORT_COLUMNS, IYF_CAMP_DEMO_ROWS, "iyf_camp_import_template.xlsx")
 
 
 # --- Camp list management -------------------------------------------------
