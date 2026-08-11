@@ -1228,6 +1228,51 @@ def _apply_donations_filters(query):
 
     date_from_raw = request.args.get("date_from") or ""
     date_to_raw = request.args.get("date_to") or ""
+
+    # Quick ranges. The log is overwhelmingly used to answer "what came in
+    # recently", and typing two dates for that every time is friction on
+    # the most common task -- so a fresh visit lands on the current month
+    # rather than the full history.
+    #
+    # Explicit dates always win: a link carrying date_from/date_to is a
+    # deliberate custom range (including one this very form produced), and
+    # must not be quietly overridden by a preset.
+    date_range = request.args.get("range") or ""
+    if date_from_raw or date_to_raw:
+        date_range = "custom"
+    elif not date_range:
+        # No dates and no preset -- the fresh-visit case. Anything wanting
+        # the old unbounded behaviour asks for range=all explicitly (see
+        # the dashboard's pending/failed links, where an older donation is
+        # precisely what staff are looking for).
+        date_range = "this_month"
+
+    if date_range not in ("custom", "all"):
+        today = datetime.date.today()
+        start = end = None
+        if date_range == "this_month":
+            start, end = today.replace(day=1), today
+        elif date_range == "last_month":
+            end = today.replace(day=1) - datetime.timedelta(days=1)
+            start = end.replace(day=1)
+        elif date_range == "last_3_months":
+            # Three whole calendar months including this one, not a rolling
+            # 90 days -- staff reconcile by month, not by day.
+            month, year = today.month - 2, today.year
+            if month <= 0:
+                month, year = month + 12, year - 1
+            start, end = datetime.date(year, month, 1), today
+        elif date_range == "this_fy":
+            # Indian financial year, 1 April - 31 March: the same boundary
+            # receipt numbering and the Form 10BD filing already use.
+            fy_start_year = today.year if today.month >= 4 else today.year - 1
+            start, end = datetime.date(fy_start_year, 4, 1), today
+        else:
+            date_range = "all"  # unrecognised value -- don't filter on a guess
+
+        if start:
+            date_from_raw, date_to_raw = start.isoformat(), end.isoformat()
+
     try:
         if date_from_raw:
             date_from = datetime.datetime.strptime(date_from_raw, "%Y-%m-%d")
@@ -1246,6 +1291,7 @@ def _apply_donations_filters(query):
     return query, {
         "status": status, "campaign_id": campaign_id, "mode": mode,
         "date_from": date_from_raw, "date_to": date_to_raw,
+        "date_range": date_range,
     }
 
 

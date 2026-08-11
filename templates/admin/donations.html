@@ -48,6 +48,24 @@
     </select>
   </div>
   <div class="col-auto">
+    {# Clears the two date inputs before submitting: otherwise the dates
+       the preset itself filled in would come back with the request, and
+       the server treats any explicit date as a deliberate custom range
+       that overrides the preset -- so picking "Last month" while looking
+       at this month's dates would appear to do nothing. #}
+    <select name="range" class="form-select" aria-label="Date range"
+            onchange="this.form.date_from.value=''; this.form.date_to.value=''; this.form.submit()">
+      <option value="this_month" {% if date_range == 'this_month' %}selected{% endif %}>This month</option>
+      <option value="last_month" {% if date_range == 'last_month' %}selected{% endif %}>Last month</option>
+      <option value="last_3_months" {% if date_range == 'last_3_months' %}selected{% endif %}>Last 3 months</option>
+      <option value="this_fy" {% if date_range == 'this_fy' %}selected{% endif %}>This financial year</option>
+      <option value="all" {% if date_range == 'all' %}selected{% endif %}>All time</option>
+      {% if date_range == 'custom' %}
+      <option value="custom" selected>Custom range</option>
+      {% endif %}
+    </select>
+  </div>
+  <div class="col-auto">
     <input type="date" name="date_from" class="form-control" value="{{ date_from }}" aria-label="From date">
   </div>
   <div class="col-auto">
@@ -55,8 +73,8 @@
   </div>
   <div class="col-auto">
     <button type="submit" class="btn btn-outline-secondary">Filter</button>
-    {% if date_from or date_to %}
-    <a href="{{ url_for('admin.donations', status=status, campaign_id=campaign_id, mode=mode) }}" class="btn btn-link btn-sm">Clear dates</a>
+    {% if date_range != 'this_month' %}
+    <a href="{{ url_for('admin.donations', status=status, campaign_id=campaign_id, mode=mode) }}" class="btn btn-link btn-sm">Reset dates</a>
     {% endif %}
   </div>
 </form>
