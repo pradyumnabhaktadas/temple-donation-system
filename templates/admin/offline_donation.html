@@ -112,8 +112,8 @@
       <label class="form-label" id="bank-transaction-label">Transaction ID / UTR Number</label>
       <input type="text" class="form-control" name="bank_transaction_id" id="bank_transaction_id">
       <div class="form-text" id="bank-transaction-help" style="display:none;">
-        Optional, but worth recording -- it's what lets this donation be reconciled against the
-        gateway's own report later.
+        Required -- it's what lets this donation be reconciled against the gateway's own
+        report later. If you don't have it to hand, look it up before recording the donation.
       </div>
     </div>
 
@@ -185,6 +185,9 @@
           <code>payment_mode</code> (cash / cheque / bank_transfer / online), <code>donation_date</code> (YYYY-MM-DD).
           See the demo file for every optional column (contact details, PAN, cheque/bank reference,
           BACE property / festival / seva type / Live To Give purpose, 80G vs non-80G, remarks).
+          Every row except <code>cash</code> also needs a reference &mdash; <code>cheque_number</code>
+          or <code>bank_transaction_id</code>. Rows without one are skipped and listed in the result,
+          so the rest of the file still imports.
         </div>
       </div>
       <div class="form-check mb-3">
@@ -270,17 +273,17 @@
 
     // The same reference field serves Bank Transfer (a UTR number) and
     // Online (the gateway's transaction/payment id) -- both are "how do I
-    // find this payment in someone else's system later". Required for a
-    // bank transfer, where there's always a UTR; optional for Online,
-    // since staff recording one after the fact don't always have the id
-    // to hand, and blocking the entry over it would be worse than
-    // recording the donation without it.
+    // find this payment in someone else's system later", and both are
+    // required. Cash is the only mode that can be recorded without a
+    // reference, because it's the only one with nothing to reference.
+    // The server enforces this too (_payment_reference_error); this is
+    // only so staff find out while they're still on the form.
     const isBankTransfer = mode === 'bank_transfer';
     const isOnline = mode === 'online';
     const needsReference = isBankTransfer || isOnline;
 
     bankTransferField.style.display = needsReference ? '' : 'none';
-    bankTransactionIdInput.required = isBankTransfer;
+    bankTransactionIdInput.required = needsReference;
     if (!needsReference) bankTransactionIdInput.value = '';
 
     document.getElementById('bank-transaction-label').textContent =

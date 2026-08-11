@@ -113,7 +113,9 @@
       <div class="form-text">
         Required columns: {% for c in required_columns %}<code>{{ c }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.
         Optional: {% for c in import_columns if c not in required_columns %}<code>{{ c }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.
-        Dates as YYYY-MM-DD.
+        Dates as YYYY-MM-DD. Every row except <code>cash</code> needs a
+        <code>bank_transaction_id</code> &mdash; rows without one are skipped and listed in the
+        result, so the rest of the file still imports.
       </div>
     </div>
     <div class="d-flex gap-2 align-items-center">
@@ -189,13 +191,21 @@
 
 <script>
 (function () {
-  // The reference field only means anything for a payment that has one.
+  // Cash is the only mode with nothing to reference. Every other one --
+  // online, bank transfer, cheque -- already exists in a bank statement,
+  // a cheque book or a gateway report, and the reference is the only way
+  // to match this collection to it afterwards, so it's required. The
+  // server enforces this as well (_payment_reference_error); this just
+  // catches it while the person is still looking at the form.
   var mode = document.getElementById('camp_payment_mode');
   var field = document.getElementById('camp-txn-field');
   if (!mode || !field) return;
   function sync() {
-    field.style.display = (mode.value === 'cash') ? 'none' : '';
-    if (mode.value === 'cash') document.getElementById('camp_bank_transaction_id').value = '';
+    var isCash = mode.value === 'cash';
+    var input = document.getElementById('camp_bank_transaction_id');
+    field.style.display = isCash ? 'none' : '';
+    input.required = !isCash;
+    if (isCash) input.value = '';
   }
   mode.addEventListener('change', sync);
   sync();

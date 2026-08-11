@@ -1624,6 +1624,43 @@ def _resolve_camp_name(raw):
     return camp.name if camp else None
 
 
+def _payment_reference_error(payment_mode, cheque_number=None, bank_transaction_id=None):
+    """Every payment except cash has to arrive with its reference.
+
+    Cash is the only mode with nothing to reference -- it happened at the
+    counter and the receipt is the record. Everything else already exists
+    in someone else's system (a bank statement, a cheque, Razorpay, Zoho),
+    and the reference is the only way to match this donation to it when
+    the two are reconciled. Recorded without one, the row is unverifiable
+    forever, and nobody goes back to fill it in.
+
+    Returns an error string, or None if the entry is acceptable.
+
+    Either field satisfies it. The camp form collects a cheque's reference
+    as bank_transaction_id (it has no separate cheque-number field), so
+    requiring the mode's "own" field would reject entries that do carry a
+    reference.
+    """
+    mode = (payment_mode or "").strip().lower()
+    if mode == "cash":
+        return None
+    if (cheque_number or "").strip() or (bank_transaction_id or "").strip():
+        return None
+    if mode == "cheque":
+        return (
+            "A cheque donation needs its cheque number -- it's what ties this "
+            "receipt to the cheque when it clears."
+        )
+    label = {
+        "bank_transfer": "A bank transfer needs its UTR / transaction ID",
+        "online": "An online payment needs its transaction / payment ID",
+    }.get(mode, f"A {mode.replace('_', ' ') or 'non-cash'} donation needs its reference")
+    return (
+        f"{label} -- it's the only way to match this donation to the payment "
+        "later. Only cash can be recorded without a reference."
+    )
+
+
 def _create_offline_donation(
     *, donor_data, campaign, amount, payment_mode, donation_date, recorded_by,
     bace_property_id=None, festival_id=None, seva_type_id=None, live_to_give_purpose_id=None,
@@ -1659,6 +1696,25 @@ def _create_offline_donation(
        "receipt_number": str, "pdf_ok": bool} -- stage 1 always
       succeeded if "ok" is True; "pdf_ok" says whether stages 2/3 did too.
     """
+    reference_error = _payment_reference_error(payment_mode, cheque_number, bank_transaction_id)
+    if reference_error:
+        # Checked before find_or_create_donor, so a rejected row doesn't
+        # leave a new donor behind for a donation that was never created.
+        #
+        # Enforced here rather than in each caller because here is the one
+        # place all four offline entry points meet: the single-entry form,
+        # the bulk CSV import, IYF camp single entry and IYF camp bulk. A
+        # rule written into the forms would have to be remembered four
+        # times, and again by the fifth form somebody adds.
+        #
+        # import_legacy_donations builds its Donation rows directly and so
+        # isn't subject to this -- deliberately. It backfills records from
+        # before this system, whose references were never captured: of the
+        # ~6,000 rows staged for go-live, 3,509 have none. Requiring one
+        # there would reject the temple's own history in order to enforce a
+        # rule about how payments are recorded from now on.
+        return {"ok": False, "error": reference_error}
+
     try:
         donor = find_or_create_donor(_sanitize_donor_data(donor_data))
 
@@ -1806,13 +1862,12 @@ def manual_donation():
                 flash(f"'{purpose.name}' isn't 80G-eligible -- select \"No\" for the 80G receipt question, or a different purpose.")
                 return redirect(url_for("admin.manual_donation"))
 
-        # Offline payment reference details -- only meaningful for their
-        # matching payment_mode (cheque_number/cheque_bank_name for
-        # "cheque", bank_transaction_id for "bank_transfer"), but captured
-        # regardless of which mode is selected rather than validated
-        # against it -- same permissive approach as the rest of this form
-        # (e.g. a cheque number entered then the mode changed back to Cash
-        # shouldn't block submission, just goes unused).
+        # Offline payment reference details. Still captured whichever mode
+        # is selected -- a cheque number typed in and then the mode changed
+        # back to Cash shouldn't block submission, it just goes unused.
+        # What is enforced (in _create_offline_donation, so every entry
+        # point gets it) is the other direction: any mode except cash must
+        # arrive with a reference in one of these fields.
         cheque_number = form.get("cheque_number")
         cheque_bank_name = form.get("cheque_bank_name")
         bank_transaction_id = form.get("bank_transaction_id")

@@ -136,17 +136,17 @@ class TestOnlineModeReference:
             pdf = Donation.query.one().receipt_pdf
             assert pdf and pdf.startswith(b"%PDF")
 
-    def test_online_without_a_reference_is_still_accepted(self, app, client, campaign_id):
-        """The field is optional for Online -- staff recording a payment
-        after the fact don't always have the id, and refusing the entry
-        over it would lose the donation, not just the reference."""
+    def test_online_without_a_reference_is_refused(self, app, client, campaign_id):
+        """This test used to assert the opposite -- the field was optional
+        for Online on the reasoning that losing the donation is worse than
+        losing the reference. Overridden deliberately: a payment recorded
+        with no way to match it to the gateway is unverifiable forever, and
+        nobody goes back to fill it in."""
         from models import Donation
         login(client)
         _log_donation(client, campaign_id, bank_transaction_id="")
         with app.app_context():
-            donation = Donation.query.one()
-            assert donation.amount == 1100
-            assert donation.reference_display is None
+            assert Donation.query.count() == 0
 
 
 class TestTheOtherPaymentModesStillBehave:
@@ -265,3 +265,183 @@ class TestEveryFormThatWritesTheField:
         resp = client.get("/admin/iyf-camps/export/detail.csv?range=all")
         assert resp.status_code == 200
         assert TXN in resp.data.decode()
+
+
+class TestAReferenceIsMandatoryForEveryModeButCash:
+    """Cash is the only mode with nothing to reference. Everything else
+    already exists in a bank statement, a cheque book or a gateway report,
+    and without the reference the donation can never be matched to it.
+
+    Enforced in _create_offline_donation, the one place all four offline
+    entry points meet, so these tests go through the routes rather than
+    calling the check directly -- a rule that holds in the helper but is
+    bypassed by a form is worth nothing.
+    """
+
+    def test_online_is_refused_without_one(self, app, client, campaign_id):
+        from models import Donation
+        login(client)
+        resp = _log_donation(client, campaign_id, bank_transaction_id="")
+        with app.app_context():
+            assert Donation.query.count() == 0
+        assert b"transaction" in resp.data.lower()
+
+    def test_bank_transfer_is_refused_without_one(self, app, client, campaign_id):
+        from models import Donation
+        login(client)
+        _log_donation(client, campaign_id, payment_mode="bank_transfer",
+                      bank_transaction_id="")
+        with app.app_context():
+            assert Donation.query.count() == 0
+
+    def test_cheque_is_refused_without_a_cheque_number(self, app, client, campaign_id):
+        from models import Donation
+        login(client)
+        _log_donation(client, campaign_id, payment_mode="cheque",
+                      cheque_number="", cheque_bank_name="HDFC Bank",
+                      bank_transaction_id="")
+        with app.app_context():
+            assert Donation.query.count() == 0
+
+    def test_cheque_is_accepted_with_a_cheque_number(self, app, client, campaign_id):
+        from models import Donation
+        login(client)
+        _log_donation(client, campaign_id, payment_mode="cheque",
+                      cheque_number="123456", bank_transaction_id="")
+        with app.app_context():
+            assert Donation.query.count() == 1
+
+    def test_cash_needs_nothing(self, app, client, campaign_id):
+        from models import Donation
+        login(client)
+        _log_donation(client, campaign_id, payment_mode="cash",
+                      bank_transaction_id="")
+        with app.app_context():
+            assert Donation.query.count() == 1
+
+    def test_a_refused_entry_leaves_no_donor_behind(self, app, client, campaign_id):
+        """The check runs before find_or_create_donor. Otherwise a rejected
+        entry still creates the donor, and repeated attempts silently
+        populate the donor list with people who never gave."""
+        from models import Donor
+        login(client)
+        _log_donation(client, campaign_id, full_name="Ghost Donor",
+                      phone="9000000001", bank_transaction_id="")
+        with app.app_context():
+            assert Donor.query.filter_by(full_name="Ghost Donor").count() == 0
+
+    def test_the_browser_form_asks_for_it_too(self, client):
+        """Server-side is what enforces it, but staff should find out
+        while they're still on the form, not after submitting."""
+        login(client)
+        page = client.get("/admin/donations/manual").data.decode()
+        assert "bankTransactionIdInput.required = needsReference" in page
+
+    def test_camp_entry_is_refused_without_one(self, app, client):
+        from models import Donation
+        login(client)
+        client.post("/admin/iyf-camps/manage", data={"name": "Utkarsha 2026"},
+                    follow_redirects=True)
+        client.post("/admin/iyf-camps/single", data={
+            "full_name": "Anita Verma", "phone": "9812345678", "amount": "2100",
+            "camp_name": "Utkarsha 2026", "batch_name": "Batch B",
+            "payment_mode": "online", "bank_transaction_id": "",
+            "donation_date": "2026-08-01",
+        }, follow_redirects=True)
+        with app.app_context():
+            assert Donation.query.count() == 0
+
+
+class TestBulkImportsSkipTheBadRowsAndKeepTheRest:
+    """A CSV is not all-or-nothing: one unreferenced row shouldn't cost
+    the operator the other 400."""
+
+    def test_bulk_donation_import(self, app, client, campaign_id):
+        from models import Donation
+        login(client)
+        csv_text = (
+            "full_name,campaign_name,amount,payment_mode,donation_date,bank_transaction_id\n"
+            "Cash Giver,Annadan,500,cash,2026-08-01,\n"
+            "No Reference,Annadan,700,online,2026-08-01,\n"
+            f"Has Reference,Annadan,900,online,2026-08-01,{TXN}\n"
+        )
+        resp = client.post(
+            "/admin/donations/bulk-import",
+            data={"csv_file": (io.BytesIO(csv_text.encode()), "donations.csv")},
+            content_type="multipart/form-data", follow_redirects=True)
+        body = resp.data.decode()
+        with app.app_context():
+            names = {d.donor.full_name for d in Donation.query.all()}
+        assert names == {"Cash Giver", "Has Reference"}
+        assert "No Reference" in body, "the skipped row isn't reported to the operator"
+
+    def test_camp_bulk_import(self, app, client):
+        from models import Donation
+        login(client)
+        client.post("/admin/iyf-camps/manage", data={"name": "Utkarsha 2026"},
+                    follow_redirects=True)
+        csv_text = (
+            "full_name,amount,camp_name,batch_name,donation_date,payment_mode,bank_transaction_id\n"
+            "Cash Student,500,Utkarsha 2026,Batch A,2026-08-01,cash,\n"
+            "No Reference,700,Utkarsha 2026,Batch A,2026-08-01,online,\n"
+            f"Has Reference,900,Utkarsha 2026,Batch A,2026-08-01,online,{TXN}\n"
+        )
+        resp = client.post(
+            "/admin/iyf-camps/bulk",
+            data={"csv_file": (io.BytesIO(csv_text.encode()), "camp.csv")},
+            content_type="multipart/form-data", follow_redirects=True)
+        with app.app_context():
+            names = {d.donor.full_name for d in Donation.query.all()}
+        assert names == {"Cash Student", "Has Reference"}
+        assert "No Reference" in resp.data.decode()
+
+
+class TestTheHistoricalImportIsExempt:
+    """Deliberate, and load-bearing for go-live.
+
+    import_legacy_donations backfills records from before this system
+    existed, whose references were never captured -- 3,509 of the ~6,000
+    rows staged for go-live have none. The rule is about how payments are
+    recorded from now on; applying it here would reject the temple's own
+    history. The exemption is structural: the legacy importer builds its
+    Donation rows directly instead of going through
+    _create_offline_donation, which is where the rule lives.
+    """
+
+    def test_a_legacy_online_row_with_no_reference_imports(self, app, client, campaign_id):
+        from models import Donation
+        login(client)
+        csv_text = (
+            "full_name,campaign_name,amount,payment_mode,donation_date,receipt_number\n"
+            "Old Donor,Annadan,1100,online,2024-05-01,162379\n"
+        )
+        resp = client.post(
+            "/admin/donations/import-legacy",
+            data={"csv_file": (io.BytesIO(csv_text.encode()), "history.csv")},
+            content_type="multipart/form-data", follow_redirects=True)
+        assert resp.status_code == 200
+        with app.app_context():
+            donation = Donation.query.one()
+            assert donation.payment_mode == "online"
+            assert donation.reference_display is None
+            assert donation.receipt_number == "162379", "legacy receipt number not preserved"
+
+    def test_the_shape_of_the_real_staged_files_imports(self, app, client, campaign_id):
+        """A row per staged file, in the shape they're actually in --
+        including the cheque and bank_transaction_id columns present but
+        empty, which is what all 405 festival rows look like."""
+        from models import Donation
+        login(client)
+        csv_text = (
+            "full_name,campaign_name,amount,payment_mode,donation_date,"
+            "receipt_number,is_80g_requested,cheque_number,cheque_bank_name,"
+            "bank_transaction_id,remarks\n"
+            "Festival Donor,Annadan,101,online,2025-01-01,162379,no,,,,\n"
+            "LTG Donor,Annadan,1001,online,2025-01-01,162380,no,,,,\n"
+        )
+        client.post(
+            "/admin/donations/import-legacy",
+            data={"csv_file": (io.BytesIO(csv_text.encode()), "history.csv")},
+            content_type="multipart/form-data", follow_redirects=True)
+        with app.app_context():
+            assert Donation.query.count() == 2
