@@ -25,7 +25,13 @@ services:
     # Render plan doesn't support preDeployCommand, delete this line and go
     # back to running `flask db upgrade` by hand from the Render Shell
     # *before* redeploying -- see README "Database migrations".
-    preDeployCommand: flask db upgrade
+    # db_deploy.py, not `flask db upgrade` directly: this project's
+    # migration chain has no initial-schema migration (its first revision
+    # adds columns to `donations`, assuming db.create_all() made it), so
+    # `flask db upgrade` alone cannot build a database from nothing. The
+    # script runs migrations on an existing database exactly as before,
+    # and bootstraps an empty one. See its docstring.
+    preDeployCommand: python db_deploy.py
     startCommand: gunicorn -c gunicorn_config.py app:app
     disk:
       name: temple-data
