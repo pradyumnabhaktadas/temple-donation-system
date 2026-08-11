@@ -56,8 +56,15 @@ the test passes without exercising anything.
 
 ## Things that bite in this codebase
 
-- **CSV uploads**: use `_csv_reader_from_upload()`. Wrapping the raw
-  upload stream in `io.TextIOWrapper` breaks below Python 3.11.
+- **Uploads**: use `_table_from_upload()`, which handles both .csv and
+  .xlsx. Wrapping the raw upload stream in `io.TextIOWrapper` breaks below
+  Python 3.11. Never parse dates in an import route — `_parse_import_date`
+  is the one parser, and a test asserts no route calls `strptime` itself.
+- **Bulk imports have a dry run.** A `Preview` button posts
+  `action=preview`; the route validates everything and returns before it
+  writes. Any rule enforced deeper down (the non-cash reference check
+  inside `_create_offline_donation`) must also be checked in the preview
+  path, or the preview promises rows the real run refuses.
 - **Destructive confirmations**: use `data-confirm="..."` with the shared
   handler in `base_admin.html`. Never splice a user-entered name into an
   inline `onsubmit` — an apostrophe silently removes the prompt.

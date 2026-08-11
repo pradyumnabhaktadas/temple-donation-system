@@ -109,7 +109,7 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="mb-3">
       <label class="form-label">CSV file</label>
-      <input type="file" class="form-control" name="csv_file" accept=".csv" required>
+      <input type="file" class="form-control" name="csv_file" accept=".csv,.xlsx" required>
       <div class="form-text">
         Required columns: {% for c in required_columns %}<code>{{ c }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.
         Optional: {% for c in import_columns if c not in required_columns %}<code>{{ c }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.
@@ -119,6 +119,7 @@
       </div>
     </div>
     <div class="d-flex gap-2 align-items-center">
+      <button type="submit" name="action" value="preview" class="btn btn-outline-secondary">Preview</button>
       <button type="submit" class="btn btn-gold">Upload &amp; Import</button>
       <a class="btn btn-outline-secondary" href="{{ url_for('admin.iyf_camp_template') }}">Download template CSV</a>
     </div>
@@ -134,7 +135,22 @@
 
 {% if bulk_results is defined and bulk_results %}
 <div class="card card-body shadow-sm p-4" style="max-width:900px">
-  <h6 class="mb-3">Results: {{ bulk_created }} imported, {{ bulk_skipped }} skipped</h6>
+  {% if bulk_preview %}
+  <div class="alert alert-info">
+    <strong>Preview only &mdash; nothing has been saved.</strong>
+    {% if bulk_summary %}
+    <div class="mt-2">
+      <strong>{{ bulk_summary.count }}</strong> collection(s) would be imported, totalling
+      <strong>Rs. {{ '{:,.2f}'.format(bulk_summary.total) }}</strong>.
+    </div>
+    <div class="mt-2 small">Check the total against what was handed in before importing.</div>
+    {% endif %}
+  </div>
+  {% endif %}
+  <h6 class="mb-3">
+    {% if bulk_preview %}Preview: {{ bulk_created }} would import, {{ bulk_skipped }} would be skipped
+    {% else %}Results: {{ bulk_created }} imported, {{ bulk_skipped }} skipped{% endif %}
+  </h6>
   <div class="table-responsive">
     <table class="table table-sm bg-white">
       <thead><tr><th>Row</th><th>Name</th><th>Outcome</th></tr></thead>
@@ -145,8 +161,13 @@
           <td>{{ r.name }}</td>
           <td>
             {% if r.ok %}
+              {% if r.preview %}
+              <span class="badge bg-info text-dark">Would import</span>
+              <span class="text-muted small">Rs. {{ '{:,.2f}'.format(r.amount) }}</span>
+              {% else %}
               <span class="text-success">Imported</span>
               <span class="text-muted small">&mdash; receipt {{ r.receipt_number }}</span>
+              {% endif %}
               {% for w in r.warnings %}<div class="text-warning small">{{ w }}</div>{% endfor %}
             {% else %}
               {% for e in r.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}

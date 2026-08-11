@@ -23,7 +23,7 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="mb-3">
       <label class="form-label">CSV File</label>
-      <input type="file" class="form-control" name="csv_file" accept=".csv" required>
+      <input type="file" class="form-control" name="csv_file" accept=".csv,.xlsx" required>
       <div class="form-text">
         Required column: <code>full_name</code>. Everything else is optional -- see the demo file for every
         column, including <code>donor_type</code> (<code>iyf</code> / <code>live_to_give</code>),
@@ -33,13 +33,32 @@
         <code>occasional</code>), and dates as <code>YYYY-MM-DD</code>.
       </div>
     </div>
-    <button type="submit" class="btn btn-gold">Upload &amp; Import</button>
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+      <button type="submit" name="action" value="preview" class="btn btn-outline-secondary">Preview</button>
+      <button type="submit" class="btn btn-gold">Upload &amp; Import</button>
+    </div>
+    <div class="form-text mt-2">
+      <strong>Preview</strong> checks the whole file and shows what would happen, without saving
+      anything. Choose the same file again and press Upload &amp; Import once it looks right.
+    </div>
   </form>
 </div>
 
 {% if results is not none %}
 <div class="card card-body shadow-sm p-4" style="max-width:900px">
-  <h6 class="mb-3">Results: {{ created }} created, {{ updated }} updated, {{ skipped }} skipped</h6>
+  {% if preview %}
+  <div class="alert alert-info">
+    <strong>Preview only &mdash; nothing has been saved.</strong>
+    <div class="mt-2 small">
+      This import updates existing donor records in place, so the rows marked
+      <em>would update</em> are the ones to look at before running it for real.
+    </div>
+  </div>
+  {% endif %}
+  <h6 class="mb-3">
+    {% if preview %}Preview: {{ created }} would be created, {{ updated }} would be updated, {{ skipped }} skipped
+    {% else %}Results: {{ created }} created, {{ updated }} updated, {{ skipped }} skipped{% endif %}
+  </h6>
   <div class="table-responsive">
   <table class="table table-sm bg-white">
     <thead><tr><th>Row</th><th>Name</th><th>Outcome</th></tr></thead>
@@ -49,7 +68,12 @@
         <td>{{ r.line }}</td>
         <td>{{ r.name }}</td>
         <td>
-          {% if r.ok %}
+          {% if r.ok and r.preview %}
+            {# No donor_id to link to -- nothing has been written yet. #}
+            <span class="badge bg-info text-dark">
+              {% if r.was_new %}Would be created{% else %}Would update an existing donor{% endif %}
+            </span>
+          {% elif r.ok %}
             <span class="badge {{ 'bg-success' if r.action == 'created' else 'bg-info text-dark' }}">{{ r.action | capitalize }}</span>
             <a href="{{ url_for('admin.donor_detail', donor_id=r.donor_id) }}">View donor →</a>
           {% else %}

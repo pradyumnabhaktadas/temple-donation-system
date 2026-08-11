@@ -179,7 +179,7 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="mb-3">
         <label class="form-label">CSV File</label>
-        <input type="file" class="form-control" name="csv_file" accept=".csv" required>
+        <input type="file" class="form-control" name="csv_file" accept=".csv,.xlsx" required>
         <div class="form-text">
           Required columns: <code>full_name</code>, <code>campaign_name</code>, <code>amount</code>,
           <code>payment_mode</code> (cash / cheque / bank_transfer / online), <code>donation_date</code>
@@ -199,13 +199,43 @@
         <div class="form-text">On by default. Untick this if you're importing historical/backlog entries that
           shouldn't trigger a fresh notification to donors.</div>
       </div>
-      <button type="submit" class="btn btn-gold">Upload &amp; Import</button>
+      <div class="d-flex gap-2 align-items-center flex-wrap">
+        <button type="submit" name="action" value="preview" class="btn btn-outline-secondary">Preview</button>
+        <button type="submit" class="btn btn-gold">Upload &amp; Import</button>
+      </div>
+      <div class="form-text mt-2">
+        <strong>Preview</strong> checks the whole file and shows what would happen &mdash; row by row,
+        with the total &mdash; without saving anything. Worth doing first: importing issues real receipt
+        numbers and can email donors, and neither is easy to take back.
+      </div>
     </form>
   </div>
 
   {% if bulk_results is not none %}
   <div class="card card-body shadow-sm p-4" style="max-width:900px">
-    <h6 class="mb-3">Results: {{ bulk_created }} created, {{ bulk_skipped }} skipped</h6>
+    {% if bulk_preview %}
+    <div class="alert alert-info">
+      <strong>Preview only &mdash; nothing has been saved.</strong>
+      {% if bulk_summary %}
+      <div class="mt-2">
+        <strong>{{ bulk_summary.count }}</strong> donation(s) would be created, totalling
+        <strong>Rs. {{ '{:,.2f}'.format(bulk_summary.total) }}</strong>{% if bulk_summary.first_date %},
+        dated {{ bulk_summary.first_date.strftime('%d %b %Y') }}
+        {%- if bulk_summary.last_date and bulk_summary.last_date != bulk_summary.first_date %}
+        to {{ bulk_summary.last_date.strftime('%d %b %Y') }}{% endif %}{% endif %}.
+        {% if bulk_summary.campaigns %}<br>Campaigns: {{ bulk_summary.campaigns | join(', ') }}.{% endif %}
+      </div>
+      <div class="mt-2 small">
+        Check the total against your cash book or bank statement. If it's right, choose the same file
+        again and press <strong>Upload &amp; Import</strong>.
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+    <h6 class="mb-3">
+      {% if bulk_preview %}Preview: {{ bulk_created }} would import, {{ bulk_skipped }} would be skipped
+      {% else %}Results: {{ bulk_created }} created, {{ bulk_skipped }} skipped{% endif %}
+    </h6>
     <div class="table-responsive">
     <table class="table table-sm bg-white">
       <thead><tr><th>Row</th><th>Name</th><th>Outcome</th></tr></thead>
@@ -215,14 +245,19 @@
           <td>{{ r.line }}</td>
           <td>{{ r.name }}</td>
           <td>
-            {% if r.ok %}
+            {% if r.ok and r.preview %}
+              <span class="badge bg-info text-dark">Would import</span>
+              Rs. {{ '{:,.2f}'.format(r.amount) }} &middot; {{ r.campaign }} &middot;
+              {{ r.donation_date.strftime('%d %b %Y') }} &middot; {{ r.payment_mode | replace('_', ' ') | title }}
+            {% elif r.ok %}
               <span class="badge bg-success">Imported</span> Receipt {{ r.receipt_number }}
               {% if r.pdf_ok is defined and not r.pdf_ok %}
               <span class="badge bg-warning text-dark">PDF failed</span> receipt number was issued, but the PDF
               couldn't be generated -- regenerate it from the donor's record.
               {% endif %}
             {% else %}
-              <span class="badge bg-danger">Skipped</span> {{ r.errors | join('; ') }}
+              <span class="badge bg-danger">{% if bulk_preview %}Would be skipped{% else %}Skipped{% endif %}</span>
+              {{ r.errors | join('; ') }}
             {% endif %}
           </td>
         </tr>

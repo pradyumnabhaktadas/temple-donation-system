@@ -32,7 +32,7 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="mb-3">
       <label class="form-label">CSV File</label>
-      <input type="file" class="form-control" name="csv_file" accept=".csv" required>
+      <input type="file" class="form-control" name="csv_file" accept=".csv,.xlsx" required>
       <div class="form-text">
         Required columns: <code>full_name</code>, <code>campaign_name</code>, <code>amount</code>,
         <code>donation_date</code> (YYYY-MM-DD). See the demo file for every optional column
@@ -45,13 +45,39 @@
         Generate a PDF receipt (this site's layout) for each imported row
       </label>
     </div>
-    <button type="submit" class="btn btn-gold">Upload &amp; Import</button>
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+      <button type="submit" name="action" value="preview" class="btn btn-outline-secondary">Preview</button>
+      <button type="submit" class="btn btn-gold">Upload &amp; Import</button>
+    </div>
+    <div class="form-text mt-2">
+      <strong>Preview</strong> checks the whole file and shows what would happen, without saving
+      anything. Choose the same file again and press Upload &amp; Import once it looks right.
+    </div>
   </form>
 </div>
 
 {% if results is not none %}
 <div class="card card-body shadow-sm p-4" style="max-width:900px">
-  <h6 class="mb-3">Results: {{ created }} imported, {{ skipped }} skipped</h6>
+  {% if preview %}
+  <div class="alert alert-info">
+    <strong>Preview only &mdash; nothing has been saved.</strong>
+    {% if summary %}
+    <div class="mt-2">
+      <strong>{{ summary.count }}</strong> donation(s) would be imported, totalling
+      <strong>Rs. {{ '{:,.2f}'.format(summary.total) }}</strong>{% if summary.first_date %},
+      dated {{ summary.first_date.strftime('%d %b %Y') }}
+      {%- if summary.last_date and summary.last_date != summary.first_date %}
+      to {{ summary.last_date.strftime('%d %b %Y') }}{% endif %}{% endif %}.
+      {% if summary.campaigns %}<br>Campaigns: {{ summary.campaigns | join(', ') }}.{% endif %}
+    </div>
+    <div class="mt-2 small">Check the total against the records you're migrating from before importing.</div>
+    {% endif %}
+  </div>
+  {% endif %}
+  <h6 class="mb-3">
+    {% if preview %}Preview: {{ created }} would import, {{ skipped }} would be skipped
+    {% else %}Results: {{ created }} imported, {{ skipped }} skipped{% endif %}
+  </h6>
   <div class="table-responsive">
   <table class="table table-sm bg-white">
     <thead><tr><th>Row</th><th>Name</th><th>Outcome</th></tr></thead>
@@ -62,10 +88,17 @@
         <td>{{ r.name }}</td>
         <td>
           {% if r.ok %}
+            {% if r.preview %}
+            <span class="badge bg-info text-dark">Would import</span>
+            Rs. {{ '{:,.2f}'.format(r.amount) }} &middot; {{ r.campaign }} &middot;
+            {{ r.donation_date.strftime('%d %b %Y') }}
+            {% else %}
             <span class="badge bg-success">Imported</span>
             {% if r.receipt_number %}Receipt {{ r.receipt_number }}{% else %}<span class="text-muted">no receipt number on file</span>{% endif %}
+            {% endif %}
           {% else %}
-            <span class="badge bg-danger">Skipped</span> {{ r.errors | join('; ') }}
+            <span class="badge bg-danger">{% if preview %}Would be skipped{% else %}Skipped{% endif %}</span>
+            {{ r.errors | join('; ') }}
           {% endif %}
         </td>
       </tr>

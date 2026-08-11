@@ -1524,28 +1524,153 @@ def _sanitize_donor_data(data):
     return out
 
 
-def _csv_reader_from_upload(file):
-    """Return a csv.DictReader over an uploaded file.
+class _UploadReadError(Exception):
+    """The upload couldn't be read at all. Carries a message meant for the
+    person who uploaded it, not a stack trace."""
 
-    Reads the whole upload into memory and decodes it, rather than wrapping
-    the raw stream in io.TextIOWrapper. Werkzeug hands uploads over as a
+
+class _UploadedTable:
+    """Rows from an uploaded .csv or .xlsx, in one shape.
+
+    Presents the same surface the importers already used from
+    csv.DictReader -- `.fieldnames` and iteration yielding dicts -- so
+    reading a spreadsheet is a change of source, not a change to four
+    import routines.
+    """
+
+    def __init__(self, fieldnames, rows):
+        self.fieldnames = fieldnames
+        self._rows = rows
+
+    def __iter__(self):
+        return iter(self._rows)
+
+
+def _excel_cell_to_text(value):
+    """One spreadsheet cell as the string an importer expects.
+
+    This is where the value of accepting .xlsx actually lands. In a CSV
+    everything has already been flattened to text by whatever wrote it,
+    and the damage is done: a date has become 01/08/2026 with no record of
+    which number was the month, 1100 has become "1,100", and a phone
+    number has become 9.87654e+09. In an .xlsx the cell still knows what
+    it is, so a date arrives as a date and is written back out in the
+    canonical form with nothing guessed.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, datetime.datetime):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, datetime.date):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, float):
+        # Excel stores every number as a float, so an amount of 1100 and a
+        # phone number both arrive as 1100.0 / 9876543210.0. Render whole
+        # numbers without the ".0" -- a phone number ending in ".0" fails
+        # validation, and str() on a large float would reach for
+        # scientific notation, which is exactly the mangling this is
+        # meant to avoid.
+        if value == int(value):
+            return str(int(value))
+        return repr(value)
+    return str(value).strip()
+
+
+def _table_from_upload(file):
+    """Rows from an uploaded .csv or .xlsx file.
+
+    CSV is read into memory and decoded rather than wrapping the raw
+    stream in io.TextIOWrapper. Werkzeug hands uploads over as a
     SpooledTemporaryFile, which does not implement readable() before
     Python 3.11 -- TextIOWrapper requires it, so the wrap raises
-    AttributeError and the route reports the file as unreadable. Production
-    runs 3.12 and never saw it; every CSV import was silently broken on
-    older local Pythons, which is where they get tried first.
+    AttributeError and the route reports the file as unreadable.
+    Production runs 3.12 and never saw it; every CSV import was silently
+    broken on older local Pythons, which is where they get tried first.
 
     Decoding with errors="replace" rather than strict: a single stray byte
     from a spreadsheet export shouldn't make a whole file unreadable, and
     the per-row validation will flag anything that actually matters.
 
-    These files are staff-uploaded imports of at most a few thousand rows,
-    so reading them into memory is not a concern.
+    These are staff-uploaded imports of at most a few thousand rows, so
+    reading them into memory is not a concern either way.
     """
-    text = file.read()
-    if isinstance(text, bytes):
-        text = text.decode("utf-8-sig", errors="replace")
-    return csv.DictReader(io.StringIO(text))
+    raw = file.read()
+    if not isinstance(raw, bytes):
+        raw = (raw or "").encode("utf-8")
+
+    # .xlsx is a zip archive, so it always starts "PK". Sniffing the
+    # content rather than trusting the extension: a file saved as
+    # "donations.csv" from Excel's xlsx format is a real mistake people
+    # make, and it produces binary gibberish through the CSV path.
+    looks_like_xlsx = raw[:2] == b"PK"
+    named_xlsx = (file.filename or "").lower().endswith((".xlsx", ".xlsm"))
+
+    if looks_like_xlsx or named_xlsx:
+        if not looks_like_xlsx:
+            raise _UploadReadError(
+                "That file is named like an Excel workbook but isn't one. Re-save it "
+                "from Excel as .xlsx, or export it as CSV."
+            )
+        return _table_from_xlsx(raw)
+
+    text = raw.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    return _UploadedTable(list(reader.fieldnames or []), list(reader))
+
+
+def _table_from_xlsx(raw):
+    """Rows from an .xlsx workbook: first sheet, first row as headers."""
+    try:
+        import openpyxl
+    except ImportError:
+        raise _UploadReadError(
+            "Excel (.xlsx) uploads need the openpyxl package, which isn't installed "
+            "here. Run `pip install -r requirements.txt`, or save the file as CSV "
+            "and upload that instead."
+        )
+
+    try:
+        workbook = openpyxl.load_workbook(
+            io.BytesIO(raw), data_only=True, read_only=True)
+    except Exception:
+        raise _UploadReadError(
+            "That Excel file couldn't be opened. If it's an older .xls, open it in "
+            "Excel and save as .xlsx, or export it as CSV."
+        )
+
+    try:
+        sheet = workbook.worksheets[0]
+        rows = sheet.iter_rows(values_only=True)
+
+        headers = None
+        for row in rows:
+            values = [_excel_cell_to_text(v) for v in row]
+            if any(v for v in values):  # skip blank leading rows
+                headers = [v.strip() for v in values]
+                break
+        if not headers:
+            raise _UploadReadError("That Excel file has no column headings in it.")
+
+        # Trailing blank columns are what Excel leaves behind after
+        # someone deletes a column, and an unnamed header would collide in
+        # the row dict.
+        keep = [i for i, h in enumerate(headers) if h]
+        headers = [headers[i] for i in keep]
+
+        parsed = []
+        for row in rows:
+            values = [_excel_cell_to_text(v) for v in row]
+            if not any(v for v in values):
+                continue  # blank row -- Excel files are full of them
+            parsed.append({
+                headers[n]: (values[i] if i < len(values) else "")
+                for n, i in enumerate(keep)
+            })
+        return _UploadedTable(headers, parsed)
+    finally:
+        workbook.close()
 
 
 def _normalize_camp_text(value):
@@ -2034,11 +2159,23 @@ def bulk_import_donations():
 
     send_notifications = request.form.get("send_notifications") == "yes"
 
+    # Dry run: validate the whole file and report what would happen,
+    # writing nothing. An import of a few hundred donations issues real
+    # receipt numbers from a shared sequence and can email donors -- it is
+    # not something to discover the shape of by running it.
+    preview = request.form.get("action") == "preview"
+
     try:
-        reader = _csv_reader_from_upload(file)
+        reader = _table_from_upload(file)
         fieldnames = {(f or "").strip() for f in (reader.fieldnames or [])}
+    except _UploadReadError as exc:
+        # Says what's actually wrong with the file. The generic message
+        # below used to cover this case too, which told someone whose
+        # Excel file needed re-saving to upload a CSV instead.
+        flash(str(exc))
+        return redirect(url_for("admin.manual_donation", tab="bulk"))
     except Exception:
-        flash("Couldn't read that file -- please upload a CSV (comma-separated) file.")
+        flash("Couldn't read that file -- please upload a CSV or Excel (.xlsx) file.")
         return redirect(url_for("admin.manual_donation", tab="bulk"))
 
     missing = [c for c in BULK_IMPORT_REQUIRED_COLUMNS if c not in fieldnames]
@@ -2135,8 +2272,27 @@ def bulk_import_donations():
         else:
             is_80g_requested = None
 
+        # _create_offline_donation enforces this, but preview has to know
+        # about it too: a preview that promises to import a row the real
+        # run will skip is worse than no preview.
+        reference_error = _payment_reference_error(
+            payment_mode, row.get("cheque_number"), row.get("bank_transaction_id"))
+        if reference_error:
+            row_errors.append(reference_error)
+
         if row_errors:
             results.append({"line": line_num, "name": full_name or "(blank)", "ok": False, "errors": row_errors})
+            continue
+
+        if preview:
+            # Everything above is validation and lookups -- nothing has
+            # been written. Record what *would* happen and move on.
+            results.append({
+                "line": line_num, "name": full_name, "ok": True, "preview": True,
+                "amount": amount, "campaign": campaign.name,
+                "donation_date": donation_date, "payment_mode": payment_mode,
+            })
+            created += 1
             continue
 
         # Same shared path manual_donation() uses -- donor find/create +
@@ -2176,12 +2332,19 @@ def bulk_import_donations():
         created += 1
 
     skipped = len(results) - created
-    bulk_msg = f"Bulk import finished: {created} donation(s) created, {skipped} skipped."
+    if preview:
+        bulk_msg = (
+            f"Preview only -- nothing has been saved. {created} row(s) would be "
+            f"imported, {skipped} skipped."
+        )
+    else:
+        bulk_msg = f"Bulk import finished: {created} donation(s) created, {skipped} skipped."
     bulk_msg += _ambiguous_date_warning(ambiguous_dates)
     flash(bulk_msg)
     return render_template(
         "admin/offline_donation.html", active_tab="bulk",
         bulk_results=results, bulk_created=created, bulk_skipped=skipped,
+        bulk_preview=preview, bulk_summary=_preview_summary(results),
         **_offline_donation_form_context(),
     )
 
@@ -2284,12 +2447,19 @@ def import_legacy_donations():
         return redirect(url_for("admin.import_legacy_donations"))
 
     generate_pdfs = request.form.get("generate_pdfs") == "yes"
+    preview = request.form.get("action") == "preview"  # dry run -- see bulk_import_donations
 
     try:
-        reader = _csv_reader_from_upload(file)
+        reader = _table_from_upload(file)
         fieldnames = {(f or "").strip() for f in (reader.fieldnames or [])}
+    except _UploadReadError as exc:
+        # Says what's actually wrong with the file. The generic message
+        # below used to cover this case too, which told someone whose
+        # Excel file needed re-saving to upload a CSV instead.
+        flash(str(exc))
+        return redirect(url_for("admin.import_legacy_donations"))
     except Exception:
-        flash("Couldn't read that file -- please upload a CSV (comma-separated) file.")
+        flash("Couldn't read that file -- please upload a CSV or Excel (.xlsx) file.")
         return redirect(url_for("admin.import_legacy_donations"))
 
     missing = [c for c in LEGACY_IMPORT_REQUIRED_COLUMNS if c not in fieldnames]
@@ -2376,6 +2546,15 @@ def import_legacy_donations():
             results.append({"line": line_num, "name": full_name or "(blank)", "ok": False, "errors": row_errors})
             continue
 
+        if preview:
+            results.append({
+                "line": line_num, "name": full_name, "ok": True, "preview": True,
+                "amount": amount, "campaign": campaign.name,
+                "donation_date": donation_date, "payment_mode": payment_mode,
+            })
+            created += 1
+            continue
+
         try:
             donor = find_or_create_donor(row)
 
@@ -2435,7 +2614,13 @@ def import_legacy_donations():
             })
 
     skipped = len(results) - created
-    flash_msg = f"Legacy import finished: {created} donation(s) imported, {skipped} skipped."
+    if preview:
+        flash_msg = (
+            f"Preview only -- nothing has been saved. {created} row(s) would be "
+            f"imported, {skipped} skipped."
+        )
+    else:
+        flash_msg = f"Legacy import finished: {created} donation(s) imported, {skipped} skipped."
     flash_msg += _ambiguous_date_warning(ambiguous_dates)
     if no_receipt_pdf_skipped:
         flash_msg += (
@@ -2444,7 +2629,9 @@ def import_legacy_donations():
             "donation's own page if one turns up, or leave it as an on-file donation with no receipt."
         )
     flash(flash_msg)
-    return render_template("admin/import_legacy_donations.html", results=results, created=created, skipped=skipped)
+    return render_template(
+        "admin/import_legacy_donations.html", results=results, created=created,
+        skipped=skipped, preview=preview, summary=_preview_summary(results))
 
 
 # Donor-only master-data import -- no donation records are created here.
@@ -2567,6 +2754,24 @@ def _parse_import_date(raw, label, row_errors, required=False, ambiguous=None):
     return None
 
 
+def _preview_summary(results):
+    """Totals for a dry run: what the file adds up to, so the numbers can
+    be checked against the cash book or the bank before anything is
+    written. A row count alone doesn't catch an amount column that landed
+    a factor of ten out."""
+    rows = [r for r in results if r.get("ok") and r.get("preview")]
+    if not rows:
+        return None
+    dates = [r["donation_date"] for r in rows if r.get("donation_date")]
+    return {
+        "count": len(rows),
+        "total": sum(r.get("amount") or 0 for r in rows),
+        "first_date": min(dates) if dates else None,
+        "last_date": max(dates) if dates else None,
+        "campaigns": sorted({r["campaign"] for r in rows if r.get("campaign")}),
+    }
+
+
 def _ambiguous_date_warning(ambiguous):
     """Message appended to an import's summary when day-first D/M/Y dates
     were guessed at. Silent when there's nothing to say."""
@@ -2638,10 +2843,16 @@ def import_donors():
         return redirect(url_for("admin.import_donors"))
 
     try:
-        reader = _csv_reader_from_upload(file)
+        reader = _table_from_upload(file)
         fieldnames = {(f or "").strip() for f in (reader.fieldnames or [])}
+    except _UploadReadError as exc:
+        # Says what's actually wrong with the file. The generic message
+        # below used to cover this case too, which told someone whose
+        # Excel file needed re-saving to upload a CSV instead.
+        flash(str(exc))
+        return redirect(url_for("admin.import_donors"))
     except Exception:
-        flash("Couldn't read that file -- please upload a CSV (comma-separated) file.")
+        flash("Couldn't read that file -- please upload a CSV or Excel (.xlsx) file.")
         return redirect(url_for("admin.import_donors"))
 
     missing = [c for c in DONOR_IMPORT_REQUIRED_COLUMNS if c not in fieldnames]
@@ -2654,6 +2865,7 @@ def import_donors():
 
     preachers_by_name = {p.name.strip().lower(): p for p in Preacher.query.all()}
 
+    preview = request.form.get("action") == "preview"  # dry run -- see bulk_import_donations
     results = []
     created = 0
     updated = 0
@@ -2716,6 +2928,20 @@ def import_donors():
                 existing = Donor.query.filter_by(email=email_v).first()
             was_new = existing is None
 
+            if preview:
+                # The matching above is read-only, so the preview can say
+                # which rows land on an existing donor -- the thing worth
+                # knowing before an import that overwrites donor details.
+                results.append({
+                    "line": line_num, "name": full_name, "ok": True, "preview": True,
+                    "was_new": was_new,
+                })
+                if was_new:
+                    created += 1
+                else:
+                    updated += 1
+                continue
+
             donor = find_or_create_donor(row)
 
             if donor_type_raw:
@@ -2759,9 +2985,16 @@ def import_donors():
             })
 
     skipped = len(results) - created - updated
-    flash(f"Donor import finished: {created} created, {updated} updated, {skipped} skipped.")
+    if preview:
+        flash(
+            f"Preview only -- nothing has been saved. {created} donor(s) would be "
+            f"created and {updated} updated, {skipped} skipped."
+        )
+    else:
+        flash(f"Donor import finished: {created} created, {updated} updated, {skipped} skipped.")
     return render_template(
-        "admin/import_donors.html", results=results, created=created, updated=updated, skipped=skipped
+        "admin/import_donors.html", results=results, created=created, updated=updated,
+        skipped=skipped, preview=preview
     )
 
 
@@ -4030,10 +4263,16 @@ def iyf_camp_bulk():
         return redirect(url_for("admin.iyf_camps", tab="bulk"))
 
     try:
-        reader = _csv_reader_from_upload(file)
+        reader = _table_from_upload(file)
         fieldnames = {(f or "").strip() for f in (reader.fieldnames or [])}
+    except _UploadReadError as exc:
+        # Says what's actually wrong with the file. The generic message
+        # below used to cover this case too, which told someone whose
+        # Excel file needed re-saving to upload a CSV instead.
+        flash(str(exc))
+        return redirect(url_for("admin.iyf_camps", tab="bulk"))
     except Exception:
-        flash("Couldn't read that file -- please upload a CSV (comma-separated) file.")
+        flash("Couldn't read that file -- please upload a CSV or Excel (.xlsx) file.")
         return redirect(url_for("admin.iyf_camps", tab="bulk"))
 
     missing = [c for c in IYF_CAMP_IMPORT_REQUIRED_COLUMNS if c not in fieldnames]
@@ -4046,6 +4285,8 @@ def iyf_camp_bulk():
 
     campaign = _iyf_camp_campaign()
     results, created = [], 0
+    preview = request.form.get("action") == "preview"  # dry run -- see bulk_import_donations
+    ambiguous_dates = []  # see _parse_import_date
 
     for line_num, row in enumerate(reader, start=2):
         row = {(k or "").strip(): (v or "").strip() for k, v in row.items() if k}
@@ -4090,11 +4331,33 @@ def iyf_camp_bulk():
         if payment_mode not in ("cash", "cheque", "bank_transfer", "online"):
             row_errors.append(f"payment_mode must be cash, cheque, bank_transfer, or online (got '{payment_mode}')")
 
-        donation_date = _parse_import_date(row.get("donation_date"), "donation_date", row_errors)
+        donation_date = _parse_import_date(
+            row.get("donation_date"), "donation_date", row_errors, ambiguous=ambiguous_dates)
+
+        # Mirrors the check inside _create_offline_donation so a preview
+        # can't promise a row the real run will refuse.
+        reference_error = _payment_reference_error(
+            payment_mode, None, row.get("bank_transaction_id"))
+        if reference_error:
+            row_errors.append(reference_error)
 
         fatal = [e for e in row_errors if "imported without it" not in e]
         if fatal:
             results.append({"line": line_num, "name": full_name or "(blank)", "ok": False, "errors": fatal})
+            continue
+
+        if preview:
+            results.append({
+                "line": line_num, "name": full_name, "ok": True, "preview": True,
+                "amount": amount, "campaign": campaign.name,
+                "donation_date": (
+                    datetime.datetime.combine(donation_date, datetime.time())
+                    if donation_date else None
+                ),
+                "payment_mode": payment_mode,
+                "warnings": [e for e in row_errors if "imported without it" in e],
+            })
+            created += 1
             continue
 
         result = _create_offline_donation(
@@ -4127,8 +4390,15 @@ def iyf_camp_bulk():
             "warnings": [e for e in row_errors if "imported without it" in e],
         })
 
-    log_activity("iyf_camp_bulk_import", details=f"Imported {created} camp donation(s) from CSV")
-    db.session.commit()
+    if preview:
+        flash(
+            f"Preview only -- nothing has been saved. {created} row(s) would be "
+            f"imported, {len(results) - created} skipped."
+            + _ambiguous_date_warning(ambiguous_dates)
+        )
+    else:
+        log_activity("iyf_camp_bulk_import", details=f"Imported {created} camp donation(s) from CSV")
+        db.session.commit()
 
     camps = Camp.query.order_by(Camp.is_active.desc(), Camp.name).all()
     batch_names = _known_batch_names()
@@ -4140,7 +4410,7 @@ def iyf_camp_bulk():
         today=datetime.date.today(),
         import_columns=IYF_CAMP_IMPORT_COLUMNS,
         required_columns=IYF_CAMP_IMPORT_REQUIRED_COLUMNS,
-        tab="bulk",
+        tab="bulk", bulk_preview=preview, bulk_summary=_preview_summary(results),
         bulk_results=results, bulk_created=created,
         bulk_skipped=len(results) - created,
     )

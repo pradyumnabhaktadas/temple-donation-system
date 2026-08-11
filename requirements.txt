@@ -18,3 +18,4 @@ sentry-sdk[flask]==2.13.0
 psycopg2-binary==2.9.9   # Postgres driver -- only used if DATABASE_URL points at Postgres (e.g. on Render)
 Flask-Limiter==3.8.0     # rate limiting on the public donation API
 Flask-Talisman==1.1.0    # security headers (HSTS/CSP/X-Frame-Options/etc.), production only
+openpyxl==3.1.5           # reads .xlsx uploads -- see _table_from_xlsx in admin.py
