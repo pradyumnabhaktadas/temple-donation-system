@@ -4082,6 +4082,7 @@ def iyf_camp_template():
 
 @bp.route("/iyf-camps/manage", methods=["GET", "POST"])
 @login_required
+@admin_role_required
 def camps():
     if request.method == "POST":
         name = _normalize_camp_text(request.form.get("name"))
@@ -4122,6 +4123,7 @@ def camps():
 
 @bp.route("/iyf-camps/manage/<int:camp_id>/edit", methods=["POST"])
 @login_required
+@admin_role_required
 def camp_edit(camp_id):
     camp = Camp.query.get_or_404(camp_id)
     new_name = _normalize_camp_text(request.form.get("name"))
@@ -4167,6 +4169,7 @@ def camp_edit(camp_id):
 
 @bp.route("/iyf-camps/manage/<int:camp_id>/delete", methods=["POST"])
 @login_required
+@admin_role_required
 def camp_delete(camp_id):
     camp = Camp.query.get_or_404(camp_id)
     name = camp.name
