@@ -1,0 +1,115 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}IYF Camp Collections{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h3 class="mb-0">🏕️ IYF Camp Collections</h3>
+  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.camps') }}">Manage Camps</a>
+</div>
+
+{% with active = 'collections' %}{% include "admin/_iyf_tabs.html" %}{% endwith %}
+
+{# Filters and exports share one form: the export buttons submit it, so a
+   download can never be of something other than what's on screen. #}
+<form class="row g-2 mb-4" id="camp-report-filters">
+  <div class="col-auto">
+    <select name="camp" class="form-select" onchange="this.form.submit()" aria-label="Camp">
+      <option value="">All camps</option>
+      {% for c in camp_names %}
+      <option value="{{ c }}" {% if camp == c %}selected{% endif %}>{{ c }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <input type="date" name="date_from" class="form-control" value="{{ date_from }}" aria-label="From date">
+  </div>
+  <div class="col-auto">
+    <input type="date" name="date_to" class="form-control" value="{{ date_to }}" aria-label="To date">
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-outline-secondary">Filter</button>
+    {% if camp or date_from or date_to %}
+    <a href="{{ url_for('admin.iyf_camp_collections') }}" class="btn btn-link btn-sm">Clear</a>
+    {% endif %}
+  </div>
+  <div class="col-auto ms-auto d-flex gap-2">
+    <button type="submit" class="btn btn-sm btn-outline-secondary"
+            formaction="{{ url_for('admin.iyf_camp_export', report='camp') }}">⬇ Camp-wise</button>
+    <button type="submit" class="btn btn-sm btn-outline-secondary"
+            formaction="{{ url_for('admin.iyf_camp_export', report='monthly') }}">⬇ Monthly</button>
+    <button type="submit" class="btn btn-sm btn-outline-secondary"
+            formaction="{{ url_for('admin.iyf_camp_export', report='detail') }}">⬇ Full detail</button>
+  </div>
+</form>
+
+<div class="row g-4">
+  <div class="col-lg-6">
+    <div class="card card-body shadow-sm h-100">
+      <h6 class="mb-3">Collected per camp</h6>
+      {% if camp_totals %}
+      <div class="table-responsive">
+        <table class="table table-sm mb-0 bg-white">
+          <thead><tr><th>Camp</th><th class="text-end">Donations</th><th class="text-end">Total</th></tr></thead>
+          <tbody>
+            {% for camp_name, count, total in camp_totals %}
+            <tr>
+              <td>{{ camp_name }}</td>
+              <td class="text-end">{{ count }}</td>
+              <td class="text-end">Rs. {{ total | inr }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr class="fw-bold">
+              <td>All camps</td>
+              <td class="text-end">{{ camp_totals | sum(attribute=1) }}</td>
+              <td class="text-end">Rs. {{ camp_totals | sum(attribute=2) | inr }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted mb-0">No camp collections recorded for this selection.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card card-body shadow-sm h-100">
+      <h6 class="mb-3">Collected by month{% if camp %} &mdash; {{ camp }}{% endif %}</h6>
+      {% if monthly_totals %}
+      <div class="table-responsive">
+        <table class="table table-sm mb-0 bg-white">
+          <thead><tr><th>Month</th><th class="text-end">Donations</th><th class="text-end">Total</th></tr></thead>
+          <tbody>
+            {% for label, count, total in monthly_totals %}
+            <tr>
+              <td>{{ label }}</td>
+              <td class="text-end">{{ count }}</td>
+              <td class="text-end">Rs. {{ total | inr }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr class="fw-bold">
+              <td>All months</td>
+              <td class="text-end">{{ monthly_totals | sum(attribute=1) }}</td>
+              <td class="text-end">Rs. {{ monthly_totals | sum(attribute=2) | inr }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted mb-0">Nothing to show for this selection.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<p class="text-muted small mt-3" style="max-width:900px">
+  Cancelled donations are excluded &mdash; that's money that came back out again, and these figures are
+  meant to reconcile against what a camp actually raised. Receipts for individual entries are in the
+  <a href="{{ url_for('admin.donations') }}">Donations Log</a>.
+</p>
+
+{% endblock %}

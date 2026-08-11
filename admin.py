@@ -10,7 +10,7 @@ from functools import wraps
 
 from flask import (
     Blueprint, render_template, request, redirect, url_for, flash,
-    current_app, Response,
+    current_app, Response, abort,
 )
 from flask_login import login_user, logout_user, login_required, current_user
 from sqlalchemy import func, extract
@@ -3827,21 +3827,6 @@ def iyf_camps():
     camps = Camp.query.order_by(Camp.is_active.desc(), Camp.name).all()
     batch_names = _known_batch_names()
 
-    # Per-camp totals: the "how much did each camp collect" question this
-    # feature exists to answer. Cancelled donations are excluded -- they're
-    # money that came back out again.
-    totals = (
-        db.session.query(
-            Donation.camp_name,
-            func.count(Donation.id),
-            func.coalesce(func.sum(Donation.amount), 0),
-        )
-        .filter(Donation.camp_name.isnot(None), Donation.status == "success")
-        .group_by(Donation.camp_name)
-        .order_by(func.coalesce(func.sum(Donation.amount), 0).desc())
-        .all()
-    )
-
     recent = (
         Donation.query.filter(Donation.camp_name.isnot(None))
         .order_by(Donation.id.desc())
@@ -3851,8 +3836,7 @@ def iyf_camps():
 
     return render_template(
         "admin/iyf_camps.html",
-        camps=camps, batch_names=batch_names,
-        camp_totals=totals, recent=recent,
+        camps=camps, batch_names=batch_names, recent=recent,
         today=datetime.date.today(),
         import_columns=IYF_CAMP_IMPORT_COLUMNS,
         required_columns=IYF_CAMP_IMPORT_REQUIRED_COLUMNS,
@@ -4046,20 +4030,9 @@ def iyf_camp_bulk():
 
     camps = Camp.query.order_by(Camp.is_active.desc(), Camp.name).all()
     batch_names = _known_batch_names()
-    totals = (
-        db.session.query(
-            Donation.camp_name, func.count(Donation.id),
-            func.coalesce(func.sum(Donation.amount), 0),
-        )
-        .filter(Donation.camp_name.isnot(None), Donation.status == "success")
-        .group_by(Donation.camp_name)
-        .order_by(func.coalesce(func.sum(Donation.amount), 0).desc())
-        .all()
-    )
     return render_template(
         "admin/iyf_camps.html",
         camps=camps, batch_names=batch_names,
-        camp_totals=totals,
         recent=Donation.query.filter(Donation.camp_name.isnot(None))
                              .order_by(Donation.id.desc()).limit(25).all(),
         today=datetime.date.today(),
@@ -4214,3 +4187,158 @@ def camp_delete(camp_id):
         msg += f" Its {kept} donation(s) and their totals are unaffected."
     flash(msg)
     return redirect(url_for("admin.camps"))
+
+
+# --- Camp collections report ----------------------------------------------
+
+def _camp_report_filters():
+    """Resolve the camp/date filters shared by the collections report and
+    its exports, so an export always matches what's on screen.
+
+    Returns (query, filters). Only successful donations count -- cancelled
+    ones are money that came back out again, and a report used to reconcile
+    what a camp actually raised must not include them.
+    """
+    query = Donation.query.filter(
+        Donation.camp_name.isnot(None), Donation.status == "success"
+    )
+
+    camp = (request.args.get("camp") or "").strip()
+    if camp:
+        query = query.filter(Donation.camp_name == camp)
+
+    date_from_raw = (request.args.get("date_from") or "").strip()
+    date_to_raw = (request.args.get("date_to") or "").strip()
+    try:
+        if date_from_raw:
+            query = query.filter(
+                Donation.donation_date >= datetime.datetime.strptime(date_from_raw, "%Y-%m-%d")
+            )
+        if date_to_raw:
+            # donation_date carries a time for online payments, so a plain
+            # <= against midnight would drop everything later that day.
+            query = query.filter(
+                Donation.donation_date
+                < datetime.datetime.strptime(date_to_raw, "%Y-%m-%d") + datetime.timedelta(days=1)
+            )
+    except ValueError:
+        date_from_raw = date_to_raw = ""
+
+    return query, {"camp": camp, "date_from": date_from_raw, "date_to": date_to_raw}
+
+
+def _camp_totals(query):
+    return (
+        query.with_entities(
+            Donation.camp_name,
+            func.count(Donation.id),
+            func.coalesce(func.sum(Donation.amount), 0),
+        )
+        .group_by(Donation.camp_name)
+        .order_by(func.coalesce(func.sum(Donation.amount), 0).desc())
+        .all()
+    )
+
+
+def _camp_monthly_totals(query):
+    """Month-by-month totals.
+
+    Grouped with extract() rather than strftime/date_trunc because those are
+    dialect-specific -- the tests run on SQLite and production is Postgres,
+    and a report that only works on one of them isn't a report.
+    """
+    rows = (
+        query.with_entities(
+            extract("year", Donation.donation_date).label("y"),
+            extract("month", Donation.donation_date).label("m"),
+            func.count(Donation.id),
+            func.coalesce(func.sum(Donation.amount), 0),
+        )
+        .group_by("y", "m")
+        .order_by("y", "m")
+        .all()
+    )
+    out = []
+    for y, m, count, total in rows:
+        label = datetime.date(int(y), int(m), 1).strftime("%b %Y")
+        out.append((label, int(count), float(total)))
+    return out
+
+
+@bp.route("/iyf-camps/collections")
+@login_required
+def iyf_camp_collections():
+    query, filters = _camp_report_filters()
+    return render_template(
+        "admin/iyf_camp_collections.html",
+        camp_totals=_camp_totals(query),
+        monthly_totals=_camp_monthly_totals(query),
+        camp_names=sorted(
+            c for (c,) in db.session.query(Donation.camp_name)
+            .filter(Donation.camp_name.isnot(None)).distinct().all() if c
+        ),
+        **filters,
+    )
+
+
+@bp.route("/iyf-camps/export/<report>.csv")
+@login_required
+def iyf_camp_export(report):
+    """CSV of the collections report, honouring the on-screen filters.
+
+    Three shapes, because they answer different questions: camp-wise for
+    "what did each camp raise", monthly for "what came in when", and detail
+    for the row-level data staff reconcile against a Zoho export or a
+    cash book.
+    """
+    query, filters = _camp_report_filters()
+    out = io.StringIO()
+    writer = csv.writer(out)
+
+    if report == "camp":
+        writer.writerow(["Camp", "Donations", "Total"])
+        for camp, count, total in _camp_totals(query):
+            writer.writerow([camp, count, float(total)])
+
+    elif report == "monthly":
+        writer.writerow(["Month", "Donations", "Total"])
+        for label, count, total in _camp_monthly_totals(query):
+            writer.writerow([label, count, total])
+
+    elif report == "detail":
+        writer.writerow([
+            "Date", "Receipt No", "Student", "Phone", "Email",
+            "Camp", "Batch", "Amount", "Payment Mode", "Reference", "Recorded By",
+        ])
+        for d in query.order_by(Donation.camp_name, Donation.donation_date).all():
+            donor = d.donor
+            writer.writerow([
+                d.donation_date.strftime("%d-%m-%Y") if d.donation_date else "",
+                d.receipt_number or "",
+                donor.full_name if donor else "",
+                (donor.phone or "") if donor else "",
+                (donor.email or "") if donor else "",
+                d.camp_name or "",
+                d.batch_name or "",
+                float(d.amount),
+                d.payment_mode or "",
+                d.reference_display or "",
+                d.recorded_by or "",
+            ])
+    else:
+        abort(404)
+
+    # Name the file after what's in it -- a folder of "export.csv" is
+    # useless a month later when someone asks which camp a figure came from.
+    parts = ["IYF_Camps", report]
+    if filters["camp"]:
+        parts.append(re.sub(r"[^A-Za-z0-9]+", "_", filters["camp"]).strip("_"))
+    if filters["date_from"] or filters["date_to"]:
+        parts.append(f"{filters['date_from'] or 'start'}_to_{filters['date_to'] or 'today'}")
+    filename = "-".join(parts) + ".csv"
+
+    return Response(
+        out.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment;filename={filename}"},
+    )

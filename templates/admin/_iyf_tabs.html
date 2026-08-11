@@ -1,0 +1,16 @@
+{# Tab bar shared by the IYF Camps pages, so the three stay in step. The
+   caller sets `active` to one of: collections, single, bulk. #}
+<ul class="nav nav-tabs mb-3">
+  <li class="nav-item">
+    <a class="nav-link {% if active == 'collections' %}active{% endif %}"
+       href="{{ url_for('admin.iyf_camp_collections') }}">Collections</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if active == 'single' %}active{% endif %}"
+       href="{{ url_for('admin.iyf_camps', tab='single') }}">Single Entry</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if active == 'bulk' %}active{% endif %}"
+       href="{{ url_for('admin.iyf_camps', tab='bulk') }}">Bulk Upload</a>
+  </li>
+</ul>

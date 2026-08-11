@@ -267,6 +267,9 @@ class TestBulkImport:
 
 class TestCampTotals:
     def test_totals_group_by_camp(self, app, client):
+        """Totals live on the Collections tab (see
+        test_iyf_camp_reports.py for the report's own coverage); this is
+        the end-to-end check that entries made here reach them."""
         login(client)
         _mk_camp(client, "Camp A")
         _mk_camp(client, "Camp B")
@@ -274,7 +277,7 @@ class TestCampTotals:
             client.post("/admin/iyf-camps/single", data={
                 "camp_name": camp, "full_name": "S", "amount": str(amt),
             }, follow_redirects=True)
-        html = client.get("/admin/iyf-camps").data.decode()
+        html = client.get("/admin/iyf-camps/collections").data.decode()
         assert "350" in html and "400" in html      # per-camp
         assert "750" in html                        # all camps
 

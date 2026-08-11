@@ -16,41 +16,7 @@
   Donations Log.
 </p>
 
-{% if camp_totals %}
-<div class="card card-body shadow-sm mb-4">
-  <h6 class="mb-3">Collected per camp</h6>
-  <div class="table-responsive">
-    <table class="table table-sm mb-0 bg-white">
-      <thead><tr><th>Camp</th><th class="text-end">Donations</th><th class="text-end">Total</th></tr></thead>
-      <tbody>
-        {% for camp, count, total in camp_totals %}
-        <tr>
-          <td>{{ camp }}</td>
-          <td class="text-end">{{ count }}</td>
-          <td class="text-end">Rs. {{ total | inr }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-      <tfoot>
-        <tr class="fw-bold">
-          <td>All camps</td>
-          <td class="text-end">{{ camp_totals | sum(attribute=1) }}</td>
-          <td class="text-end">Rs. {{ camp_totals | sum(attribute=2) | inr }}</td>
-        </tr>
-      </tfoot>
-    </table>
-  </div>
-</div>
-{% endif %}
-
-<ul class="nav nav-tabs mb-3">
-  <li class="nav-item">
-    <a class="nav-link {% if tab != 'bulk' %}active{% endif %}" href="{{ url_for('admin.iyf_camps', tab='single') }}">Single Entry</a>
-  </li>
-  <li class="nav-item">
-    <a class="nav-link {% if tab == 'bulk' %}active{% endif %}" href="{{ url_for('admin.iyf_camps', tab='bulk') }}">Bulk Upload</a>
-  </li>
-</ul>
+{% with active = 'bulk' if tab == 'bulk' else 'single' %}{% include "admin/_iyf_tabs.html" %}{% endwith %}
 
 {# Batch stays free text -- batches are per-camp and far too numerous to
    maintain as records -- so this offers the ones already in use to keep
