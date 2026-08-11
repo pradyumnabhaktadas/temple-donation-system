@@ -32,7 +32,7 @@ import sys
 from app import create_app
 from extensions import db
 from models import (
-    Donation, Donor, Campaign, BaceProperty, Festival, SevaType,
+    Camp, Donation, Donor, Campaign, BaceProperty, Festival, SevaType,
     LiveToGivePurpose, Preacher, ReceiptCounter, DonorLoginOTP,
     AdminActivityLog, AdminUser,
 )
@@ -43,6 +43,13 @@ CONFIRMATION_PHRASE = "DELETE ALL DATA"
 # constraints never block a delete (Donation references donors/campaigns/
 # bace_properties/festivals/seva_types/live_to_give_purposes; Donor
 # references preachers).
+#
+# Every model in models.py must appear here. tests/test_reset_data.py
+# enforces that by comparing this list against SQLAlchemy's own registry --
+# Camp was added to the app and missed here, so a reset silently left test
+# camps behind and didn't even mention them in the summary it printed
+# before asking for confirmation. A list maintained by hand needs something
+# checking it.
 MODELS_IN_DELETE_ORDER = [
     Donation,
     DonorLoginOTP,
@@ -55,6 +62,7 @@ MODELS_IN_DELETE_ORDER = [
     SevaType,
     LiveToGivePurpose,
     Preacher,
+    Camp,
     AdminUser,
 ]
 
