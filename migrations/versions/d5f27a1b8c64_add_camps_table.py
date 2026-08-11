@@ -30,6 +30,27 @@ depends_on = None
 
 
 def upgrade():
+    # Skip if the table is already there.
+    #
+    # create_app() calls db.create_all(), and Alembic imports the app to
+    # run this -- so simply loading the app for `flask db upgrade` creates
+    # every table missing from the database, including this one, moments
+    # before this migration tries to create it again. That produced a
+    # DuplicateTable failure on the first deploy of this feature and took
+    # the whole pre-deploy step down with it.
+    #
+    # Earlier migrations never hit this because they added *columns*, and
+    # create_all() only ever creates missing tables -- it never alters an
+    # existing one. Only a new-table migration collides.
+    #
+    # app.py no longer calls create_all() in production, which removes the
+    # cause. This check stays anyway: it makes the migration safe to run
+    # against a database where the table already exists by either route,
+    # which is exactly the state the failed deploy left behind.
+    bind = op.get_bind()
+    if sa.inspect(bind).has_table('camps'):
+        return
+
     op.create_table(
         'camps',
         sa.Column('id', sa.Integer(), nullable=False),
@@ -44,4 +65,6 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_table('camps')
+    bind = op.get_bind()
+    if sa.inspect(bind).has_table('camps'):
+        op.drop_table('camps')

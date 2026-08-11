@@ -264,8 +264,26 @@ def create_app(test_config=None):
     app.register_blueprint(admin_bp)
     app.register_blueprint(donor_bp)
 
-    with app.app_context():
-        db.create_all()
+    # Create any missing tables straight from the models -- convenient for
+    # local development and the test suite, where there's no reason to run
+    # migrations to get a working database.
+    #
+    # Deliberately NOT in production, where Alembic owns the schema.
+    # Running both means create_all() silently creates tables Alembic
+    # doesn't know it created, and the next new-table migration then fails
+    # with DuplicateTable -- which is precisely what happened deploying the
+    # camps table. Worse, because Alembic loads this very app to run
+    # `flask db upgrade`, create_all() would fire *during* the upgrade and
+    # create the table the migration was about to create, so the migration
+    # could never succeed. It never bit before only because every earlier
+    # migration added columns, and create_all() never alters an existing
+    # table.
+    #
+    # Production schema changes go through `flask db upgrade` (wired up as
+    # Render's pre-deploy command -- see README "Database migrations").
+    if not app.config.get("IS_PRODUCTION") or app.config.get("TESTING"):
+        with app.app_context():
+            db.create_all()
 
     return app
 
