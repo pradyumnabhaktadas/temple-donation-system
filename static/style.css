@@ -544,3 +544,60 @@ body {
   .photo-gallery-grid{grid-template-columns:repeat(2,1fr)}.photo-gallery-grid.cols-5{grid-template-columns:repeat(2,1fr)}.ways-to-give-grid{grid-template-columns:1fr}
   .footer-grid { grid-template-columns:1fr; gap:1.7rem; padding:2.2rem 1rem 1.6rem; }
 }
+
+/* Hero on phones -- text beside the photo doesn't survive a narrow screen.
+   ---------------------------------------------------------------------
+   The desktop hero works by putting the copy over the open, blurred left
+   third of the photo while the deity's face sits out on the right, kept
+   clear by a near-horizontal (100deg) gradient.
+
+   None of that holds once the viewport is narrow. `cover` scales a
+   landscape photo to fill the height of a tall container, so the width
+   overflows and the visible slice is cropped horizontally around the
+   background-position -- the deity's face is pulled in from the right and
+   ends up roughly mid-container, directly under the heading. And the
+   vertical position can't push it out of the way: with the height exactly
+   filled there is no vertical overflow left to shift.
+
+   So rather than hunting for a crop that keeps text and face apart at
+   every phone width -- which is guesswork, and breaks again on the next
+   handset size -- the two are separated outright. The copy gets a solid
+   dark panel, the photo becomes a band beneath it. Overlap is then not
+   something that can happen at any width, and the deity is fully visible
+   instead of half-hidden behind a gradient. */
+@media (max-width: 767.98px) {
+  .donation-hero {
+    display:block;
+    min-height:0;
+    padding:2.1rem 1.35rem 0;
+    align-items:stretch;
+    /* Deep temple-night panel, matching the gradient the copy sat on
+       before -- the text keeps the same contrast it always had. */
+    background:linear-gradient(158deg,#0a1020 0%,#101c34 52%,#16263f 100%);
+  }
+  /* Full-bleed inside the hero's own padding, so the photo runs edge to
+     edge of the rounded card rather than sitting in an inset box. */
+  .donation-hero:after {
+    content:"";
+    display:block;
+    height:208px;
+    margin:1.5rem -1.35rem 0;
+    background:url('images/deities/krishna-flute-closeup.jpg') 68% 30%/cover no-repeat;
+  }
+  /* 68% horizontally keeps the face in frame in that band: it's in the
+     right half of the photo, and a band this shape crops mainly from the
+     sides. */
+
+  .donation-hero-copy { max-width:none; }
+  .donation-hero h1 { font-size:2.6rem; max-width:none; }
+  .hero-lede { font-size:.95rem; max-width:none; margin:.95rem 0 1.15rem; }
+  .hero-trust-row { gap:.6rem .95rem; font-size:.7rem; }
+  /* The decorative lotus was anchored to the hero's bottom-right, which is
+     now where the photo band is -- it would sit on top of the deity. */
+  .hero-lotus { display:none; }
+
+  /* The donation card deliberately tucks up into the hero on desktop
+     (-1.6rem). That worked when the hero ended in gradient; it would now
+     crop the bottom of the deity's photo. */
+  .donation-layout { margin-top:1.2rem; }
+}
