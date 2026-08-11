@@ -368,6 +368,24 @@ class Donation(db.Model):
     receipt_pdf = db.Column(db.LargeBinary)
 
     donation_date = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    # IYF camp collections. Plain text rather than a Camp table by explicit
+    # choice -- camps are short-lived and the data arrives from a Zoho
+    # export that already carries the names as strings, so a managed list
+    # would mean maintaining records nobody asked for.
+    #
+    # The trade-off to know about: these group reports by exact string, so
+    # "Utkarsha 2026" and "Utkarsha-2026" are two different camps in every
+    # total. _normalize_camp_text() below trims and collapses whitespace to
+    # take the easy half of that off the table, and the entry form offers
+    # the names already in use as a picker, but a genuine misspelling still
+    # splits a camp's total until the rows are edited.
+    #
+    # Indexed because the whole point of storing them is grouping and
+    # filtering by camp.
+    camp_name = db.Column(db.String(150), index=True)
+    batch_name = db.Column(db.String(150), index=True)
+
     remarks = db.Column(db.String(300))
     recorded_by = db.Column(db.String(100))  # "online" or admin username for manual entries
 

@@ -1,0 +1,229 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}IYF Camps{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h3 class="mb-0">🏕️ IYF Camp Collections</h3>
+</div>
+
+<p class="text-muted small" style="max-width:900px">
+  Donations collected from students at IYF camps. These are recorded against the
+  <strong>IYF Camps</strong> campaign and get a real receipt number like any other donation, so they
+  appear in the Donations Log and the 10BD exports. They are <strong>not</strong> 80G-eligible, and
+  nothing is emailed or WhatsApped to students &mdash; most of this data is entered well after the
+  money was collected, so receipts are generated for your records and can be downloaded from the
+  Donations Log.
+</p>
+
+{% if camp_totals %}
+<div class="card card-body shadow-sm mb-4">
+  <h6 class="mb-3">Collected per camp</h6>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0 bg-white">
+      <thead><tr><th>Camp</th><th class="text-end">Donations</th><th class="text-end">Total</th></tr></thead>
+      <tbody>
+        {% for camp, count, total in camp_totals %}
+        <tr>
+          <td>{{ camp }}</td>
+          <td class="text-end">{{ count }}</td>
+          <td class="text-end">Rs. {{ total | inr }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="fw-bold">
+          <td>All camps</td>
+          <td class="text-end">{{ camp_totals | sum(attribute=1) }}</td>
+          <td class="text-end">Rs. {{ camp_totals | sum(attribute=2) | inr }}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<ul class="nav nav-tabs mb-3">
+  <li class="nav-item">
+    <a class="nav-link {% if tab != 'bulk' %}active{% endif %}" href="{{ url_for('admin.iyf_camps', tab='single') }}">Single Entry</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if tab == 'bulk' %}active{% endif %}" href="{{ url_for('admin.iyf_camps', tab='bulk') }}">Bulk Upload</a>
+  </li>
+</ul>
+
+{# Camp and batch names are plain text, so the same camp typed two ways
+   becomes two camps in the totals above. These datalists offer whatever is
+   already in use, which makes picking the existing spelling the path of
+   least resistance without preventing a genuinely new camp being typed. #}
+<datalist id="camp-names">
+  {% for c in camp_names %}<option value="{{ c }}">{% endfor %}
+</datalist>
+<datalist id="batch-names">
+  {% for b in batch_names %}<option value="{{ b }}">{% endfor %}
+</datalist>
+
+{% if tab != 'bulk' %}
+<div class="card card-body shadow-sm p-4" style="max-width:900px">
+  <form method="post" action="{{ url_for('admin.iyf_camp_single') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Camp Name <span class="text-danger">*</span></label>
+        <input type="text" class="form-control" name="camp_name" list="camp-names" required
+               placeholder="e.g. Utkarsha 2026">
+        <div class="form-text">Pick an existing camp from the list where possible &mdash; a new spelling starts a separate total.</div>
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Batch</label>
+        <input type="text" class="form-control" name="batch_name" list="batch-names" placeholder="e.g. Batch A">
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Student Name <span class="text-danger">*</span></label>
+        <input type="text" class="form-control" name="full_name" required>
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Amount (Rs.) <span class="text-danger">*</span></label>
+        <input type="number" step="0.01" min="1" class="form-control" name="amount" required>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Phone <span class="text-muted">(optional)</span></label>
+        <input type="tel" class="form-control" name="phone">
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Email <span class="text-muted">(optional)</span></label>
+        <input type="email" class="form-control" name="email">
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Payment Mode</label>
+        <select class="form-select" name="payment_mode" id="camp_payment_mode">
+          <option value="cash">Cash</option>
+          <option value="online">Online</option>
+          <option value="bank_transfer">Bank Transfer</option>
+          <option value="cheque">Cheque</option>
+        </select>
+      </div>
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Date</label>
+        <input type="date" class="form-control" name="donation_date" value="{{ today.isoformat() }}">
+      </div>
+      <div class="col-md-4 mb-3" id="camp-txn-field" style="display:none;">
+        <label class="form-label">Transaction / Reference ID</label>
+        <input type="text" class="form-control" name="bank_transaction_id" id="camp_bank_transaction_id">
+      </div>
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Remarks <span class="text-muted">(optional)</span></label>
+      <input type="text" class="form-control" name="remarks" maxlength="300">
+    </div>
+
+    <button type="submit" class="btn btn-gold">Record Camp Donation</button>
+  </form>
+</div>
+{% else %}
+<div class="card card-body shadow-sm p-4 mb-4" style="max-width:900px">
+  <form method="post" action="{{ url_for('admin.iyf_camp_bulk') }}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3">
+      <label class="form-label">CSV file</label>
+      <input type="file" class="form-control" name="csv_file" accept=".csv" required>
+      <div class="form-text">
+        Required columns: {% for c in required_columns %}<code>{{ c }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.
+        Optional: {% for c in import_columns if c not in required_columns %}<code>{{ c }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.
+        Dates as YYYY-MM-DD.
+      </div>
+    </div>
+    <div class="d-flex gap-2 align-items-center">
+      <button type="submit" class="btn btn-gold">Upload &amp; Import</button>
+      <a class="btn btn-outline-secondary" href="{{ url_for('admin.iyf_camp_template') }}">Download template CSV</a>
+    </div>
+    <p class="form-text mb-0 mt-2">
+      Each row creates a donation with its own receipt number. A row with an unusable phone number is
+      still imported &mdash; the phone is dropped and flagged, rather than losing the donation over it.
+      Students are never notified.
+    </p>
+  </form>
+</div>
+
+{% if bulk_results is defined and bulk_results %}
+<div class="card card-body shadow-sm p-4" style="max-width:900px">
+  <h6 class="mb-3">Results: {{ bulk_created }} imported, {{ bulk_skipped }} skipped</h6>
+  <div class="table-responsive">
+    <table class="table table-sm bg-white">
+      <thead><tr><th>Row</th><th>Name</th><th>Outcome</th></tr></thead>
+      <tbody>
+        {% for r in bulk_results %}
+        <tr>
+          <td>{{ r.line }}</td>
+          <td>{{ r.name }}</td>
+          <td>
+            {% if r.ok %}
+              <span class="text-success">Imported</span>
+              <span class="text-muted small">&mdash; receipt {{ r.receipt_number }}</span>
+              {% for w in r.warnings %}<div class="text-warning small">{{ w }}</div>{% endfor %}
+            {% else %}
+              {% for e in r.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endif %}
+
+{% if recent %}
+<div class="card card-body shadow-sm mt-4">
+  <h6 class="mb-3">Most recent camp entries</h6>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0 bg-white">
+      <thead><tr><th>Date</th><th>Student</th><th>Camp</th><th>Batch</th><th class="text-end">Amount</th><th>Mode</th><th>Receipt</th></tr></thead>
+      <tbody>
+        {% for d in recent %}
+        <tr>
+          <td>{{ (d.donation_date | to_ist).strftime('%d %b %Y') if d.donation_date else '-' }}</td>
+          <td>{% if d.donor %}<a href="{{ url_for('admin.donor_detail', donor_id=d.donor.id) }}">{{ d.donor.full_name }}</a>{% else %}-{% endif %}</td>
+          <td>{{ d.camp_name or '-' }}</td>
+          <td>{{ d.batch_name or '-' }}</td>
+          <td class="text-end">Rs. {{ d.amount | inr }}</td>
+          <td class="small text-muted">{{ (d.payment_mode or '').replace('_',' ').title() }}</td>
+          <td class="small">
+            {% if d.receipt_number %}
+            <a href="{{ url_for('public.download_receipt', donation_id=d.id, t=receipt_token(d.id)) }}">{{ d.receipt_number }}</a>
+            {% else %}-{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<script>
+(function () {
+  // The reference field only means anything for a payment that has one.
+  var mode = document.getElementById('camp_payment_mode');
+  var field = document.getElementById('camp-txn-field');
+  if (!mode || !field) return;
+  function sync() {
+    field.style.display = (mode.value === 'cash') ? 'none' : '';
+    if (mode.value === 'cash') document.getElementById('camp_bank_transaction_id').value = '';
+  }
+  mode.addEventListener('change', sync);
+  sync();
+})();
+</script>
+{% endblock %}

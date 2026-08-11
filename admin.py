@@ -1523,11 +1523,69 @@ def _sanitize_donor_data(data):
     return out
 
 
+def _normalize_camp_text(value):
+    """Trim and collapse internal whitespace on a camp or batch name.
+
+    Camp/batch are plain text and reports group by the exact string, so
+    "Utkarsha  2026 " and "Utkarsha 2026" would otherwise be two separate
+    camps in every total. This can only fix whitespace -- a real
+    misspelling still splits the total until the rows are edited -- but
+    whitespace is far and away the most common way a pasted or exported
+    value differs from a typed one, and it costs nothing to rule out.
+
+    Case is deliberately left alone: camp names carry meaningful
+    capitalisation ("BACE", "IYF") that title-casing would mangle.
+    """
+    if not value:
+        return None
+    return " ".join(str(value).split())[:150] or None
+
+
+IYF_CAMP_CAMPAIGN_NAME = "IYF Camps"
+
+
+def _iyf_camp_campaign():
+    """The campaign every camp collection is recorded against.
+
+    Donation.campaign_id is required, and camp money is its own stream --
+    filing it under an existing campaign would corrupt that campaign's
+    totals. Created on first use rather than needing a setup step, and
+    is_80g=False per the rule that camp collections aren't 80G-eligible.
+    """
+    campaign = Campaign.query.filter_by(name=IYF_CAMP_CAMPAIGN_NAME).first()
+    if campaign is None:
+        campaign = Campaign(
+            name=IYF_CAMP_CAMPAIGN_NAME,
+            description="Donations collected from students at IYF camps.",
+            is_80g=False,
+        )
+        db.session.add(campaign)
+        db.session.commit()
+    return campaign
+
+
+def _known_camp_names():
+    """Camp and batch names already in use, for the entry form's pickers.
+
+    The cheapest available defence against the typo-splitting that plain
+    text invites: staff pick an existing name instead of retyping it.
+    """
+    camps = [
+        c for (c,) in db.session.query(Donation.camp_name)
+        .filter(Donation.camp_name.isnot(None)).distinct().all() if c
+    ]
+    batches = [
+        b for (b,) in db.session.query(Donation.batch_name)
+        .filter(Donation.batch_name.isnot(None)).distinct().all() if b
+    ]
+    return sorted(camps), sorted(batches)
+
+
 def _create_offline_donation(
     *, donor_data, campaign, amount, payment_mode, donation_date, recorded_by,
     bace_property_id=None, festival_id=None, seva_type_id=None, live_to_give_purpose_id=None,
     is_80g_requested=None, cheque_number=None, cheque_bank_name=None, bank_transaction_id=None,
-    remarks=None, send_notifications=True,
+    remarks=None, send_notifications=True, camp_name=None, batch_name=None,
 ):
     """The one shared path every offline donation -- single-entry form or
     a bulk CSV row -- goes through once its own field-by-field validation
@@ -1576,6 +1634,8 @@ def _create_offline_donation(
             cheque_number=(cheque_number or "").strip()[:50] or None,
             cheque_bank_name=(cheque_bank_name or "").strip()[:150] or None,
             bank_transaction_id=(bank_transaction_id or "").strip()[:100] or None,
+            camp_name=_normalize_camp_text(camp_name),
+            batch_name=_normalize_camp_text(batch_name),
             remarks=(remarks or "").strip()[:300] or None,
             recorded_by=recorded_by,
         )
@@ -3529,6 +3589,7 @@ def export_donations():
         "Receipt No", "Date", "Status", "Donor Name", "Phone", "WhatsApp", "Email", "PAN",
         "Address", "City", "State", "Pincode",
         "Amount", "Payment Mode", "Reference", "Order ID", "Campaign", "Specific Purpose", "80G Eligible",
+        "Camp", "Batch",
         "Recorded By", "Remarks", "Cancelled At", "Cancelled By", "Cancellation Reason",
     ])
     for d in rows:
@@ -3564,6 +3625,8 @@ def export_donations():
             d.campaign.name,
             specific_purpose,
             "Yes" if d.effective_is_80g else "No",
+            d.camp_name or "",
+            d.batch_name or "",
             d.recorded_by or "",
             d.remarks or "",
             to_ist(d.cancelled_at).strftime("%d-%m-%Y %H:%M") if d.cancelled_at else "",
@@ -3690,3 +3753,295 @@ def lapsed_donors():
             lapsed.append(donor)
 
     return render_template("admin/lapsed_donors.html", donors=lapsed)
+
+
+# ---------------------------------------------------------------------------
+# IYF Camps
+# ---------------------------------------------------------------------------
+# Donations collected from students at IYF camps. Structurally these are
+# ordinary offline donations -- they go through the same
+# _create_offline_donation() path, get real receipt numbers from the same
+# counter, and show up in the Donations Log like everything else. The only
+# thing that makes them camp donations is the camp_name/batch_name pair on
+# the row, which is what the per-camp totals group by.
+#
+# Two deliberate differences from the Offline Donation tab:
+#   - They're always filed against the "IYF Camps" campaign, created on
+#     first use. Camp money is its own stream; putting it under an existing
+#     campaign would corrupt that campaign's totals.
+#   - Nothing is emailed or WhatsApped, ever. Most of this data arrives as a
+#     Zoho export of payments students made weeks earlier, and messaging
+#     hundreds of them retrospectively would be worse than useless. Receipts
+#     are still generated and downloadable from the admin side.
+
+IYF_CAMP_IMPORT_REQUIRED_COLUMNS = ["full_name", "amount", "camp_name"]
+IYF_CAMP_IMPORT_COLUMNS = [
+    "full_name", "amount", "camp_name", "batch_name", "donation_date",
+    "payment_mode", "phone", "email", "bank_transaction_id", "remarks",
+]
+
+
+@bp.route("/iyf-camps")
+@login_required
+def iyf_camps():
+    camp_names, batch_names = _known_camp_names()
+
+    # Per-camp totals: the "how much did each camp collect" question this
+    # feature exists to answer. Cancelled donations are excluded -- they're
+    # money that came back out again.
+    totals = (
+        db.session.query(
+            Donation.camp_name,
+            func.count(Donation.id),
+            func.coalesce(func.sum(Donation.amount), 0),
+        )
+        .filter(Donation.camp_name.isnot(None), Donation.status == "success")
+        .group_by(Donation.camp_name)
+        .order_by(func.coalesce(func.sum(Donation.amount), 0).desc())
+        .all()
+    )
+
+    recent = (
+        Donation.query.filter(Donation.camp_name.isnot(None))
+        .order_by(Donation.id.desc())
+        .limit(25)
+        .all()
+    )
+
+    return render_template(
+        "admin/iyf_camps.html",
+        camp_names=camp_names, batch_names=batch_names,
+        camp_totals=totals, recent=recent,
+        today=datetime.date.today(),
+        import_columns=IYF_CAMP_IMPORT_COLUMNS,
+        required_columns=IYF_CAMP_IMPORT_REQUIRED_COLUMNS,
+        tab=request.args.get("tab", "single"),
+    )
+
+
+@bp.route("/iyf-camps/single", methods=["POST"])
+@login_required
+def iyf_camp_single():
+    form = request.form
+
+    camp_name = _normalize_camp_text(form.get("camp_name"))
+    if not camp_name:
+        flash("Camp Name is required.")
+        return redirect(url_for("admin.iyf_camps"))
+
+    try:
+        amount = float(form.get("amount") or 0)
+    except ValueError:
+        amount = 0
+    if amount <= 0:
+        flash("Enter a valid amount.")
+        return redirect(url_for("admin.iyf_camps"))
+
+    if not (form.get("full_name") or "").strip():
+        flash("Student name is required.")
+        return redirect(url_for("admin.iyf_camps"))
+
+    # Phone is optional here (unlike the public forms): a camp register
+    # often has only a name against a cash payment. But a value that *is*
+    # given still has to be a real number, or donor dedup starts matching
+    # unrelated students to each other on a mistyped phone.
+    phone = (form.get("phone") or "").strip()
+    if phone and not is_valid_phone(phone):
+        flash("That phone number doesn't look right. Please enter a 10-digit mobile number, or leave it blank.")
+        return redirect(url_for("admin.iyf_camps"))
+
+    donation_date_str = form.get("donation_date")
+    try:
+        donation_date = (
+            datetime.datetime.strptime(donation_date_str, "%Y-%m-%d")
+            if donation_date_str else datetime.datetime.utcnow()
+        )
+    except ValueError:
+        flash("That donation date doesn't look right.")
+        return redirect(url_for("admin.iyf_camps"))
+
+    result = _create_offline_donation(
+        donor_data=form,
+        campaign=_iyf_camp_campaign(),
+        amount=amount,
+        payment_mode=form.get("payment_mode", "cash"),
+        donation_date=donation_date,
+        recorded_by=current_user.username,
+        bank_transaction_id=form.get("bank_transaction_id"),
+        remarks=form.get("remarks"),
+        camp_name=camp_name,
+        batch_name=_normalize_camp_text(form.get("batch_name")),
+        # See the module comment above -- camp entries never notify.
+        send_notifications=False,
+    )
+
+    if not result["ok"]:
+        flash(result["error"])
+        return redirect(url_for("admin.iyf_camps"))
+
+    log_activity(
+        "iyf_camp_donation", target_type="donation", target_id=result["donation"].id,
+        details=f"Camp '{camp_name}' donation Rs. {amount:.2f}, receipt {result['receipt_number']}",
+    )
+    db.session.commit()
+
+    msg = f"Recorded Rs. {amount:.0f} for {camp_name} -- receipt {result['receipt_number']}."
+    if not result["pdf_ok"]:
+        msg += " (The receipt PDF couldn't be generated; it can be downloaded again later.)"
+    flash(msg)
+    return redirect(url_for("admin.iyf_camps"))
+
+
+@bp.route("/iyf-camps/bulk", methods=["POST"])
+@login_required
+def iyf_camp_bulk():
+    file = request.files.get("csv_file")
+    if not file or not file.filename:
+        flash("Please choose a CSV file to upload.")
+        return redirect(url_for("admin.iyf_camps", tab="bulk"))
+
+    try:
+        stream = io.TextIOWrapper(file.stream, encoding="utf-8-sig")
+        reader = csv.DictReader(stream)
+        fieldnames = {(f or "").strip() for f in (reader.fieldnames or [])}
+    except Exception:
+        flash("Couldn't read that file -- please upload a CSV (comma-separated) file.")
+        return redirect(url_for("admin.iyf_camps", tab="bulk"))
+
+    missing = [c for c in IYF_CAMP_IMPORT_REQUIRED_COLUMNS if c not in fieldnames]
+    if missing:
+        flash(
+            "That CSV is missing required column(s): " + ", ".join(missing)
+            + ". Download the template below for the full column list."
+        )
+        return redirect(url_for("admin.iyf_camps", tab="bulk"))
+
+    campaign = _iyf_camp_campaign()
+    results, created = [], 0
+
+    for line_num, row in enumerate(reader, start=2):
+        row = {(k or "").strip(): (v or "").strip() for k, v in row.items() if k}
+        row_errors = []
+
+        full_name = row.get("full_name", "")
+        if not full_name:
+            row_errors.append("full_name is required")
+
+        camp_name = _normalize_camp_text(row.get("camp_name"))
+        if not camp_name:
+            row_errors.append("camp_name is required")
+
+        try:
+            amount = float(row.get("amount") or 0)
+            if amount <= 0:
+                row_errors.append("amount must be greater than 0")
+        except ValueError:
+            amount = 0
+            row_errors.append(f"invalid amount '{row.get('amount')}'")
+
+        phone = row.get("phone", "")
+        if phone and not is_valid_phone(phone):
+            # Not fatal on purpose: a Zoho export can carry a phone mangled
+            # into scientific notation by a spreadsheet round-trip, and
+            # losing the whole donation over an unusable phone number would
+            # be the wrong trade. Dropped with a note instead, so the money
+            # is still recorded against the right student and camp.
+            row_errors.append(f"phone '{phone}' isn't a valid 10-digit mobile -- imported without it")
+            phone = ""
+
+        payment_mode = (row.get("payment_mode") or "cash").lower()
+        if payment_mode not in ("cash", "cheque", "bank_transfer", "online"):
+            row_errors.append(f"payment_mode must be cash, cheque, bank_transfer, or online (got '{payment_mode}')")
+
+        donation_date = _parse_import_date(row.get("donation_date"), "donation_date", row_errors)
+
+        fatal = [e for e in row_errors if "imported without it" not in e]
+        if fatal:
+            results.append({"line": line_num, "name": full_name or "(blank)", "ok": False, "errors": fatal})
+            continue
+
+        result = _create_offline_donation(
+            donor_data={
+                "full_name": full_name, "phone": phone, "email": row.get("email", ""),
+            },
+            campaign=campaign,
+            amount=amount,
+            payment_mode=payment_mode,
+            donation_date=(
+                datetime.datetime.combine(donation_date, datetime.time())
+                if donation_date else datetime.datetime.utcnow()
+            ),
+            recorded_by=current_user.username,
+            bank_transaction_id=row.get("bank_transaction_id"),
+            remarks=row.get("remarks"),
+            camp_name=camp_name,
+            batch_name=_normalize_camp_text(row.get("batch_name")),
+            send_notifications=False,
+        )
+
+        if not result["ok"]:
+            results.append({"line": line_num, "name": full_name, "ok": False, "errors": [result["error"]]})
+            continue
+
+        created += 1
+        results.append({
+            "line": line_num, "name": full_name, "ok": True,
+            "receipt_number": result["receipt_number"],
+            "warnings": [e for e in row_errors if "imported without it" in e],
+        })
+
+    log_activity("iyf_camp_bulk_import", details=f"Imported {created} camp donation(s) from CSV")
+    db.session.commit()
+
+    camp_names, batch_names = _known_camp_names()
+    totals = (
+        db.session.query(
+            Donation.camp_name, func.count(Donation.id),
+            func.coalesce(func.sum(Donation.amount), 0),
+        )
+        .filter(Donation.camp_name.isnot(None), Donation.status == "success")
+        .group_by(Donation.camp_name)
+        .order_by(func.coalesce(func.sum(Donation.amount), 0).desc())
+        .all()
+    )
+    return render_template(
+        "admin/iyf_camps.html",
+        camp_names=camp_names, batch_names=batch_names,
+        camp_totals=totals,
+        recent=Donation.query.filter(Donation.camp_name.isnot(None))
+                             .order_by(Donation.id.desc()).limit(25).all(),
+        today=datetime.date.today(),
+        import_columns=IYF_CAMP_IMPORT_COLUMNS,
+        required_columns=IYF_CAMP_IMPORT_REQUIRED_COLUMNS,
+        tab="bulk",
+        bulk_results=results, bulk_created=created,
+        bulk_skipped=len(results) - created,
+    )
+
+
+@bp.route("/iyf-camps/template.csv")
+@login_required
+def iyf_camp_template():
+    """A CSV with the exact headers the importer expects, plus two example
+    rows -- easier to hand someone than a column list they have to
+    transcribe, and it round-trips through Excel without surprises."""
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=IYF_CAMP_IMPORT_COLUMNS)
+    writer.writeheader()
+    writer.writerow({
+        "full_name": "Ravi Sharma", "amount": "1100", "camp_name": "Utkarsha 2026",
+        "batch_name": "Batch A", "donation_date": "2026-08-01", "payment_mode": "cash",
+        "phone": "9876543210", "email": "ravi@example.com",
+        "bank_transaction_id": "", "remarks": "",
+    })
+    writer.writerow({
+        "full_name": "Anita Verma", "amount": "2100", "camp_name": "Utkarsha 2026",
+        "batch_name": "Batch B", "donation_date": "2026-08-02", "payment_mode": "online",
+        "phone": "9812345678", "email": "",
+        "bank_transaction_id": "pay_TO5ASGCNZOi4fP", "remarks": "Paid via Zoho",
+    })
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=iyf_camp_import_template.csv"},
+    )
