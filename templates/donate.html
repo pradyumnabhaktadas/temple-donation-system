@@ -4,8 +4,13 @@
 <section class="donation-hero">
   <div class="donation-hero-copy">
     <p class="hero-eyebrow">{{ org_name or 'ISKCON Dwarka Delhi' }}</p>
-    <h1>Live to <em>Give</em>.</h1>
-    <p class="hero-lede">Offer your contribution in the service of Sri Krishna -- a receipt is generated automatically after payment.</p>
+    {# The <em> carries the gold accent colour (see .donation-hero h1 em),
+       so it sits on "Give" in both halves rather than a whole line. #}
+    <h1>Live to <em>Give</em>. Give to <em>Serve</em>.</h1>
+    {# Diacritics written as literal characters, not HTML entities: the
+       file is UTF-8 and Jinja autoescaping would render entities in an
+       attribute or a plain-text context as visible &amp;-noise. #}
+    <p class="hero-lede">Offer your heartfelt contribution in the loving service of Śrī Śrī Rukmiṇī-Dvārakādhīśa.</p>
     <div class="hero-trust-row">
       <span>🔒 Secure Payment</span><span>🧾 80G Receipt</span><span>🙏 Thank You for Your Seva</span>
     </div>
