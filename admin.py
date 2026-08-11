@@ -1524,6 +1524,30 @@ def _sanitize_donor_data(data):
     return out
 
 
+def _csv_reader_from_upload(file):
+    """Return a csv.DictReader over an uploaded file.
+
+    Reads the whole upload into memory and decodes it, rather than wrapping
+    the raw stream in io.TextIOWrapper. Werkzeug hands uploads over as a
+    SpooledTemporaryFile, which does not implement readable() before
+    Python 3.11 -- TextIOWrapper requires it, so the wrap raises
+    AttributeError and the route reports the file as unreadable. Production
+    runs 3.12 and never saw it; every CSV import was silently broken on
+    older local Pythons, which is where they get tried first.
+
+    Decoding with errors="replace" rather than strict: a single stray byte
+    from a spreadsheet export shouldn't make a whole file unreadable, and
+    the per-row validation will flag anything that actually matters.
+
+    These files are staff-uploaded imports of at most a few thousand rows,
+    so reading them into memory is not a concern.
+    """
+    text = file.read()
+    if isinstance(text, bytes):
+        text = text.decode("utf-8-sig", errors="replace")
+    return csv.DictReader(io.StringIO(text))
+
+
 def _normalize_camp_text(value):
     """Trim and collapse internal whitespace on a camp or batch name.
 
@@ -1956,8 +1980,7 @@ def bulk_import_donations():
     send_notifications = request.form.get("send_notifications") == "yes"
 
     try:
-        stream = io.TextIOWrapper(file.stream, encoding="utf-8-sig")
-        reader = csv.DictReader(stream)
+        reader = _csv_reader_from_upload(file)
         fieldnames = {(f or "").strip() for f in (reader.fieldnames or [])}
     except Exception:
         flash("Couldn't read that file -- please upload a CSV (comma-separated) file.")
@@ -2201,8 +2224,7 @@ def import_legacy_donations():
     generate_pdfs = request.form.get("generate_pdfs") == "yes"
 
     try:
-        stream = io.TextIOWrapper(file.stream, encoding="utf-8-sig")
-        reader = csv.DictReader(stream)
+        reader = _csv_reader_from_upload(file)
         fieldnames = {(f or "").strip() for f in (reader.fieldnames or [])}
     except Exception:
         flash("Couldn't read that file -- please upload a CSV (comma-separated) file.")
@@ -2516,8 +2538,7 @@ def import_donors():
         return redirect(url_for("admin.import_donors"))
 
     try:
-        stream = io.TextIOWrapper(file.stream, encoding="utf-8-sig")
-        reader = csv.DictReader(stream)
+        reader = _csv_reader_from_upload(file)
         fieldnames = {(f or "").strip() for f in (reader.fieldnames or [])}
     except Exception:
         flash("Couldn't read that file -- please upload a CSV (comma-separated) file.")
@@ -3923,8 +3944,7 @@ def iyf_camp_bulk():
         return redirect(url_for("admin.iyf_camps", tab="bulk"))
 
     try:
-        stream = io.TextIOWrapper(file.stream, encoding="utf-8-sig")
-        reader = csv.DictReader(stream)
+        reader = _csv_reader_from_upload(file)
         fieldnames = {(f or "").strip() for f in (reader.fieldnames or [])}
     except Exception:
         flash("Couldn't read that file -- please upload a CSV (comma-separated) file.")
