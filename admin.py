@@ -17,6 +17,7 @@ from sqlalchemy import func, extract
 
 from extensions import db
 from models import (
+    Camp,
     Donor, Campaign, Donation, AdminUser, ReceiptCounter, BaceProperty, Festival, SevaType,
     LiveToGivePurpose, Preacher, AdminActivityLog, DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES,
     DONATION_FREQUENCY_LABELS,
@@ -1564,21 +1565,39 @@ def _iyf_camp_campaign():
     return campaign
 
 
-def _known_camp_names():
-    """Camp and batch names already in use, for the entry form's pickers.
+def _known_batch_names():
+    """Batch names already in use, for the entry form's picker.
 
-    The cheapest available defence against the typo-splitting that plain
-    text invites: staff pick an existing name instead of retyping it.
+    Batches stay free text -- they're per-camp, short-lived, and there are
+    far too many to be worth maintaining as records. Offering the ones
+    already used is enough to keep spelling consistent in practice.
     """
-    camps = [
-        c for (c,) in db.session.query(Donation.camp_name)
-        .filter(Donation.camp_name.isnot(None)).distinct().all() if c
-    ]
-    batches = [
+    return sorted(
         b for (b,) in db.session.query(Donation.batch_name)
         .filter(Donation.batch_name.isnot(None)).distinct().all() if b
-    ]
-    return sorted(camps), sorted(batches)
+    )
+
+
+def _resolve_camp_name(raw):
+    """Match a camp name from an import against the Camp list.
+
+    Case- and whitespace-insensitive, returning the camp's own spelling so
+    that's what lands on the donation. A Zoho export writing "utkarsha
+    2026" therefore files under "Utkarsha 2026" rather than starting a
+    second camp that differs only in case.
+
+    Returns None if there's no such camp. Deliberately does not create one:
+    the point of a managed list is that an unrecognised name is a typo to
+    be caught, not a new camp to be silently invented.
+
+    Matches inactive camps too -- retiring a camp shouldn't break an import
+    of donations that were collected while it was running.
+    """
+    cleaned = _normalize_camp_text(raw)
+    if not cleaned:
+        return None
+    camp = Camp.query.filter(func.lower(Camp.name) == cleaned.lower()).first()
+    return camp.name if camp else None
 
 
 def _create_offline_donation(
@@ -3784,7 +3803,8 @@ IYF_CAMP_IMPORT_COLUMNS = [
 @bp.route("/iyf-camps")
 @login_required
 def iyf_camps():
-    camp_names, batch_names = _known_camp_names()
+    camps = Camp.query.order_by(Camp.is_active.desc(), Camp.name).all()
+    batch_names = _known_batch_names()
 
     # Per-camp totals: the "how much did each camp collect" question this
     # feature exists to answer. Cancelled donations are excluded -- they're
@@ -3810,7 +3830,7 @@ def iyf_camps():
 
     return render_template(
         "admin/iyf_camps.html",
-        camp_names=camp_names, batch_names=batch_names,
+        camps=camps, batch_names=batch_names,
         camp_totals=totals, recent=recent,
         today=datetime.date.today(),
         import_columns=IYF_CAMP_IMPORT_COLUMNS,
@@ -3824,9 +3844,11 @@ def iyf_camps():
 def iyf_camp_single():
     form = request.form
 
-    camp_name = _normalize_camp_text(form.get("camp_name"))
+    # Resolved against the Camp list rather than taken as typed, so the
+    # stored name is always the camp's own spelling.
+    camp_name = _resolve_camp_name(form.get("camp_name"))
     if not camp_name:
-        flash("Camp Name is required.")
+        flash("Please choose a camp from the list. Add it under Manage Camps first if it's missing.")
         return redirect(url_for("admin.iyf_camps"))
 
     try:
@@ -3927,9 +3949,18 @@ def iyf_camp_bulk():
         if not full_name:
             row_errors.append("full_name is required")
 
-        camp_name = _normalize_camp_text(row.get("camp_name"))
-        if not camp_name:
+        raw_camp = _normalize_camp_text(row.get("camp_name"))
+        camp_name = _resolve_camp_name(raw_camp)
+        if not raw_camp:
             row_errors.append("camp_name is required")
+        elif not camp_name:
+            # Named rather than silently created: an unrecognised camp in
+            # an export is nearly always a spelling difference, and
+            # inventing a camp for it would split that camp's total in two
+            # -- the exact failure the managed list exists to prevent.
+            row_errors.append(
+                f"no camp named '{raw_camp}' -- add it under Manage Camps, or correct the spelling"
+            )
 
         try:
             amount = float(row.get("amount") or 0)
@@ -3993,7 +4024,8 @@ def iyf_camp_bulk():
     log_activity("iyf_camp_bulk_import", details=f"Imported {created} camp donation(s) from CSV")
     db.session.commit()
 
-    camp_names, batch_names = _known_camp_names()
+    camps = Camp.query.order_by(Camp.is_active.desc(), Camp.name).all()
+    batch_names = _known_batch_names()
     totals = (
         db.session.query(
             Donation.camp_name, func.count(Donation.id),
@@ -4006,7 +4038,7 @@ def iyf_camp_bulk():
     )
     return render_template(
         "admin/iyf_camps.html",
-        camp_names=camp_names, batch_names=batch_names,
+        camps=camps, batch_names=batch_names,
         camp_totals=totals,
         recent=Donation.query.filter(Donation.camp_name.isnot(None))
                              .order_by(Donation.id.desc()).limit(25).all(),
@@ -4045,3 +4077,120 @@ def iyf_camp_template():
         mimetype="text/csv",
         headers={"Content-Disposition": "attachment; filename=iyf_camp_import_template.csv"},
     )
+
+
+# --- Camp list management -------------------------------------------------
+# The camps offered in the entry dropdown. Kept deliberately separate from
+# the donations themselves: Donation.camp_name is a copy of the name taken
+# when the donation was recorded, so deleting a camp here never disturbs
+# what it collected. See the Camp model docstring for why.
+
+@bp.route("/iyf-camps/manage", methods=["GET", "POST"])
+@login_required
+def camps():
+    if request.method == "POST":
+        name = _normalize_camp_text(request.form.get("name"))
+        if not name:
+            flash("Camp name is required.")
+            return redirect(url_for("admin.camps"))
+
+        # Case-insensitive, because "utkarsha 2026" and "Utkarsha 2026"
+        # being two camps is exactly what this list exists to prevent.
+        if Camp.query.filter(func.lower(Camp.name) == name.lower()).first():
+            flash(f"There's already a camp called '{name}'.")
+            return redirect(url_for("admin.camps"))
+
+        camp = Camp(name=name)
+        db.session.add(camp)
+        db.session.commit()
+        log_activity("camp_create", target_type="camp", target_id=camp.id, details=f"Created camp '{name}'")
+        db.session.commit()
+        flash(f"Camp '{name}' added.")
+        return redirect(url_for("admin.camps"))
+
+    camps_list = Camp.query.order_by(Camp.is_active.desc(), Camp.name).all()
+
+    # How much each camp has collected, so staff can see what they'd be
+    # detaching before deleting one.
+    totals = dict(
+        db.session.query(Donation.camp_name, func.coalesce(func.sum(Donation.amount), 0))
+        .filter(Donation.camp_name.isnot(None), Donation.status == "success")
+        .group_by(Donation.camp_name).all()
+    )
+    counts = dict(
+        db.session.query(Donation.camp_name, func.count(Donation.id))
+        .filter(Donation.camp_name.isnot(None), Donation.status == "success")
+        .group_by(Donation.camp_name).all()
+    )
+    return render_template("admin/camps.html", camps=camps_list, totals=totals, counts=counts)
+
+
+@bp.route("/iyf-camps/manage/<int:camp_id>/edit", methods=["POST"])
+@login_required
+def camp_edit(camp_id):
+    camp = Camp.query.get_or_404(camp_id)
+    new_name = _normalize_camp_text(request.form.get("name"))
+    if not new_name:
+        flash("Camp name is required.")
+        return redirect(url_for("admin.camps"))
+
+    clash = Camp.query.filter(func.lower(Camp.name) == new_name.lower(), Camp.id != camp.id).first()
+    if clash:
+        flash(f"There's already a camp called '{clash.name}'.")
+        return redirect(url_for("admin.camps"))
+
+    old_name = camp.name
+    camp.name = new_name
+    camp.is_active = request.form.get("is_active") == "yes"
+
+    # Carry the rename onto donations already recorded under the old name.
+    # Without this a corrected spelling would split one camp's history into
+    # two totals -- the old name still sitting on past donations, the new
+    # one collecting everything from here. This is the whole reason renames
+    # go through a form rather than being edited row by row.
+    renamed = 0
+    if old_name != new_name:
+        renamed = (
+            Donation.query.filter(Donation.camp_name == old_name)
+            .update({Donation.camp_name: new_name}, synchronize_session=False)
+        )
+
+    db.session.commit()
+    log_activity(
+        "camp_edit", target_type="camp", target_id=camp.id,
+        details=f"Renamed camp '{old_name}' to '{new_name}'" if old_name != new_name
+                else f"Updated camp '{new_name}'",
+    )
+    db.session.commit()
+
+    msg = f"Camp updated to '{new_name}'."
+    if renamed:
+        msg += f" {renamed} existing donation(s) moved with it."
+    flash(msg)
+    return redirect(url_for("admin.camps"))
+
+
+@bp.route("/iyf-camps/manage/<int:camp_id>/delete", methods=["POST"])
+@login_required
+def camp_delete(camp_id):
+    camp = Camp.query.get_or_404(camp_id)
+    name = camp.name
+
+    # Safe to delete outright whatever has been collected: the donations
+    # carry the camp name themselves, so they keep reporting under it. This
+    # only removes the camp from the entry dropdown.
+    kept = Donation.query.filter(Donation.camp_name == name).count()
+
+    db.session.delete(camp)
+    db.session.commit()
+    log_activity(
+        "camp_delete", target_type="camp", target_id=camp_id,
+        details=f"Deleted camp '{name}' ({kept} donation(s) retained under that name)",
+    )
+    db.session.commit()
+
+    msg = f"Camp '{name}' removed from the list."
+    if kept:
+        msg += f" Its {kept} donation(s) and their totals are unaffected."
+    flash(msg)
+    return redirect(url_for("admin.camps"))

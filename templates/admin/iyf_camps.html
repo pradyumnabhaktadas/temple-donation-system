@@ -4,6 +4,7 @@
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
   <h3 class="mb-0">🏕️ IYF Camp Collections</h3>
+  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.camps') }}">Manage Camps</a>
 </div>
 
 <p class="text-muted small" style="max-width:900px">
@@ -51,13 +52,9 @@
   </li>
 </ul>
 
-{# Camp and batch names are plain text, so the same camp typed two ways
-   becomes two camps in the totals above. These datalists offer whatever is
-   already in use, which makes picking the existing spelling the path of
-   least resistance without preventing a genuinely new camp being typed. #}
-<datalist id="camp-names">
-  {% for c in camp_names %}<option value="{{ c }}">{% endfor %}
-</datalist>
+{# Batch stays free text -- batches are per-camp and far too numerous to
+   maintain as records -- so this offers the ones already in use to keep
+   spelling consistent. Camps come from the managed list instead. #}
 <datalist id="batch-names">
   {% for b in batch_names %}<option value="{{ b }}">{% endfor %}
 </datalist>
@@ -69,10 +66,18 @@
 
     <div class="row">
       <div class="col-md-6 mb-3">
-        <label class="form-label">Camp Name <span class="text-danger">*</span></label>
-        <input type="text" class="form-control" name="camp_name" list="camp-names" required
-               placeholder="e.g. Utkarsha 2026">
-        <div class="form-text">Pick an existing camp from the list where possible &mdash; a new spelling starts a separate total.</div>
+        <label class="form-label">Camp <span class="text-danger">*</span></label>
+        <select class="form-select" name="camp_name" required {% if not camps %}disabled{% endif %}>
+          <option value="" disabled selected>-- Select a camp --</option>
+          {% for c in camps if c.is_active %}
+          <option value="{{ c.name }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+        {% if not camps %}
+        <div class="form-text text-danger">No camps defined yet &mdash; <a href="{{ url_for('admin.camps') }}">add one</a> before recording collections.</div>
+        {% else %}
+        <div class="form-text">Missing a camp? <a href="{{ url_for('admin.camps') }}">Manage Camps</a>.</div>
+        {% endif %}
       </div>
       <div class="col-md-6 mb-3">
         <label class="form-label">Batch</label>
@@ -148,9 +153,11 @@
       <a class="btn btn-outline-secondary" href="{{ url_for('admin.iyf_camp_template') }}">Download template CSV</a>
     </div>
     <p class="form-text mb-0 mt-2">
-      Each row creates a donation with its own receipt number. A row with an unusable phone number is
-      still imported &mdash; the phone is dropped and flagged, rather than losing the donation over it.
-      Students are never notified.
+      Each row creates a donation with its own receipt number. <code>camp_name</code> must match a camp
+      on the <a href="{{ url_for('admin.camps') }}">Manage Camps</a> list &mdash; matching ignores case and
+      spacing, and retired camps still match, but an unrecognised name is reported rather than quietly
+      creating a second camp. A row with an unusable phone number is still imported: the phone is
+      dropped and flagged, rather than losing the donation over it. Students are never notified.
     </p>
   </form>
 </div>

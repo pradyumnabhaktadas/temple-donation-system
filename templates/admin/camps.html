@@ -1,0 +1,85 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Manage Camps{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h3 class="mb-0">🏕️ Manage Camps</h3>
+  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.iyf_camps') }}">← Back to Camp Collections</a>
+</div>
+
+<p class="text-muted small" style="max-width:820px">
+  This is the list of camps offered in the entry dropdown. It is <strong>not</strong> where a
+  donation's camp is stored &mdash; each donation keeps a copy of the camp name from when it was
+  recorded. That's deliberate: deleting a camp here only removes it from the dropdown, and every
+  rupee it collected still reports correctly. Renaming a camp updates its past donations too, so a
+  corrected spelling doesn't split one camp's total into two.
+</p>
+
+<div class="card card-body shadow-sm p-4 mb-4" style="max-width:620px">
+  <h6 class="mb-3">Add a camp</h6>
+  <form method="post" class="row g-2">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="col">
+      <input type="text" class="form-control" name="name" required placeholder="e.g. Utkarsha 2026">
+    </div>
+    <div class="col-auto">
+      <button type="submit" class="btn btn-gold">Add Camp</button>
+    </div>
+  </form>
+</div>
+
+<div class="card card-body shadow-sm">
+  {% if camps %}
+  <div class="table-responsive">
+    <table class="table table-sm align-middle bg-white mb-0">
+      <thead>
+        <tr>
+          <th>Camp</th>
+          <th class="text-end">Donations</th>
+          <th class="text-end">Collected</th>
+          <th>Status</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in camps %}
+        <tr>
+          <form method="post" action="{{ url_for('admin.camp_edit', camp_id=c.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <td><input type="text" class="form-control form-control-sm" name="name" value="{{ c.name }}" required></td>
+            <td class="text-end">{{ counts.get(c.name, 0) }}</td>
+            <td class="text-end">Rs. {{ totals.get(c.name, 0) | inr }}</td>
+            <td>
+              <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" name="is_active" value="yes"
+                       id="active-{{ c.id }}" {% if c.is_active %}checked{% endif %}>
+                <label class="form-check-label small text-muted" for="active-{{ c.id }}">
+                  {% if c.is_active %}Active{% else %}Retired{% endif %}
+                </label>
+              </div>
+            </td>
+            <td class="text-end text-nowrap">
+              <button type="submit" class="btn btn-sm btn-outline-secondary">Save</button>
+          </form>
+              <form method="post" action="{{ url_for('admin.camp_delete', camp_id=c.id) }}" class="d-inline"
+                    onsubmit="return confirm('Remove {{ c.name }} from the camp list?\n\nIts {{ counts.get(c.name, 0) }} donation(s) and totals are NOT affected -- they keep the camp name. This only stops it being offered for new entries.');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+              </form>
+            </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="text-muted small mb-0 mt-3">
+    Retiring a camp keeps it out of the entry dropdown without deleting it &mdash; the reversible
+    option when a camp finishes. Imports still match retired camps, so historical data can be
+    uploaded after the fact.
+  </p>
+  {% else %}
+  <p class="text-muted mb-0">No camps yet. Add one above to start recording camp collections.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

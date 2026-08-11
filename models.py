@@ -185,6 +185,41 @@ class Festival(db.Model):
         return f"<Festival {self.name}>"
 
 
+class Camp(db.Model):
+    """An IYF camp -- e.g. "Utkarsha 2026". Editable from Admin -> IYF
+    Camps, and what populates the camp dropdown on the entry form.
+
+    Note what this table is and isn't. It is the *picker*: the list of
+    camps staff can choose from. It is not where a donation's camp is
+    stored -- Donation.camp_name holds the name as plain text, copied at
+    the moment the donation was recorded.
+
+    That looked redundant until the requirement that camps get renamed and
+    deleted. With a foreign key, deleting a camp would either take its
+    donations with it or leave them pointing at nothing, and the money
+    collected at that camp would vanish from the totals. Storing the name
+    on the donation means the history is self-contained: delete a camp and
+    it simply stops being offered for new entries, while every rupee it
+    collected still reports correctly.
+
+    Renaming is handled the other way round -- see admin.camp_edit, which
+    rewrites the name onto existing donations too, so a corrected spelling
+    doesn't split one camp's total into two.
+    """
+
+    __tablename__ = "camps"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False, unique=True)
+    # Retiring a finished camp keeps it out of the entry dropdown without
+    # deleting it -- the softer alternative to removal, and reversible.
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    def __repr__(self):
+        return f"<Camp {self.name}>"
+
+
 class SevaType(db.Model):
     """A seva/sponsorship tier for festival donations -- e.g. "Annakut
     Seva", "Flower Decoration Seva", "Full Sponsorship". `suggested_amount`
