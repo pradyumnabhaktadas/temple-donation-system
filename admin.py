@@ -2057,6 +2057,10 @@ def bulk_import_donations():
 
     results = []
     created = 0
+    # Dates where the day-first reading of a D/M/Y value was a guess --
+    # reported at the end so the operator can spot-check. See
+    # _parse_import_date.
+    ambiguous_dates = []
 
     for line_num, raw_row in enumerate(reader, start=2):  # header is line 1
         row = {(k or "").strip(): (v or "").strip() for k, v in raw_row.items() if k}
@@ -2094,12 +2098,13 @@ def bulk_import_donations():
                 f"payment_mode must be cash, cheque, bank_transfer, or online (got '{payment_mode}')"
             )
 
-        donation_date = None
-        date_raw = row.get("donation_date", "")
-        try:
-            donation_date = datetime.datetime.strptime(date_raw, "%Y-%m-%d")
-        except ValueError:
-            row_errors.append(f"invalid donation_date '{date_raw}' (expected YYYY-MM-DD)")
+        # Tolerates Excel's locale reformatting -- see _parse_import_date.
+        # This importer used to accept YYYY-MM-DD and nothing else, while
+        # the donor, camp and legacy importers all took the reformatted
+        # form, so the same reviewed-in-Excel file imported through three
+        # tabs and failed on this one.
+        donation_date = _import_datetime(
+            row.get("donation_date"), "donation_date", row_errors, ambiguous=ambiguous_dates)
 
         pan = row.get("pan", "").upper()
         if pan and not is_valid_pan(pan):
@@ -2171,7 +2176,9 @@ def bulk_import_donations():
         created += 1
 
     skipped = len(results) - created
-    flash(f"Bulk import finished: {created} donation(s) created, {skipped} skipped.")
+    bulk_msg = f"Bulk import finished: {created} donation(s) created, {skipped} skipped."
+    bulk_msg += _ambiguous_date_warning(ambiguous_dates)
+    flash(bulk_msg)
     return render_template(
         "admin/offline_donation.html", active_tab="bulk",
         bulk_results=results, bulk_created=created, bulk_skipped=skipped,
@@ -2298,6 +2305,7 @@ def import_legacy_donations():
     results = []
     created = 0
     no_receipt_pdf_skipped = 0
+    ambiguous_dates = []  # see _parse_import_date
 
     for line_num, raw_row in enumerate(reader, start=2):  # header is line 1
         row = {(k or "").strip(): (v or "").strip() for k, v in raw_row.items() if k}
@@ -2327,28 +2335,10 @@ def import_legacy_donations():
         if payment_mode not in ("cash", "cheque", "bank_transfer", "online"):
             payment_mode = "cash"  # unrecognised is treated as cash, same as the CLI importer, rather than skipped
 
-        donation_date = None
-        date_raw = (row.get("donation_date") or "").strip()
-        try:
-            donation_date = datetime.datetime.strptime(date_raw, "%Y-%m-%d")
-        except ValueError:
-            # Same Excel-reformatting issue as the donor importer -- a
-            # reviewed-and-resaved CSV can turn 2024-01-22 into 22/01/2024
-            # or 22/01/24. Accept day-first D/M/Y as a fallback.
-            m = re.match(r"^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$", date_raw)
-            parsed = None
-            if m:
-                d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
-                if y < 100:
-                    y += 2000 if y < 30 else 1900
-                try:
-                    parsed = datetime.datetime(y, mo, d)
-                except ValueError:
-                    parsed = None
-            if parsed:
-                donation_date = parsed
-            else:
-                row_errors.append(f"invalid donation_date '{date_raw}' (expected YYYY-MM-DD)")
+        # Was an inline copy of _parse_import_date's fallback. Same rule,
+        # one implementation, so the two can't drift.
+        donation_date = _import_datetime(
+            row.get("donation_date"), "donation_date", row_errors, ambiguous=ambiguous_dates)
 
         pan = row.get("pan", "").upper()
         if pan and not is_valid_pan(pan):
@@ -2446,6 +2436,7 @@ def import_legacy_donations():
 
     skipped = len(results) - created
     flash_msg = f"Legacy import finished: {created} donation(s) imported, {skipped} skipped."
+    flash_msg += _ambiguous_date_warning(ambiguous_dates)
     if no_receipt_pdf_skipped:
         flash_msg += (
             f" {no_receipt_pdf_skipped} row(s) had no receipt_number, so no PDF was generated for "
@@ -2513,17 +2504,34 @@ def import_donors_demo_csv():
     )
 
 
-def _parse_import_date(raw, label, row_errors):
-    """YYYY-MM-DD is the canonical format (what the demo template always
-    uses), but a spreadsheet that's been opened and re-saved in Excel/
-    Google Sheets for a quick review commonly gets its date cells
-    silently reformatted to a locale style first -- e.g. 1999-09-12
-    becomes 12/09/99. So this also accepts day-first D/M/Y with a 2- or
-    4-digit year before giving up. Blank means 'leave whatever's already
-    on file untouched'; a value that still doesn't parse fails the whole
-    row rather than being silently dropped."""
+def _parse_import_date(raw, label, row_errors, required=False, ambiguous=None):
+    """The one date parser for every CSV importer in this file.
+
+    YYYY-MM-DD is the canonical format (what every demo template uses),
+    but a spreadsheet that's been opened and re-saved in Excel or Google
+    Sheets for a quick review commonly gets its date cells silently
+    reformatted to a locale style first -- 2024-01-22 comes back as
+    22/01/2024 or 22/01/24. Nobody notices until the import rejects half
+    the file, and the natural next move (retype every date) is worse than
+    the problem. So day-first D/M/Y with a 2- or 4-digit year is accepted
+    as a fallback.
+
+    `required=True` makes a blank value an error, for the importers where
+    the date is a required column. Left False, blank means "leave whatever
+    is already on file untouched", which is what the donor importer wants.
+
+    `ambiguous`, if given a list, collects values where the day-first
+    reading was a *guess* -- both numbers 12 or under, so 01/08/2026 could
+    equally be 1 August or 8 January. Day-first is right for a file
+    produced in an Indian locale and wrong for a US one, and on a donation
+    the difference can land the receipt in the wrong financial year, which
+    then flows into Form 10BD. The caller surfaces the count so the
+    operator can spot-check rather than find out at audit.
+    """
     raw = (raw or "").strip()
     if not raw:
+        if required:
+            row_errors.append(f"{label} is required")
         return None
 
     try:
@@ -2531,18 +2539,55 @@ def _parse_import_date(raw, label, row_errors):
     except ValueError:
         pass
 
+    # Year-first with other separators (2026/08/01) -- some Google Sheets
+    # locales write this. Unambiguous, since a 4-digit leading number can
+    # only be the year, so it needs no day-first guess.
+    m = re.match(r"^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})$", raw)
+    if m:
+        try:
+            return datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            pass
+
     m = re.match(r"^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$", raw)
     if m:
         day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
         if year < 100:
             year += 2000 if year < 30 else 1900
         try:
-            return datetime.date(year, month, day)
+            parsed = datetime.date(year, month, day)
         except ValueError:
-            pass
+            parsed = None
+        if parsed:
+            if ambiguous is not None and day <= 12 and month <= 12:
+                ambiguous.append(raw)
+            return parsed
 
     row_errors.append(f"invalid {label} '{raw}' (expected YYYY-MM-DD)")
     return None
+
+
+def _ambiguous_date_warning(ambiguous):
+    """Message appended to an import's summary when day-first D/M/Y dates
+    were guessed at. Silent when there's nothing to say."""
+    if not ambiguous:
+        return ""
+    sample = ", ".join(sorted(set(ambiguous))[:3])
+    return (
+        f" Note: {len(ambiguous)} date(s) were written as D/M/Y and read day-first "
+        f"(e.g. {sample}). That's correct for a file saved in an Indian locale. If it came "
+        "from a US-locale spreadsheet the day and month are swapped -- check those donations "
+        "before issuing receipts, since the date decides the financial year."
+    )
+
+
+def _import_datetime(raw, label, row_errors, ambiguous=None):
+    """_parse_import_date for the two donation importers, which store a
+    datetime and always require the date."""
+    parsed = _parse_import_date(raw, label, row_errors, required=True, ambiguous=ambiguous)
+    if parsed is None:
+        return None
+    return datetime.datetime.combine(parsed, datetime.time())
 
 
 def _resolve_preacher_import(preachers_by_name, raw_name, row_errors):
