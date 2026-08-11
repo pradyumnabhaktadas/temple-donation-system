@@ -114,4 +114,30 @@
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeAll(null); });
 })();
 </script>
+
+<script>
+/* Confirmation for destructive actions.
+ *
+ * Any form carrying data-confirm="..." asks before submitting. The message
+ * lives in the attribute, so names typed by staff never pass through a
+ * JavaScript string literal.
+ *
+ * That indirection is the whole point. These prompts used to be built with
+ * an inline onsubmit handler returning confirm() with the name spliced
+ * into a JavaScript string literal, which breaks on a
+ * name containing an apostrophe: autoescaping writes &#39;, the browser
+ * decodes it back to ' before parsing the attribute as JavaScript, the
+ * string terminates early, and the handler throws. The visible effect is
+ * that the confirmation silently disappears and the destructive action
+ * proceeds on the first click -- the failure mode you'd least want from
+ * the one guard on a delete.
+ */
+(function () {
+  document.addEventListener('submit', function (e) {
+    var form = e.target;
+    if (!form || !form.dataset || !form.dataset.confirm) return;
+    if (!confirm(form.dataset.confirm)) e.preventDefault();
+  }, true);
+})();
+</script>
 {% endblock %}

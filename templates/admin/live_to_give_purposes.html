@@ -48,7 +48,7 @@
           </form>
           <a href="{{ url_for('admin.live_to_give_purpose_edit', purpose_id=p.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
           <form method="post" action="{{ url_for('admin.live_to_give_purpose_delete', purpose_id=p.id) }}"
-                onsubmit="return confirm('Delete purpose \'{{ p.name }}\'? Only possible if it has no donations recorded.');">
+                data-confirm="Delete purpose '{{ p.name }}'? Only possible if it has no donations recorded." >
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="btn btn-sm btn-outline-danger">Delete</button>
           </form>

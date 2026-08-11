@@ -40,7 +40,7 @@
           </form>
           <a href="{{ url_for('admin.preacher_edit', preacher_id=p.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
           <form method="post" action="{{ url_for('admin.preacher_delete', preacher_id=p.id) }}"
-                onsubmit="return confirm('Delete preacher \'{{ p.name }}\'? Only possible if no donors are connected to them.');">
+                data-confirm="Delete preacher '{{ p.name }}'? Only possible if no donors are connected to them." >
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="btn btn-sm btn-outline-danger">Delete</button>
           </form>

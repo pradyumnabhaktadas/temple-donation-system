@@ -41,7 +41,7 @@
           </form>
           <a href="{{ url_for('admin.bace_property_edit', property_id=p.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
           <form method="post" action="{{ url_for('admin.bace_property_delete', property_id=p.id) }}"
-                onsubmit="return confirm('Delete BACE property \'{{ p.name }}\'? Only possible if it has no donations recorded.');">
+                data-confirm="Delete BACE property '{{ p.name }}'? Only possible if it has no donations recorded." >
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="btn btn-sm btn-outline-danger">Delete</button>
           </form>

@@ -68,7 +68,7 @@
         </form>
         <a href="{{ url_for('admin.campaign_edit', campaign_id=c.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
         <form method="post" action="{{ url_for('admin.campaign_delete', campaign_id=c.id) }}"
-              onsubmit="return confirm('Delete campaign \'{{ c.name }}\'? Only possible if it has no donations recorded.');">
+              data-confirm="Delete campaign '{{ c.name }}'? Only possible if it has no donations recorded." >
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button class="btn btn-sm btn-outline-danger">Delete</button>
         </form>

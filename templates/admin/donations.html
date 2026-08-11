@@ -127,7 +127,7 @@
         <a href="#" data-bs-toggle="modal" data-bs-target="#cancelDonation{{ d.id }}" class="small text-danger">Cancel</a>
         {% elif d.status == 'cancelled' %}
         <form method="post" action="{{ url_for('admin.restore_donation', donation_id=d.id) }}" class="d-inline"
-              onsubmit="return confirm('Restore this donation to Success? It will count towards totals and receipts again.');">
+              data-confirm="Restore this donation to Success? It will count towards totals and receipts again." >
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn btn-link btn-sm p-0 small">Restore</button>
         </form>

@@ -42,36 +42,76 @@
         </tr>
       </thead>
       <tbody>
+        {# The <form> elements live outside the table (below), and these
+           controls attach to them by id via the HTML5 `form` attribute.
+
+           A <form> cannot be a child of <tr>: browsers "foster parent" it
+           out of the table entirely, which leaves the inputs sitting in
+           the <td>s no longer inside any form -- so Save would post an
+           empty name and be rejected. This is the standard way to get a
+           per-row form without that. #}
         {% for c in camps %}
         <tr>
-          <form method="post" action="{{ url_for('admin.camp_edit', camp_id=c.id) }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <td><input type="text" class="form-control form-control-sm" name="name" value="{{ c.name }}" required></td>
-            <td class="text-end">{{ counts.get(c.name, 0) }}</td>
-            <td class="text-end">Rs. {{ totals.get(c.name, 0) | inr }}</td>
-            <td>
-              <div class="form-check form-switch mb-0">
-                <input class="form-check-input" type="checkbox" name="is_active" value="yes"
-                       id="active-{{ c.id }}" {% if c.is_active %}checked{% endif %}>
-                <label class="form-check-label small text-muted" for="active-{{ c.id }}">
-                  {% if c.is_active %}Active{% else %}Retired{% endif %}
-                </label>
-              </div>
-            </td>
-            <td class="text-end text-nowrap">
-              <button type="submit" class="btn btn-sm btn-outline-secondary">Save</button>
-          </form>
-              <form method="post" action="{{ url_for('admin.camp_delete', camp_id=c.id) }}" class="d-inline"
-                    onsubmit="return confirm('Remove {{ c.name }} from the camp list?\n\nIts {{ counts.get(c.name, 0) }} donation(s) and totals are NOT affected -- they keep the camp name. This only stops it being offered for new entries.');">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-              </form>
-            </td>
+          <td>
+            <input type="text" class="form-control form-control-sm" name="name"
+                   value="{{ c.name }}" required form="camp-edit-{{ c.id }}">
+          </td>
+          <td class="text-end">{{ counts.get(c.name, 0) }}</td>
+          <td class="text-end">Rs. {{ totals.get(c.name, 0) | inr }}</td>
+          <td>
+            <div class="form-check form-switch mb-0">
+              {# Unchecked checkboxes aren't submitted at all, which is
+                 exactly what marks the camp retired on save. #}
+              <input class="form-check-input" type="checkbox" name="is_active" value="yes"
+                     id="active-{{ c.id }}" form="camp-edit-{{ c.id }}"
+                     {% if c.is_active %}checked{% endif %}>
+              <label class="form-check-label small text-muted" for="active-{{ c.id }}">
+                {% if c.is_active %}Active{% else %}Retired{% endif %}
+              </label>
+            </div>
+          </td>
+          <td class="text-end text-nowrap">
+            <button type="submit" class="btn btn-sm btn-outline-secondary"
+                    form="camp-edit-{{ c.id }}">Save</button>
+            <button type="submit" class="btn btn-sm btn-outline-danger"
+                    form="camp-delete-{{ c.id }}">Delete</button>
+          </td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+
+  {% for c in camps %}
+  <form method="post" id="camp-edit-{{ c.id }}" action="{{ url_for('admin.camp_edit', camp_id=c.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  </form>
+  {# The camp name is passed as data attributes rather than spliced into an
+     inline onsubmit handler. Neither quoting style survives arbitrary
+     names there: an apostrophe ("Dev's Camp") closes a single-quoted JS
+     string early, and |tojson emits double quotes that terminate the
+     double-quoted HTML attribute. Either way Delete would fire with no
+     confirmation at all -- the one prompt guarding a destructive action.
+     Autoescaping handles attribute values correctly, and the handler
+     below reads them back as plain strings. #}
+  <form method="post" id="camp-delete-{{ c.id }}" action="{{ url_for('admin.camp_delete', camp_id=c.id) }}"
+        class="js-camp-delete" data-camp-name="{{ c.name }}" data-camp-count="{{ counts.get(c.name, 0) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  </form>
+  {% endfor %}
+
+<script>
+document.querySelectorAll('.js-camp-delete').forEach(function (form) {
+  form.addEventListener('submit', function (e) {
+    var name = form.dataset.campName;
+    var count = form.dataset.campCount;
+    var msg = 'Remove ' + name + ' from the camp list?\n\n'
+            + 'Its ' + count + ' donation(s) and their totals are NOT affected -- they keep the '
+            + 'camp name. This only stops it being offered for new entries.';
+    if (!confirm(msg)) e.preventDefault();
+  });
+});
+</script>
   <p class="text-muted small mb-0 mt-3">
     Retiring a camp keeps it out of the entry dropdown without deleting it &mdash; the reversible
     option when a camp finishes. Imports still match retired camps, so historical data can be

@@ -110,7 +110,7 @@
         <a href="#" data-bs-toggle="modal" data-bs-target="#cancelDonation{{ d.id }}" class="small text-danger">Cancel</a>
         {% elif d.status == 'cancelled' %}
         <form method="post" action="{{ url_for('admin.restore_donation', donation_id=d.id) }}" class="d-inline"
-              onsubmit="return confirm('Restore this donation to Success? It will count towards totals and receipts again.');">
+              data-confirm="Restore this donation to Success? It will count towards totals and receipts again." >
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn btn-link btn-sm p-0 small">Restore</button>
         </form>
@@ -218,7 +218,7 @@
   <p class="text-muted small">If this person has another donor record (e.g. from a typo'd phone number),
     enter that record's phone or email below. All of its donations will be moved here and the duplicate removed.</p>
   <form method="post" action="{{ url_for('admin.donor_merge', donor_id=donor.id) }}" class="d-flex gap-2"
-        onsubmit="return confirm('Merge the matching donor into {{ donor.full_name }}? This cannot be undone.');">
+        data-confirm="Merge the matching donor into {{ donor.full_name }}? This cannot be undone." >
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="text" name="duplicate_lookup" class="form-control" placeholder="Duplicate's phone or email" required>
     <button class="btn btn-outline-secondary text-nowrap">Merge In</button>
