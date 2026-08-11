@@ -48,6 +48,54 @@
   </p>
 </div>
 
+<div class="card card-body shadow-sm p-4 mb-4 border-danger" style="max-width:760px">
+  <h6 class="mb-2">♻️ Restore From a Backup</h6>
+  <p class="text-muted small mb-3">
+    Reloads donors, donations and the lookup lists from a backup ZIP. Admin logins are never touched, so
+    nobody's password changes. <strong>Preview first</strong> &mdash; it reports exactly what would change
+    and writes nothing. Before any real restore, a backup of the current data is taken and saved
+    automatically, so this is undoable.
+  </p>
+
+  <form method="post" action="{{ url_for('admin.restore_backup_upload') }}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="mb-3">
+      <label class="form-label">Backup ZIP</label>
+      <input type="file" class="form-control" name="backup_zip" accept=".zip" required>
+      <div class="form-text">A <code>temple_data_backup_*.zip</code> from a download, the weekly email, or this server's disk.</div>
+    </div>
+
+    <div class="form-check mb-2">
+      <input class="form-check-input" type="checkbox" name="wipe" value="yes" id="restore-wipe">
+      <label class="form-check-label" for="restore-wipe">
+        Clear existing rows first
+      </label>
+      <div class="form-text">
+        Leave unticked to layer the backup's rows over what's already there, matching by id &mdash; the safer
+        choice when the database holds entries newer than the backup. Tick it to make the data match the
+        backup exactly, discarding anything recorded since; that's what you want when restoring into a fresh
+        or empty database.
+      </div>
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">To apply, type <code>RESTORE</code></label>
+      <input type="text" class="form-control" name="confirm" placeholder="RESTORE"
+             autocomplete="off" style="max-width:220px">
+      <div class="form-text">Only needed for "Apply Restore" &mdash; a preview never asks for it.</div>
+    </div>
+
+    <div class="d-flex flex-wrap gap-2">
+      <button type="submit" name="mode" value="preview" class="btn btn-gold">Preview Changes</button>
+      <button type="submit" name="mode" value="apply" class="btn btn-outline-danger"
+              data-confirm="Apply this restore to the live data?&#10;&#10;A backup of the current data will be saved first, so it can be undone.">
+        Apply Restore
+      </button>
+    </div>
+  </form>
+</div>
+
 {% if recent_backups %}
 <div class="card card-body shadow-sm p-4" style="max-width:760px">
   <h6 class="mb-3">Recent Backups on This Server's Disk</h6>

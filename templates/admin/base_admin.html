@@ -135,8 +135,16 @@
 (function () {
   document.addEventListener('submit', function (e) {
     var form = e.target;
-    if (!form || !form.dataset || !form.dataset.confirm) return;
-    if (!confirm(form.dataset.confirm)) e.preventDefault();
+    if (!form || !form.dataset) return;
+    // The submitting button's own message wins over the form's, so a form
+    // with two buttons can guard only the destructive one -- Preview and
+    // Apply Restore share a form, and prompting on Preview would train
+    // people to click through the prompt that matters.
+    var submitter = e.submitter;
+    var message = (submitter && submitter.dataset && submitter.dataset.confirm)
+                || form.dataset.confirm;
+    if (!message) return;
+    if (!confirm(message)) e.preventDefault();
   }, true);
 })();
 </script>

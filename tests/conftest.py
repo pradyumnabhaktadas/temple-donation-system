@@ -11,7 +11,7 @@ from models import Campaign, AdminUser
 
 
 @pytest.fixture
-def app():
+def app(tmp_path):
     """A fresh app + in-memory database for every test, so tests can't
     leak state into each other or touch your real instance/temple.db."""
     test_app = create_app(
@@ -46,6 +46,12 @@ def app():
             "WHATSAPP_TEMPLATE_ID": "",
             "PUBLIC_BASE_URL": "",
             "SMTP_HOST": "",
+
+            # Backups go to a temp directory, not instance/backups. Tests
+            # that exercise the restore route trigger a real safety backup,
+            # and without this they leave actual ZIP files behind in the
+            # developer's working copy every run.
+            "BACKUP_DIR": str(tmp_path / "backups"),
         }
     )
 

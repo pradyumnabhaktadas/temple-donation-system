@@ -28,7 +28,7 @@ from public import (
     find_or_create_donor, _org_cfg, high_value_pan_address_error, _finalize_success,
     _send_receipt_notifications_background,
 )
-from backup_utils import build_backup_zip, run_backup
+from backup_utils import build_backup_zip, run_backup, restore_backup_zip
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -3472,7 +3472,9 @@ def data_backup():
     backup_data.py, which is meant to run automatically on a weekly
     schedule (Render Cron Job or any external scheduler) -- this page is
     for "I want one right now" without waiting for that."""
-    backups_dir = os.path.join(current_app.root_path, "instance", "backups")
+    backups_dir = current_app.config.get("BACKUP_DIR") or os.path.join(
+        current_app.root_path, "instance", "backups"
+    )
     recent_backups = []
     if os.path.isdir(backups_dir):
         recent_backups = sorted(
@@ -4342,3 +4344,88 @@ def iyf_camp_export(report):
         mimetype="text/csv",
         headers={"Content-Disposition": f"attachment;filename={filename}"},
     )
+
+
+@bp.route("/settings/backup/restore", methods=["POST"])
+@login_required
+@admin_role_required
+def restore_backup_upload():
+    """Restore a backup ZIP from the Data Backup page.
+
+    Restoring is the most destructive thing this admin panel can do, so
+    three guards sit in front of it, all of which have to be got past
+    deliberately:
+
+      1. Preview is the default. The form's Preview button reports what
+         would change and writes nothing. Applying takes a separate,
+         differently-labelled button.
+      2. Applying requires typing RESTORE. A misclick can't do it.
+      3. A backup of the CURRENT database is taken and saved before any
+         write. The CLI script tells you to do this by hand and trusts you
+         to remember; here it's automatic, because the moment you need it
+         is exactly the moment you'll have forgotten.
+
+    Admin-only (staff can't reach it), on top of all of the above.
+    """
+    file = request.files.get("backup_zip")
+    if not file or not file.filename:
+        flash("Please choose a backup ZIP file.")
+        return redirect(url_for("admin.data_backup"))
+
+    apply_changes = request.form.get("mode") == "apply"
+    wipe = request.form.get("wipe") == "yes"
+
+    if apply_changes and (request.form.get("confirm") or "").strip().upper() != "RESTORE":
+        flash("Type RESTORE in the confirmation box to apply a restore. Nothing was changed.")
+        return redirect(url_for("admin.data_backup"))
+
+    zip_bytes = file.read()
+
+    safety_backup = None
+    if apply_changes:
+        # Before touching anything. If this fails, the restore doesn't run:
+        # going ahead without a way back is not a trade worth making.
+        try:
+            safety_backup = run_backup(current_app, send_email=False)
+        except Exception:
+            current_app.logger.exception("Pre-restore safety backup failed")
+            flash(
+                "Couldn't take a safety backup of the current data, so the restore was "
+                "cancelled. Nothing was changed."
+            )
+            return redirect(url_for("admin.data_backup"))
+
+    try:
+        result = restore_backup_zip(db, zip_bytes, wipe=wipe, dry_run=not apply_changes)
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("Backup restore failed")
+        flash(f"Restore failed: {exc}. Nothing was changed.")
+        return redirect(url_for("admin.data_backup"))
+
+    if not apply_changes:
+        db.session.rollback()
+    else:
+        db.session.commit()
+        log_activity(
+            "backup_restore",
+            details=f"Restored {file.filename}"
+                    + (" (wipe first)" if wipe else " (upsert)")
+                    + (f"; safety backup {safety_backup['filename']}" if safety_backup else ""),
+        )
+        db.session.commit()
+
+    summary = ", ".join(
+        f"{name.replace('.csv','')}: {ins} new / {upd} updated"
+        for name, ins, upd in result["tables"]
+    )
+    if apply_changes:
+        flash(f"Restore complete. {summary}.")
+        if safety_backup:
+            flash(f"A backup of the previous data was saved first as {safety_backup['filename']}.")
+    else:
+        flash(f"Preview only -- nothing was changed. This backup would apply: {summary}.")
+    if result["missing"]:
+        flash("Not in this backup (left as-is): " + ", ".join(result["missing"]) + ".")
+
+    return redirect(url_for("admin.data_backup"))
