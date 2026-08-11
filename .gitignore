@@ -4,3 +4,9 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+.DS_Store
+
+# Converted donor/donation history staged for import. These carry real
+# names, phone numbers, addresses and PANs -- they belong on the machine
+# doing the import, not in the repository.
+data_imports/

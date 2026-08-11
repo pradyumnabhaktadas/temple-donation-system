@@ -479,7 +479,22 @@ class Donation(db.Model):
         if self.payment_mode == "cheque" and self.cheque_number:
             suffix = f" ({self.cheque_bank_name})" if self.cheque_bank_name else ""
             return f"Cheque #{self.cheque_number}{suffix}"
-        if self.payment_mode == "bank_transfer" and self.bank_transaction_id:
+        # bank_transaction_id is the catch-all reference field: a UTR for a
+        # bank transfer, the gateway's transaction/payment id for a payment
+        # recorded by hand as "online" (typed in from a Zoho or Razorpay
+        # report), a reference number for an IYF camp collection.
+        #
+        # Deliberately not filtered by payment_mode. It used to allow only
+        # bank_transfer, and an online donation logged through the Offline
+        # Donation form stored the id but showed it nowhere -- not in the
+        # Donations Log, not in the CSV export, not on the receipt, all of
+        # which read this one property. Listing the permitted modes here
+        # just moves the bug: the IYF camp form offers the same reference
+        # field for Cheque while collecting no cheque number, so a
+        # mode-by-mode allowlist silently drops that one too. If a human
+        # typed a reference into this field, it is the only thread back to
+        # the payment in someone else's system, and it gets shown.
+        if self.bank_transaction_id:
             return self.bank_transaction_id
         return None
 
