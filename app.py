@@ -9,7 +9,7 @@ load_dotenv()
 from config import Config
 from extensions import db, login_manager, csrf, limiter, LIMITER_AVAILABLE
 from models import AdminUser
-from utils import format_inr, normalize_phone, to_ist, receipt_access_token
+from utils import format_inr, normalize_phone, to_ist, receipt_access_token, mask_pan
 
 
 def create_app(test_config=None):
@@ -191,6 +191,11 @@ def create_app(test_config=None):
     # on their wall. Usage: {{ (d.donation_date | to_ist).strftime(...) }}
     # -- chainable on an optional column since to_ist(None) is None.
     app.jinja_env.filters["to_ist"] = to_ist
+
+    # QA report REG-029: mask a PAN down to its last 4 characters for
+    # list-style views where every donor's PAN would otherwise be visible
+    # at once. Usage: {{ d.pan | mask_pan }}
+    app.jinja_env.filters["mask_pan"] = mask_pan
 
     # Receipt download links need a signed token (see
     # utils.receipt_access_token) -- exposed to templates so every link is

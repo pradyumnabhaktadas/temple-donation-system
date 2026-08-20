@@ -14,8 +14,9 @@ from flask import (
 )
 from flask_login import login_user, logout_user, login_required, current_user
 from sqlalchemy import func, extract
+from werkzeug.security import check_password_hash, generate_password_hash
 
-from extensions import db
+from extensions import db, limiter
 from models import (
     Camp,
     Donor, Campaign, Donation, AdminUser, ReceiptCounter, BaceProperty, Festival, SevaType,
@@ -93,7 +94,31 @@ def enforce_password_change():
         return redirect(url_for("admin.change_password"))
 
 
+
+# QA report REG-048: a nonexistent username used to short-circuit before
+# ever reaching check_password_hash's deliberately expensive comparison
+# (a real hash is intentionally slow, to resist brute-forcing) -- the
+# report's own timing samples caught a consistent ~2x gap between a
+# nonexistent username (~417ms) and a real one with a wrong password
+# (~812ms), enough to enumerate valid usernames by timing alone even
+# though the response body/message was already identical either way.
+# Hashed once at import time (not per-request) so it costs the same as a
+# real check_password_hash call without recomputing a fresh hash on every
+# login attempt; the actual value is never used for anything except
+# consuming comparable time, so it doesn't need to be a secret.
+_DUMMY_PASSWORD_HASH = generate_password_hash(secrets.token_hex(32))
+
+
 @bp.route("/login", methods=["GET", "POST"])
+# QA report REG-049: 15 rapid failed attempts against a nonexistent
+# username, then immediately a second nonexistent username, all went
+# through with no backoff -- the per-username lockout below (register_
+# failed_attempt) only ever triggers for a username that exists, so it
+# does nothing against a spray across many guessed/nonexistent usernames.
+# This adds the missing IP-level layer on top of it, the same pairing the
+# donor OTP endpoint already uses (per-identifier lockout + per-IP
+# throttle) -- see donor_portal.py's send_otp_route().
+@limiter.limit("20 per hour")
 def login():
     if request.method == "POST":
         username = request.form["username"].strip()
@@ -105,7 +130,13 @@ def login():
             flash(f"Too many failed attempts. Try again in about {minutes_left} minute(s).")
             return render_template("admin/login.html")
 
-        if user and user.check_password(password):
+        # Always run a password-hash comparison, real user or not -- see
+        # REG-048 above. check_password() below is check_password_hash()
+        # under the hood (see AdminUser.check_password), the same
+        # function, so both branches cost the same regardless of outcome.
+        password_ok = user.check_password(password) if user else check_password_hash(_DUMMY_PASSWORD_HASH, password)
+
+        if user and password_ok:
             user.register_successful_login()
             db.session.commit()
             login_user(user)

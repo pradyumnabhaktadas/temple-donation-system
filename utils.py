@@ -3,6 +3,21 @@ import hashlib
 import hmac
 import re
 
+# Income Tax Rule 114B requires PAN to be quoted for various high-value
+# transactions once they reach Rs 50,000 -- this app requires PAN (and a
+# postal address, so the office can actually reach a large donor if
+# anything needs following up) starting at Rs 49,000 instead, as a safety
+# margin under that line rather than cutting it exactly at the legal
+# threshold. Applies to every donation entry point regardless of 80G
+# status (BACE Contribution payments are not tax-deductible but can still
+# be large enough to trigger this same PAN-quoting requirement).
+#
+# Lives here rather than in public.py so pdf_utils.py can use the same
+# number when deciding whether a receipt should print a PAN at all (QA
+# report REG-034) without importing public.py, which would create an
+# import cycle (public.py already imports from pdf_utils.py).
+HIGH_VALUE_PAN_THRESHOLD = 49000
+
 # CSV/formula injection (OWASP CSV Injection, QA report REG-059): a cell
 # whose text begins with one of these is read as a formula, not literal
 # text, the moment the file is opened in Excel or Google Sheets -- and
@@ -31,6 +46,33 @@ def csv_safe_row(values):
     """Apply csv_safe() to every cell in a row about to go to
     csv.writer.writerow() -- see csv_safe()'s docstring for why."""
     return [csv_safe(v) for v in values]
+
+
+def mask_pan(value):
+    """QA report REG-029: /admin/donors printed every donor's PAN in full
+    to anyone glancing at the list -- unlike the donor-detail page (one
+    donor, an admin who navigated there deliberately) or the CSV exports
+    (a compliance record an admin explicitly downloaded), the list view is
+    the one surface where a PAN is on screen for every donor at once with
+    no reason for most of them to be readable at a glance.
+
+    Matches the report's own suggested format: the first 5 and last 1
+    characters stay visible, the middle is masked with '*' -- a valid
+    PAN's middle 4 characters are its actual
+    unique serial digits, while the first 5 (holder-type/initial letters)
+    and last (checksum-ish letter) carry less on their own, so this keeps
+    enough visible to recognise/match against a physical document without
+    showing the part that actually identifies the person. Malformed/short
+    values (a few legacy-imported PANs aren't exactly 10 characters)
+    degrade gracefully rather than crashing or leaking the whole value."""
+    if not value:
+        return value
+    value = str(value)
+    if len(value) <= 6:
+        # Too short to have a meaningful first-5/last-1 split -- mask
+        # everything but the very last character.
+        return "*" * (len(value) - 1) + value[-1:] if value else value
+    return value[:5] + "*" * (len(value) - 6) + value[-1:]
 
 
 def receipt_access_token(donation_id, secret_key):

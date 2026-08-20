@@ -8,7 +8,7 @@ from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-from utils import amount_to_words_inr, format_inr
+from utils import HIGH_VALUE_PAN_THRESHOLD, amount_to_words_inr, format_inr
 
 RECEIPTS_DIR = os.path.join(os.path.dirname(__file__), "instance", "receipts")
 FONTS_DIR = os.path.join(os.path.dirname(__file__), "static", "fonts")
@@ -491,9 +491,17 @@ def generate_receipt_pdf(donation, donor, campaign, org_cfg):
         ("Name", donor.full_name, 2),
         ("Address", donor.address or "-", 5),
         ("PIN", donor.pincode or "-", 1),
-        ("PAN", donor.pan or "-", 1),
-        ("Mobile", donor.phone or "-", 1),
     ]
+    # QA report REG-034: a PAN on file (kept for one donation that needed
+    # it, or entered once and reused by find_or_create_donor for a later
+    # one) used to print on *every* receipt for that donor, even a small
+    # non-80G one with no legal reason to show it. Only print PAN when
+    # this specific donation is 80G-eligible or crosses the same
+    # high-value threshold that requires PAN to be collected at all --
+    # matching the rule already enforced at collection time.
+    if donation.effective_is_80g or (donation.amount or 0) > HIGH_VALUE_PAN_THRESHOLD:
+        donor_fields.append(("PAN", donor.pan or "-", 1))
+    donor_fields.append(("Mobile", donor.phone or "-", 1))
     whatsapp = getattr(donor, "whatsapp_number", None)
     if whatsapp and whatsapp != donor.phone:
         # Only shown when it's actually a different number -- most donors

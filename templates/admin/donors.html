@@ -45,7 +45,7 @@
       <td><a href="{{ url_for('admin.donor_detail', donor_id=d.id) }}">{{ d.full_name }}</a></td>
       <td>{{ d.phone or '-' }}</td>
       <td>{{ d.email or '-' }}</td>
-      <td>{{ d.pan or '-' }}</td>
+      <td>{{ d.pan | mask_pan if d.pan else '-' }}</td>
       <td>{{ donor_type_labels.get(d.donor_type, '-') if d.donor_type else '-' }}</td>
       <td>{{ d.connected_preacher.name if d.connected_preacher else '-' }}</td>
       <td class="text-end">{{ t[1] }}</td>

@@ -102,7 +102,12 @@
     </div>
     <div class="site-footer-note">
       <img src="{{ url_for('static', filename='branding/iskcon_dwarka_logo.png') }}" alt="ISKCON Dwarka Delhi" class="footer-logo"> Thank you for supporting {{ org_name or 'the temple' }}.
-      <span class="footer-admin-link">· <a href="{{ url_for('admin.login') }}">Admin</a></span>
+      {# QA report REG-019: the Admin login link used to be advertised in
+         every public page's footer -- staff already know the /admin/login
+         URL, and publicly linking it just hands anyone browsing the site
+         a ready-made target to brute-force or probe. Removed; nothing
+         about actually logging in changes, the route still works exactly
+         the same for anyone who navigates to it directly. #}
     </div>
   </footer>
   {% endblock %}

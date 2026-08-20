@@ -48,7 +48,7 @@ from models import Donor, Campaign, Donation, ReceiptCounter, BaceProperty, Fest
 from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email
 from whatsapp_utils import send_receipt_whatsapp
-from utils import is_valid_pan, is_valid_phone, normalize_phone, receipt_access_token
+from utils import HIGH_VALUE_PAN_THRESHOLD, is_valid_pan, is_valid_phone, normalize_phone, receipt_access_token
 
 bp = Blueprint("public", __name__)
 
@@ -155,17 +155,6 @@ def _normalize_name(name):
     to tell "same person, retyped slightly differently" apart from
     "different person" when a phone/email is shared (see below)."""
     return re.sub(r"\s+", " ", (name or "").strip()).lower()
-
-
-# Income Tax Rule 114B requires PAN to be quoted for various high-value
-# transactions once they reach Rs 50,000 -- this app requires PAN (and a
-# postal address, so the office can actually reach a large donor if
-# anything needs following up) starting at Rs 49,000 instead, as a safety
-# margin under that line rather than cutting it exactly at the legal
-# threshold. Applies to every donation entry point regardless of 80G
-# status (BACE Contribution payments are not tax-deductible but can still
-# be large enough to trigger this same PAN-quoting requirement).
-HIGH_VALUE_PAN_THRESHOLD = 49000
 
 
 def high_value_pan_address_error(amount, pan, address):
@@ -590,6 +579,45 @@ def create_order():
     try:
         donor = find_or_create_donor(donor_data)
 
+        # REG-032 (QA report): two identical create-order requests fired
+        # back-to-back (a genuine double-click, or the pay button
+        # re-enabling on modal.ondismiss/payment.failed and the donor
+        # retrying) used to mint two separate donations and two separate
+        # Razorpay orders for what was really one donation intent. Rather
+        # than a client-side-only guard (which the report's own PAY-12
+        # case showed doesn't help a non-browser client, or two genuinely
+        # concurrent requests), reuse an existing pending donation for the
+        # same (donor, campaign, amount, purpose/property/festival/seva)
+        # if one was created in the last few minutes and -- for a live
+        # Razorpay payment -- already has an order attached, rather than
+        # creating a second one. A short window on purpose: long enough to
+        # absorb a rapid resubmit, short enough that a donor who
+        # deliberately makes two separate donations of the same amount to
+        # the same campaign minutes apart still gets two donations.
+        dedup_cutoff = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
+        existing_donation = Donation.query.filter(
+            Donation.donor_id == donor.id,
+            Donation.campaign_id == campaign.id,
+            Donation.amount == amount,
+            Donation.payment_mode == "online",
+            Donation.status == "pending",
+            Donation.bace_property_id == bace_property_id,
+            Donation.festival_id == festival_id,
+            Donation.seva_type_id == seva_type_id,
+            Donation.live_to_give_purpose_id == live_to_give_purpose_id,
+            Donation.donation_date >= dedup_cutoff,
+        ).order_by(Donation.id.desc()).first()
+        if existing_donation and (
+            not current_app.config["RAZORPAY_ENABLED"] or existing_donation.razorpay_order_id
+        ):
+            return jsonify({
+                "donation_id": existing_donation.id,
+                "order_id": existing_donation.razorpay_order_id,
+                "amount": amount,
+                "razorpay_enabled": current_app.config["RAZORPAY_ENABLED"],
+                "key_id": current_app.config["RAZORPAY_KEY_ID"],
+            })
+
         donation = Donation(
             donor_id=donor.id,
             campaign_id=campaign.id,
@@ -650,6 +678,26 @@ def create_order():
                     "notes": {"donation_id": str(donation.id), "campaign": campaign.name},
                 }
             )
+        except razorpay.errors.BadRequestError as e:
+            # QA report REG-033: an out-of-range amount (Razorpay rejects
+            # past its own ceiling) used to surface as a generic 502
+            # "gateway" error -- the donor's own input was the actual
+            # problem, not our connection to Razorpay, so this is a 400
+            # like any other validation failure. BadRequestError is
+            # specifically what the SDK raises for Razorpay's 4xx
+            # responses (bad amount, bad currency, ...) -- a real outage
+            # or misconfigured key raises something else and still falls
+            # through to the 502 branch below. Either way, the rollback
+            # (shared with that branch) means the pending donation row
+            # from the try block above never survives a failed order
+            # call -- confirmed by test_zzz_orphan_check-style coverage,
+            # not just assumed.
+            db.session.rollback()
+            current_app.logger.warning("Razorpay rejected the order request: %s", e)
+            return jsonify({
+                "error": "That amount couldn't be processed -- please try a smaller amount, "
+                         "or contact the temple office to arrange a large donation directly."
+            }), 400
         except Exception:
             # Razorpay unreachable/misconfigured -- don't leave an orphaned
             # pending donation behind, and show the donor a normal "try

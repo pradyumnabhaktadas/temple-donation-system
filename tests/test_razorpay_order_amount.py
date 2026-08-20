@@ -71,3 +71,118 @@ class TestRazorpayOrderAmountRounding:
         for cents in range(10100, 200000):  # Rs. 101.00 to Rs. 2000.00
             amount = cents / 100
             assert round(amount * 100) == cents
+
+
+class TestOutOfRangeAmountRejection:
+    """REG-033 (QA report, 2026-08-20): a very large amount is passed
+    through to Razorpay, which rejects it past its own ceiling
+    (razorpay.errors.BadRequestError) -- that used to surface as a bare
+    502 "gateway" error, the same response a donor would see if Razorpay
+    itself were down, even though the donor's own input was the actual
+    problem. Now returns a clean 400 for that specific case; a genuine
+    connectivity/server failure (any other exception) still returns 502.
+
+    The report also flagged a pending donation row appearing to survive
+    the failed order call -- reproduced first to confirm whether that was
+    still true before writing a fix for it: it wasn't (the existing
+    db.session.rollback() already undoes the flush()'d row), so only the
+    status-code half needed fixing. Both are asserted here so a future
+    regression on either one is caught."""
+
+    def test_amount_rejected_by_razorpay_returns_400_not_502(self, app, client):
+        import razorpay.errors
+        from unittest.mock import MagicMock, patch
+        from models import Campaign
+
+        app.config["RAZORPAY_KEY_ID"] = "rzp_test_fake"
+        app.config["RAZORPAY_KEY_SECRET"] = "fake_secret"
+        app.config["RAZORPAY_ENABLED"] = True
+        campaign = Campaign.query.filter_by(name="Annadan").first()
+
+        mock_client = MagicMock()
+        mock_client.order.create.side_effect = razorpay.errors.BadRequestError(
+            "Amount exceeds maximum amount allowed."
+        )
+
+        with patch("razorpay.Client", return_value=mock_client):
+            resp = client.post(
+                "/api/create-order",
+                json={
+                    "campaign_id": campaign.id,
+                    "amount": 999999999,
+                    "full_name": "Out Of Range Donor",
+                    "phone": "9876500001",
+                    "consent": "on",
+                    "pan": "ABCDE1234F",
+                    "address": "123 Test Street",
+                },
+            )
+
+        assert resp.status_code == 400
+        assert "error" in resp.get_json()
+
+    def test_amount_rejected_by_razorpay_leaves_no_orphaned_donation_row(self, app, client):
+        import razorpay.errors
+        from unittest.mock import MagicMock, patch
+        from models import Campaign, Donation
+
+        app.config["RAZORPAY_KEY_ID"] = "rzp_test_fake"
+        app.config["RAZORPAY_KEY_SECRET"] = "fake_secret"
+        app.config["RAZORPAY_ENABLED"] = True
+        campaign = Campaign.query.filter_by(name="Annadan").first()
+
+        mock_client = MagicMock()
+        mock_client.order.create.side_effect = razorpay.errors.BadRequestError(
+            "Amount exceeds maximum amount allowed."
+        )
+
+        with app.app_context():
+            before = Donation.query.count()
+
+        with patch("razorpay.Client", return_value=mock_client):
+            client.post(
+                "/api/create-order",
+                json={
+                    "campaign_id": campaign.id,
+                    "amount": 999999999,
+                    "full_name": "Orphan Row Donor",
+                    "phone": "9876500002",
+                    "consent": "on",
+                    "pan": "ABCDE1234F",
+                    "address": "123 Test Street",
+                },
+            )
+
+        with app.app_context():
+            after = Donation.query.count()
+        assert after == before, "a rejected order-creation call must not leave a pending donation row behind"
+
+    def test_a_generic_razorpay_failure_still_returns_502(self, app, client):
+        """A real connectivity/server-side failure (not a rejected
+        amount) is a different kind of problem -- still worth telling the
+        donor "try again," not the amount-specific message above."""
+        from unittest.mock import MagicMock, patch
+        from models import Campaign
+
+        app.config["RAZORPAY_KEY_ID"] = "rzp_test_fake"
+        app.config["RAZORPAY_KEY_SECRET"] = "fake_secret"
+        app.config["RAZORPAY_ENABLED"] = True
+        campaign = Campaign.query.filter_by(name="Annadan").first()
+
+        mock_client = MagicMock()
+        mock_client.order.create.side_effect = ConnectionError("Razorpay unreachable")
+
+        with patch("razorpay.Client", return_value=mock_client):
+            resp = client.post(
+                "/api/create-order",
+                json={
+                    "campaign_id": campaign.id,
+                    "amount": 501,
+                    "full_name": "Connectivity Failure Donor",
+                    "phone": "9876500003",
+                    "consent": "on",
+                    "pan": "ABCDE1234F",
+                },
+            )
+
+        assert resp.status_code == 502
