@@ -21,15 +21,25 @@ Notes:
     the campaign first (Admin -> Campaigns -> New Campaign), then re-run.
   - receipt_number: if your old records already have receipt numbers you
     want to preserve for continuity, put them in this column and they'll be
-    kept as-is instead of generating new ones. Leave blank to auto-generate
-    using the same numbering scheme as new donations.
+    kept as-is. Leave it blank and the donation imports with no receipt
+    number -- this site's own numbering sequence is never auto-generated
+    for a historical row, since that would present an old donation as an
+    official receipt this site had issued. It still counts everywhere
+    (totals, Analytics, Form 10BD by financial year).
+  - donation_date also accepts the DD/MM/YYYY that Excel leaves behind
+    after you open and re-save the file.
   - Donor de-duplication uses the exact same PAN -> phone -> email matching
     logic as the live donation form, so importing won't create duplicates
     of donors who already exist (e.g. if some of this year's data has
     already come in through the new system).
   - This script does NOT generate PDF receipts for imported rows by default
     (it would be slow and pointless for old paper receipts). Pass
-    --generate-receipts if you do want PDFs for every imported row.
+    --generate-receipts if you do want PDFs -- rows with no receipt_number
+    don't get one either way, since there'd be no number to print on it.
+
+NOTE: Admin -> Import Historical Data does the same job in the browser,
+accepts .xlsx directly, and shows a Preview of what would happen before
+anything is written. Prefer it unless you specifically want a CLI.
 
 Usage:
     python import_legacy_data.py path/to/consolidated_history.csv
@@ -43,9 +53,11 @@ import sys
 
 from app import create_app
 from extensions import db
-from models import Campaign, Donation, ReceiptCounter
+from admin import _import_datetime
+from models import Campaign, Donation
 from pdf_utils import generate_receipt_pdf
 from public import find_or_create_donor, _org_cfg
+from utils import get_financial_year
 
 VALID_MODES = {"cash", "cheque", "bank_transfer", "online"}
 
@@ -69,6 +81,7 @@ def main():
             sys.exit(1)
 
         imported = 0
+        no_receipt = 0
         skipped = []
 
         with open(args.csv_path, newline="", encoding="utf-8-sig") as f:
@@ -94,10 +107,16 @@ def main():
                     skipped.append((i, f"Invalid amount '{row.get('amount')}'"))
                     continue
 
-                try:
-                    donation_date = datetime.datetime.strptime(row["donation_date"].strip(), "%Y-%m-%d")
-                except (ValueError, KeyError, AttributeError):
-                    skipped.append((i, f"Invalid donation_date '{row.get('donation_date')}' (expected YYYY-MM-DD)"))
+                # Same parser the web importers use, so a spreadsheet that
+                # Excel reformatted to 22/01/2024 on save is accepted here
+                # too. This used to be a bare strptime("%Y-%m-%d"), which
+                # meant the identical file imported through the admin panel
+                # and was rejected row-by-row by this script.
+                date_errors = []
+                donation_date = _import_datetime(
+                    row.get("donation_date"), "donation_date", date_errors)
+                if date_errors:
+                    skipped.append((i, date_errors[0]))
                     continue
 
                 if not (row.get("full_name") or "").strip():
@@ -127,17 +146,29 @@ def main():
                 db.session.add(donation)
                 db.session.flush()
 
+                # financial_year always comes from the donation's own date,
+                # receipt number or not -- it's what Form 10BD and every
+                # annual report group by.
+                donation.financial_year = get_financial_year(donation_date)
+
                 existing_receipt = (row.get("receipt_number") or "").strip()
                 if existing_receipt:
-                    donation.receipt_number = existing_receipt
-                    from utils import get_financial_year
-                    donation.financial_year = get_financial_year(donation_date)
+                    donation.receipt_number = existing_receipt[:50]
                 else:
-                    receipt_number, fy = ReceiptCounter.next_receipt_number(campaign.is_80g, donation_date)
-                    donation.receipt_number = receipt_number
-                    donation.financial_year = fy
+                    # Deliberately left without one, matching the admin
+                    # panel's Historical Import. This script used to mint a
+                    # fresh number from this site's own sequence
+                    # (032511/ISK500000...) here, which misrepresents an old
+                    # paper donation as an official receipt this site
+                    # issued, and burns numbers out of the live series for
+                    # donations that predate it. The donation still counts
+                    # everywhere -- totals, Analytics, Form 10BD -- it just
+                    # has no receipt number, same as it had none before.
+                    no_receipt += 1
 
-                if args.generate_receipts:
+                # No receipt number means nothing to print on a receipt,
+                # so no PDF either -- same rule as the admin panel.
+                if args.generate_receipts and donation.receipt_number:
                     donation.receipt_pdf = generate_receipt_pdf(donation, donor, campaign, _org_cfg())
 
                 db.session.commit()
@@ -148,6 +179,12 @@ def main():
             print(f"[DRY RUN] Would import {imported} row(s). Nothing was written.")
         else:
             print(f"Imported {imported} donation(s).")
+            if no_receipt:
+                print(
+                    f"  {no_receipt} row(s) had no receipt_number, so none was assigned. "
+                    "This site's own numbering is never auto-generated for historical rows "
+                    "-- that would present an old donation as a receipt this site issued."
+                )
 
         if skipped:
             print(f"\nSkipped {len(skipped)} row(s):")

@@ -1607,6 +1607,16 @@ def _table_from_upload(file):
     looks_like_xlsx = raw[:2] == b"PK"
     named_xlsx = (file.filename or "").lower().endswith((".xlsx", ".xlsm"))
 
+    # Old-format .xls is an OLE2 compound document, not a zip, and openpyxl
+    # can't read it. Worth naming: through the CSV path it decodes to
+    # binary noise and the operator is told their file is missing every
+    # required column, which sends them looking in the wrong place.
+    if raw[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        raise _UploadReadError(
+            "That's an older Excel .xls file, which can't be read directly. Open it in "
+            "Excel and use Save As to make it an .xlsx (or a CSV), then upload that."
+        )
+
     if looks_like_xlsx or named_xlsx:
         if not looks_like_xlsx:
             raise _UploadReadError(
@@ -1694,16 +1704,23 @@ def _normalize_camp_text(value):
 IYF_CAMP_CAMPAIGN_NAME = "IYF Camps"
 
 
-def _iyf_camp_campaign():
+def _iyf_camp_campaign(create=True):
     """The campaign every camp collection is recorded against.
 
     Donation.campaign_id is required, and camp money is its own stream --
     filing it under an existing campaign would corrupt that campaign's
     totals. Created on first use rather than needing a setup step, and
     is_80g=False per the rule that camp collections aren't 80G-eligible.
+
+    `create=False` returns None instead of creating it, and exists for the
+    bulk import's preview: this function commits, so a dry run that called
+    it was writing a Campaign row to the database while telling the
+    operator nothing had been saved. Harmless in itself -- the row is
+    identical to the one a real import would make -- but "nothing has been
+    saved" has to be true, or it isn't worth saying.
     """
     campaign = Campaign.query.filter_by(name=IYF_CAMP_CAMPAIGN_NAME).first()
-    if campaign is None:
+    if campaign is None and create:
         campaign = Campaign(
             name=IYF_CAMP_CAMPAIGN_NAME,
             description="Donations collected from students at IYF camps.",
@@ -4411,9 +4428,12 @@ def iyf_camp_bulk():
         )
         return redirect(url_for("admin.iyf_camps", tab="bulk"))
 
-    campaign = _iyf_camp_campaign()
-    results, created = [], 0
     preview = request.form.get("action") == "preview"  # dry run -- see bulk_import_donations
+    # create=False on a dry run: this call commits, so previewing used to
+    # create the IYF Camps campaign while reporting that nothing had been
+    # saved. May be None here; only the non-preview path dereferences it.
+    campaign = _iyf_camp_campaign(create=not preview)
+    results, created = [], 0
     ambiguous_dates = []  # see _parse_import_date
 
     for line_num, row in enumerate(reader, start=2):
@@ -4477,7 +4497,9 @@ def iyf_camp_bulk():
         if preview:
             results.append({
                 "line": line_num, "name": full_name, "ok": True, "preview": True,
-                "amount": amount, "campaign": campaign.name,
+                # The constant, not campaign.name -- campaign is None on a
+                # dry run when the IYF Camps campaign doesn't exist yet.
+                "amount": amount, "campaign": IYF_CAMP_CAMPAIGN_NAME,
                 "donation_date": (
                     datetime.datetime.combine(donation_date, datetime.time())
                     if donation_date else None

@@ -162,6 +162,20 @@ class TestExcelFilesUploadDirectly:
         # Flashed through Jinja, so the apostrophe arrives escaped.
         assert "named like an Excel workbook" in resp.data.decode()
 
+    def test_an_old_format_xls_gets_a_specific_message(self, app, client, campaign_id):
+        """.xls (pre-2007 Excel) is an OLE2 compound document, not a zip --
+        openpyxl can't read it, and it isn't CSV text either. Without a
+        dedicated check it falls into the CSV path, decodes to binary
+        noise, and the operator is told their file is "missing every
+        required column" -- true of the garbled read, useless as a report
+        of what's actually wrong."""
+        login(client)
+        ole2_signature = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+        resp = _upload(client, ole2_signature + b"\x00" * 300, filename="history.xls")
+        body = resp.data.decode()
+        assert "older Excel" in body
+        assert "missing required column" not in body
+
 
 class TestPreviewWritesNothing:
     """The property that matters most. Everything else about a preview is
@@ -389,3 +403,73 @@ class TestTheExcelTemplates:
         for index, csv_row in enumerate(csv_rows):
             name_cell = sheet.cell(row=index + 2, column=headers.index("full_name") + 1)
             assert name_cell.value == csv_row["full_name"]
+
+
+class TestCampBulkPreviewCreatesNothing:
+    """_iyf_camp_campaign() commits a new Campaign row the first time it's
+    called -- fine for a real import, wrong for a preview. This used to
+    mean previewing a camp CSV against a fresh database created the "IYF
+    Camps" campaign while the banner said nothing had been saved.
+    """
+
+    def test_previewing_a_camp_file_does_not_create_the_campaign(self, app, client):
+        from extensions import db
+        from models import Camp, Campaign
+        login(client)
+        with app.app_context():
+            db.session.add(Camp(name="Utkarsha 2026"))
+            db.session.commit()
+            assert Campaign.query.filter_by(name="IYF Camps").first() is None
+
+        csv_text = (
+            "full_name,amount,camp_name,batch_name,donation_date,payment_mode\n"
+            "Camp One,2100,Utkarsha 2026,Batch A,2026-08-01,cash\n"
+        ).encode()
+        resp = client.post(
+            "/admin/iyf-camps/bulk",
+            data={"csv_file": (io.BytesIO(csv_text), "f.csv"), "action": "preview"},
+            content_type="multipart/form-data", follow_redirects=True)
+
+        assert "Would import" in resp.data.decode()
+        with app.app_context():
+            assert Campaign.query.filter_by(name="IYF Camps").first() is None, (
+                "preview created the IYF Camps campaign -- 'nothing has been saved' was false"
+            )
+
+    def test_the_real_import_still_creates_it_and_imports(self, app, client):
+        """Guards the fix above from overcorrecting into never creating
+        the campaign at all."""
+        from extensions import db
+        from models import Camp, Campaign, Donation
+        login(client)
+        with app.app_context():
+            db.session.add(Camp(name="Utkarsha 2026"))
+            db.session.commit()
+
+        csv_text = (
+            "full_name,amount,camp_name,batch_name,donation_date,payment_mode\n"
+            "Camp One,2100,Utkarsha 2026,Batch A,2026-08-01,cash\n"
+        ).encode()
+        client.post("/admin/iyf-camps/bulk",
+                    data={"csv_file": (io.BytesIO(csv_text), "f.csv")},
+                    content_type="multipart/form-data", follow_redirects=True)
+        with app.app_context():
+            assert Campaign.query.filter_by(name="IYF Camps").first() is not None
+            assert Donation.query.count() == 1
+
+    def test_preview_still_reports_the_campaign_name(self, app, client):
+        """The preview row names IYF_CAMP_CAMPAIGN_NAME directly rather
+        than campaign.name, since campaign can be None on a dry run
+        against a fresh database. Confirms the display didn't break."""
+        login(client)
+        csv_text = (
+            "full_name,amount,camp_name,batch_name,donation_date,payment_mode\n"
+            "Camp One,2100,Utkarsha 2026,Batch A,2026-08-01,cash\n"
+        ).encode()
+        # No Camp row created either -- exercises the "nothing exists yet"
+        # path fully, not just the campaign half of it.
+        resp = client.post(
+            "/admin/iyf-camps/bulk",
+            data={"csv_file": (io.BytesIO(csv_text), "f.csv"), "action": "preview"},
+            content_type="multipart/form-data", follow_redirects=True)
+        assert "IYF Camps" in resp.data.decode()
