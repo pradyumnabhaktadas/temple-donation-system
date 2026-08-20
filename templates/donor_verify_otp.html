@@ -13,8 +13,8 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="phone" value="{{ phone }}">
       <div class="mb-3">
-        <label class="form-label">One-Time Password</label>
-        <input type="text" class="form-control text-center" name="otp" inputmode="numeric" pattern="[0-9]*"
+        <label class="form-label" for="otp">One-Time Password</label>
+        <input type="text" class="form-control text-center" name="otp" id="otp" inputmode="numeric" pattern="[0-9]*"
                maxlength="6" placeholder="6-digit code" required autofocus style="letter-spacing: 0.3em; font-size:1.2rem;">
       </div>
       <button class="btn btn-gold w-100">Verify &amp; sign in <span class="ms-2">→</span></button>

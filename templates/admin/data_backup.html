@@ -61,8 +61,8 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
     <div class="mb-3">
-      <label class="form-label">Backup ZIP</label>
-      <input type="file" class="form-control" name="backup_zip" accept=".zip" required>
+      <label class="form-label" for="backup_zip">Backup ZIP</label>
+      <input type="file" class="form-control" name="backup_zip" id="backup_zip" accept=".zip" required>
       <div class="form-text">A <code>temple_data_backup_*.zip</code> from a download, the weekly email, or this server's disk.</div>
     </div>
 
@@ -80,8 +80,8 @@
     </div>
 
     <div class="mb-3">
-      <label class="form-label">To apply, type <code>RESTORE</code></label>
-      <input type="text" class="form-control" name="confirm" placeholder="RESTORE"
+      <label class="form-label" for="confirm">To apply, type <code>RESTORE</code></label>
+      <input type="text" class="form-control" name="confirm" id="confirm" placeholder="RESTORE"
              autocomplete="off" style="max-width:220px">
       <div class="form-text">Only needed for "Apply Restore" &mdash; a preview never asks for it.</div>
     </div>

@@ -6,8 +6,8 @@
 <form method="get" class="card card-body shadow-sm mb-4">
   <div class="row g-2 align-items-end">
     <div class="col-md-2">
-      <label class="form-label small mb-1">Date Range</label>
-      <select name="date_preset" class="form-select form-select-sm" onchange="this.form.submit()">
+      <label class="form-label small mb-1" for="date_preset">Date Range</label>
+      <select name="date_preset" id="date_preset" class="form-select form-select-sm" onchange="this.form.submit()">
         {% for p, lbl in [('this_month','This Month'), ('last_month','Last Month'), ('this_quarter','This Quarter'), ('this_year','This Year'), ('custom','Custom')] %}
         <option value="{{ p }}" {% if date_preset == p %}selected{% endif %}>{{ lbl }}</option>
         {% endfor %}
@@ -15,17 +15,17 @@
     </div>
     {% if date_preset == 'custom' %}
     <div class="col-md-2">
-      <label class="form-label small mb-1">From</label>
-      <input type="date" name="date_from" value="{{ custom_from }}" class="form-control form-control-sm">
+      <label class="form-label small mb-1" for="date_from">From</label>
+      <input type="date" name="date_from" id="date_from" value="{{ custom_from }}" class="form-control form-control-sm">
     </div>
     <div class="col-md-2">
-      <label class="form-label small mb-1">To</label>
-      <input type="date" name="date_to" value="{{ custom_to }}" class="form-control form-control-sm">
+      <label class="form-label small mb-1" for="date_to">To</label>
+      <input type="date" name="date_to" id="date_to" value="{{ custom_to }}" class="form-control form-control-sm">
     </div>
     {% endif %}
     <div class="col-md-2">
-      <label class="form-label small mb-1">Donor Type</label>
-      <select name="donor_type" class="form-select form-select-sm" onchange="this.form.submit()">
+      <label class="form-label small mb-1" for="donor_type">Donor Type</label>
+      <select name="donor_type" id="donor_type" class="form-select form-select-sm" onchange="this.form.submit()">
         <option value="">All</option>
         {% for t in donor_types %}
         <option value="{{ t }}" {% if donor_type_filter == t %}selected{% endif %}>{{ donor_type_labels[t] }}</option>
@@ -33,8 +33,8 @@
       </select>
     </div>
     <div class="col-md-2">
-      <label class="form-label small mb-1">Preacher</label>
-      <select name="preacher_id" class="form-select form-select-sm" onchange="this.form.submit()">
+      <label class="form-label small mb-1" for="preacher_id">Preacher</label>
+      <select name="preacher_id" id="preacher_id" class="form-select form-select-sm" onchange="this.form.submit()">
         <option value="">All</option>
         <option value="none" {% if preacher_filter == 'none' %}selected{% endif %}>Not Assigned</option>
         {% for p in all_preachers %}
@@ -43,8 +43,8 @@
       </select>
     </div>
     <div class="col-md-2">
-      <label class="form-label small mb-1">Frequency</label>
-      <select name="donation_frequency" class="form-select form-select-sm" onchange="this.form.submit()">
+      <label class="form-label small mb-1" for="donation_frequency">Frequency</label>
+      <select name="donation_frequency" id="donation_frequency" class="form-select form-select-sm" onchange="this.form.submit()">
         <option value="">All</option>
         {% for f in donation_frequencies %}
         <option value="{{ f }}" {% if frequency_filter == f %}selected{% endif %}>{{ donation_frequency_labels[f] }}</option>

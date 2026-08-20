@@ -23,7 +23,7 @@
 </div>
 <form class="row g-2 mb-3">
   <div class="col-auto">
-    <select name="campaign_id" class="form-select" onchange="this.form.submit()">
+    <select name="campaign_id" class="form-select" aria-label="Campaign" onchange="this.form.submit()">
       <option value="">All Campaigns</option>
       {% for c in campaigns %}
       <option value="{{ c.id }}" {% if campaign_id == c.id %}selected{% endif %}>{{ c.name }}</option>
@@ -31,7 +31,7 @@
     </select>
   </div>
   <div class="col-auto">
-    <select name="mode" class="form-select" onchange="this.form.submit()">
+    <select name="mode" class="form-select" aria-label="Payment mode" onchange="this.form.submit()">
       <option value="">All Modes</option>
       {% for m in ['online','cash','cheque','bank_transfer'] %}
       <option value="{{ m }}" {% if mode == m %}selected{% endif %}>{{ m.replace('_',' ').title() }}</option>
@@ -39,7 +39,7 @@
     </select>
   </div>
   <div class="col-auto">
-    <select name="status" class="form-select" onchange="this.form.submit()">
+    <select name="status" class="form-select" aria-label="Status" onchange="this.form.submit()">
       <option value="success" {% if status == 'success' %}selected{% endif %}>Success (default)</option>
       <option value="cancelled" {% if status == 'cancelled' %}selected{% endif %}>Cancelled</option>
       <option value="pending" {% if status == 'pending' %}selected{% endif %}>Pending</option>
@@ -219,8 +219,8 @@
           <p class="text-muted small">This won't delete the donation or alter the issued receipt PDF, but it will
             be excluded from totals, statements and reports, and its receipt will no longer be downloadable. This
             can be undone later from the Restore action.</p>
-          <label class="form-label">Reason for cancellation</label>
-          <textarea class="form-control" name="cancellation_reason" rows="2" required></textarea>
+          <label class="form-label" for="cancellation_reason_{{ d.id }}">Reason for cancellation</label>
+          <textarea class="form-control" name="cancellation_reason" id="cancellation_reason_{{ d.id }}" rows="2" required></textarea>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Never mind</button>
@@ -249,8 +249,8 @@
             first (search by amount/phone/time), then paste its Payment ID below. This issues a real receipt,
             so don't use it unless you've confirmed the payment on Razorpay's side.
           </p>
-          <label class="form-label">Razorpay Payment ID</label>
-          <input type="text" class="form-control" name="razorpay_payment_id" placeholder="pay_XXXXXXXXXXXXXX" required>
+          <label class="form-label" for="razorpay_payment_id_{{ d.id }}">Razorpay Payment ID</label>
+          <input type="text" class="form-control" name="razorpay_payment_id" id="razorpay_payment_id_{{ d.id }}" placeholder="pay_XXXXXXXXXXXXXX" required>
           {% if d.razorpay_order_id %}
           <div class="form-text">Order ID on file for this donation: <code>{{ d.razorpay_order_id }}</code></div>
           {% endif %}

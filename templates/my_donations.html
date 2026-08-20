@@ -13,8 +13,8 @@
     <form method="post" action="{{ url_for('donor_portal.send_otp_route') }}" class="card card-body account-card shadow-sm p-4">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="mb-3">
-        <label class="form-label">Phone Number</label>
-        <input type="tel" class="form-control" name="phone" placeholder="The number you donated with" required autofocus>
+        <label class="form-label" for="phone">Phone Number</label>
+        <input type="tel" class="form-control" name="phone" id="phone" placeholder="The number you donated with" required autofocus>
       </div>
       <button class="btn btn-gold w-100">Send secure code <span class="ms-2">→</span></button>
     </form>

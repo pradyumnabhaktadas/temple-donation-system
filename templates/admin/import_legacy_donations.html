@@ -32,8 +32,8 @@
   <form method="post" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="mb-3">
-      <label class="form-label">CSV File</label>
-      <input type="file" class="form-control" name="csv_file" accept=".csv,.xlsx" required>
+      <label class="form-label" for="csv_file">CSV File</label>
+      <input type="file" class="form-control" name="csv_file" id="csv_file" accept=".csv,.xlsx" required>
       <div class="form-text">
         Required columns: <code>full_name</code>, <code>campaign_name</code>, <code>amount</code>,
         <code>donation_date</code> (YYYY-MM-DD). See the demo file for every optional column

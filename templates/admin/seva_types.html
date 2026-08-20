@@ -12,12 +12,12 @@
       <form method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="mb-2">
-          <label class="form-label">Name</label>
-          <input type="text" class="form-control" name="name" placeholder="e.g. Annakut Seva" required>
+          <label class="form-label" for="name">Name</label>
+          <input type="text" class="form-control" name="name" id="name" placeholder="e.g. Annakut Seva" required>
         </div>
         <div class="mb-2">
-          <label class="form-label">Suggested Amount (optional)</label>
-          <input type="number" class="form-control" name="suggested_amount">
+          <label class="form-label" for="suggested_amount">Suggested Amount (optional)</label>
+          <input type="number" class="form-control" name="suggested_amount" id="suggested_amount">
         </div>
         <button class="btn btn-gold btn-sm">Add</button>
       </form>

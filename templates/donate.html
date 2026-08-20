@@ -43,31 +43,31 @@
       <div class="form-section">
       <div class="row">
         <div class="col-md-6 mb-3">
-          <label class="form-label">First Name</label>
+          <label class="form-label" for="first_name">First Name</label>
           <input type="text" class="form-control" id="first_name" required>
         </div>
         <div class="col-md-6 mb-3">
-          <label class="form-label">Last Name <span class="text-muted">(optional)</span></label>
+          <label class="form-label" for="last_name">Last Name <span class="text-muted">(optional)</span></label>
           <input type="text" class="form-control" id="last_name">
         </div>
       </div>
 
       <div class="row">
         <div class="col-md-6 mb-3">
-          <label class="form-label">Phone</label>
-          <input type="tel" class="form-control" name="phone" required>
+          <label class="form-label" for="phone">Phone</label>
+          <input type="tel" class="form-control" name="phone" id="phone" required>
         </div>
         <div class="col-md-6 mb-3">
-          <label class="form-label">Email address</label>
-          <input type="email" class="form-control" name="email" required>
+          <label class="form-label" for="email">Email address</label>
+          <input type="email" class="form-control" name="email" id="email" required>
           <div class="field-note mt-1">Your donation receipt will be sent here.</div>
         </div>
       </div>
 
       <div class="row">
         <div class="col-md-6 mb-3">
-          <label class="form-label">WhatsApp Number <span class="text-muted">(if different from phone)</span></label>
-          <input type="tel" class="form-control" name="whatsapp_number">
+          <label class="form-label" for="whatsapp_number">WhatsApp Number <span class="text-muted">(if different from phone)</span></label>
+          <input type="tel" class="form-control" name="whatsapp_number" id="whatsapp_number">
         </div>
       </div>
       </div>
@@ -106,8 +106,8 @@
         </select>
       </div>
 
-      <div class="form-section" id="receipt-type-section" style="display:none;">
-        <label class="form-label mb-2">Do you need an 80G receipt? <span class="text-muted">(to claim tax benefits)</span></label>
+      <fieldset class="form-section" id="receipt-type-section" style="display:none;border:0;margin:0;padding:0;">
+        <legend class="form-label mb-2" style="font-size:inherit;float:none;">Do you need an 80G receipt? <span class="text-muted">(to claim tax benefits)</span></legend>
         <div class="d-flex gap-4">
           <div class="form-check">
             <input class="form-check-input" type="radio" name="receipt_type" id="receipt_type_80g" value="80g">
@@ -122,42 +122,42 @@
           This purpose isn't eligible for an 80G tax receipt -- only Food for Life, Charity, Donation,
           Life Membership, Construction, and Annadan qualify. You'll receive a regular donation receipt.
         </p>
-      </div>
+      </fieldset>
 
       <div class="form-section" id="eightyg-fields" style="display:none;">
       <p class="field-note text-muted mb-2" id="high-value-note" style="display:none;">
         PAN and address are mandatory for donations above Rs. 49,000, per Income Tax rules.
       </p>
       <div class="mb-3">
-        <label class="form-label">PAN <span class="text-muted">(required for 80G receipt)</span></label>
+        <label class="form-label" for="pan">PAN <span class="text-muted">(required for 80G receipt)</span></label>
         <input type="text" class="form-control" name="pan" id="pan" style="text-transform:uppercase" maxlength="10"
                pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10 characters, e.g. ABCDE1234F">
       </div>
 
       <div class="mb-0">
-        <label class="form-label">Address</label>
+        <label class="form-label" for="address">Address</label>
         <textarea class="form-control" name="address" id="address" rows="2"></textarea>
       </div>
 
       <div class="row">
         <div class="col-md-4 mb-3">
-          <label class="form-label">City</label>
-          <input type="text" class="form-control" name="city">
+          <label class="form-label" for="city">City</label>
+          <input type="text" class="form-control" name="city" id="city">
         </div>
         <div class="col-md-4 mb-3">
-          <label class="form-label">State</label>
-          <input type="text" class="form-control" name="state">
+          <label class="form-label" for="state">State</label>
+          <input type="text" class="form-control" name="state" id="state">
         </div>
         <div class="col-md-4 mb-3">
-          <label class="form-label">Pincode</label>
-          <input type="text" class="form-control" name="pincode">
+          <label class="form-label" for="pincode">Pincode</label>
+          <input type="text" class="form-control" name="pincode" id="pincode">
         </div>
       </div>
       </div>
 
       <div class="form-section mb-0">
-        <label class="form-label">Remarks <span class="text-muted">(optional)</span></label>
-        <input type="text" class="form-control" name="remarks" maxlength="300">
+        <label class="form-label" for="remarks">Remarks <span class="text-muted">(optional)</span></label>
+        <input type="text" class="form-control" name="remarks" id="remarks" maxlength="300">
       </div>
 
       <div class="consent-box form-check">

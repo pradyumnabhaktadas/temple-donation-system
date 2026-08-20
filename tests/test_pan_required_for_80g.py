@@ -138,6 +138,69 @@ class TestLiveToGiveReceiptTypeChoice:
         assert resp.status_code == 200
 
 
+class TestSpuriousPanNotStored:
+    """REG-001 (QA report): the donate.html opt-out toggle now excludes
+    the PAN field from FormData once "No" is selected (disabled, not just
+    hidden) -- but the report's own recommendation asked for a server-side
+    backstop too: "verify server-side that a non-80G donation record never
+    stores a PAN even if one arrives in the request." These simulate a
+    request that supplies a PAN anyway (stale form state, a non-JS client,
+    a hand-crafted request) alongside a non-80G, below-threshold donation,
+    and check it never reaches the donor's stored profile."""
+
+    def test_pan_sent_with_a_non_80g_low_value_donation_is_not_stored(self, app, client, non_80g_campaign):
+        from models import Donor
+        resp = _order(
+            client, campaign_id=non_80g_campaign, amount=500,
+            phone="9812340099", pan="ABCDE1234F",
+        )
+        assert resp.status_code == 200
+        donor = Donor.query.filter_by(phone="9812340099").first()
+        assert donor is not None
+        assert donor.pan is None
+
+    def test_pan_sent_with_live_to_give_non80g_choice_is_not_stored(self, app, client, live_to_give_setup):
+        from models import Donor
+        resp = _order(
+            client,
+            campaign_id=live_to_give_setup["campaign_id"],
+            live_to_give_purpose_id=live_to_give_setup["eligible_id"],
+            receipt_type="non80g",
+            phone="9812340098",
+            pan="ABCDE1234F",
+        )
+        assert resp.status_code == 200
+        donor = Donor.query.filter_by(phone="9812340098").first()
+        assert donor is not None
+        assert donor.pan is None
+
+    def test_pan_is_still_stored_when_the_donation_is_actually_80g(self, app, client, eighty_g_campaign):
+        """The backstop must not eat a legitimately-needed PAN."""
+        from models import Donor
+        resp = _order(
+            client, campaign_id=eighty_g_campaign, amount=500,
+            phone="9812340097", pan="ABCDE1234F",
+        )
+        assert resp.status_code == 200
+        donor = Donor.query.filter_by(phone="9812340097").first()
+        assert donor is not None
+        assert donor.pan == "ABCDE1234F"
+
+    def test_pan_is_still_stored_above_the_high_value_threshold_even_if_non_80g(self, app, client, non_80g_campaign):
+        """Above Rs. 49,000 the temple must report the PAN regardless of
+        80G status (income-tax high-value rule) -- the backstop only
+        strips a PAN that isn't needed for either reason."""
+        from models import Donor
+        resp = _order(
+            client, campaign_id=non_80g_campaign, amount=60000,
+            phone="9812340096", pan="ABCDE1234F", address="123 Test Street",
+        )
+        assert resp.status_code == 200
+        donor = Donor.query.filter_by(phone="9812340096").first()
+        assert donor is not None
+        assert donor.pan == "ABCDE1234F"
+
+
 class TestFestivalSevaFormMarksPanRequired:
     """Festivals is a fixed-80G campaign with no per-donation opt-out --
     every donation through this form is 80G, so the field itself should

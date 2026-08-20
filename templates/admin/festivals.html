@@ -12,12 +12,12 @@
       <form method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="mb-2">
-          <label class="form-label">Name</label>
-          <input type="text" class="form-control" name="name" placeholder="e.g. Janmashtami 2026" required>
+          <label class="form-label" for="name">Name</label>
+          <input type="text" class="form-control" name="name" id="name" placeholder="e.g. Janmashtami 2026" required>
         </div>
         <div class="mb-2">
-          <label class="form-label">Date (optional)</label>
-          <input type="date" class="form-control" name="event_date">
+          <label class="form-label" for="event_date">Date (optional)</label>
+          <input type="date" class="form-control" name="event_date" id="event_date">
         </div>
         <button class="btn btn-gold btn-sm">Add</button>
       </form>

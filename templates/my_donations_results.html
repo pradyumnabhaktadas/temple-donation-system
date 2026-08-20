@@ -17,7 +17,7 @@
   <div class="card card-body p-3">
     <div class="small fw-bold mb-2" style="color: var(--maroon-dark);">📄 Annual Statement</div>
     <form method="get" action="{{ url_for('donor_portal.download_statement', donor_id=donor.id) }}" class="d-flex gap-2">
-      <select name="fy" class="form-select form-select-sm">
+      <select name="fy" class="form-select form-select-sm" aria-label="Financial year">
         {% for fy in available_fys %}
         <option value="{{ fy }}">FY {{ fy }}</option>
         {% endfor %}
@@ -66,42 +66,42 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
       <div class="mb-3">
-        <label class="form-label">Full Name</label>
-        <input type="text" class="form-control" name="full_name" value="{{ donor.full_name }}" required>
+        <label class="form-label" for="full_name">Full Name</label>
+        <input type="text" class="form-control" name="full_name" id="full_name" value="{{ donor.full_name }}" required>
       </div>
 
       <div class="row">
         <div class="col-md-6 mb-3">
-          <label class="form-label">Phone</label>
-          <input type="tel" class="form-control" value="{{ donor.phone or '' }}" disabled>
+          <label class="form-label" for="donor-phone-display">Phone</label>
+          <input type="tel" class="form-control" id="donor-phone-display" value="{{ donor.phone or '' }}" disabled>
           <div class="form-text">To change your phone number, please contact the temple office.</div>
         </div>
         <div class="col-md-6 mb-3">
-          <label class="form-label">Email <span class="text-muted">(receipts are sent here)</span></label>
-          <input type="email" class="form-control" name="email" value="{{ donor.email or '' }}">
+          <label class="form-label" for="email">Email <span class="text-muted">(receipts are sent here)</span></label>
+          <input type="email" class="form-control" name="email" id="email" value="{{ donor.email or '' }}">
         </div>
       </div>
 
       <div class="mb-3">
-        <label class="form-label">WhatsApp Number <span class="text-muted">(if different from phone)</span></label>
-        <input type="tel" class="form-control" name="whatsapp_number" value="{{ donor.whatsapp_number or '' }}">
+        <label class="form-label" for="whatsapp_number">WhatsApp Number <span class="text-muted">(if different from phone)</span></label>
+        <input type="tel" class="form-control" name="whatsapp_number" id="whatsapp_number" value="{{ donor.whatsapp_number or '' }}">
       </div>
 
       <div class="mb-3">
-        <label class="form-label">PAN <span class="text-muted">(for 80G receipts)</span></label>
-        <input type="text" class="form-control" name="pan" value="{{ donor.pan or '' }}" style="text-transform:uppercase" maxlength="10"
+        <label class="form-label" for="pan">PAN <span class="text-muted">(for 80G receipts)</span></label>
+        <input type="text" class="form-control" name="pan" id="pan" value="{{ donor.pan or '' }}" style="text-transform:uppercase" maxlength="10"
                pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10 characters, e.g. ABCDE1234F">
       </div>
 
       <div class="mb-3">
-        <label class="form-label">Address</label>
-        <textarea class="form-control" name="address" rows="2">{{ donor.address or '' }}</textarea>
+        <label class="form-label" for="address">Address</label>
+        <textarea class="form-control" name="address" id="address" rows="2">{{ donor.address or '' }}</textarea>
       </div>
 
       <div class="row">
-        <div class="col-md-4 mb-3"><label class="form-label">City</label><input type="text" class="form-control" name="city" value="{{ donor.city or '' }}"></div>
-        <div class="col-md-4 mb-3"><label class="form-label">State</label><input type="text" class="form-control" name="state" value="{{ donor.state or '' }}"></div>
-        <div class="col-md-4 mb-3"><label class="form-label">Pincode</label><input type="text" class="form-control" name="pincode" value="{{ donor.pincode or '' }}"></div>
+        <div class="col-md-4 mb-3"><label class="form-label" for="city">City</label><input type="text" class="form-control" name="city" id="city" value="{{ donor.city or '' }}"></div>
+        <div class="col-md-4 mb-3"><label class="form-label" for="state">State</label><input type="text" class="form-control" name="state" id="state" value="{{ donor.state or '' }}"></div>
+        <div class="col-md-4 mb-3"><label class="form-label" for="pincode">Pincode</label><input type="text" class="form-control" name="pincode" id="pincode" value="{{ donor.pincode or '' }}"></div>
       </div>
 
       <button class="btn btn-gold">Save Changes</button>

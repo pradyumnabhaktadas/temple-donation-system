@@ -40,18 +40,18 @@
       <div class="form-section">
       <div class="row">
         <div class="col-md-6 mb-3">
-          <label class="form-label">Full Name</label>
-          <input type="text" class="form-control" name="full_name" required>
+          <label class="form-label" for="full_name">Full Name</label>
+          <input type="text" class="form-control" name="full_name" id="full_name" required>
         </div>
         <div class="col-md-6 mb-3">
-          <label class="form-label">Phone</label>
-          <input type="tel" class="form-control" name="phone" required>
+          <label class="form-label" for="phone">Phone</label>
+          <input type="tel" class="form-control" name="phone" id="phone" required>
         </div>
       </div>
       <div class="row">
         <div class="col-md-6 mb-0">
-          <label class="form-label">Email <span class="text-muted">(optional -- your receipt will be sent here)</span></label>
-          <input type="email" class="form-control" name="email">
+          <label class="form-label" for="email">Email <span class="text-muted">(optional -- your receipt will be sent here)</span></label>
+          <input type="email" class="form-control" name="email" id="email">
         </div>
       </div>
       </div>
@@ -67,20 +67,20 @@
         </p>
         <div class="row mb-0">
           <div class="col-md-6 mb-3">
-            <label class="form-label">PAN</label>
+            <label class="form-label" for="pan">PAN</label>
             <input type="text" class="form-control" name="pan" id="pan" style="text-transform:uppercase" maxlength="10"
                    pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10 characters, e.g. ABCDE1234F">
           </div>
         </div>
         <div class="mb-0">
-          <label class="form-label">Address</label>
+          <label class="form-label" for="address">Address</label>
           <textarea class="form-control" name="address" id="address" rows="2"></textarea>
         </div>
       </div>
 
       <div class="form-section mb-0">
-        <label class="form-label">Remarks <span class="text-muted">(optional)</span></label>
-        <input type="text" class="form-control" name="remarks" maxlength="300" placeholder="e.g. month covered by this payment">
+        <label class="form-label" for="remarks">Remarks <span class="text-muted">(optional)</span></label>
+        <input type="text" class="form-control" name="remarks" id="remarks" maxlength="300" placeholder="e.g. month covered by this payment">
       </div>
 
       <div class="consent-box form-check">

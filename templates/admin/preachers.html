@@ -14,8 +14,8 @@
       <form method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="mb-2">
-          <label class="form-label">Name</label>
-          <input type="text" class="form-control" name="name" placeholder="e.g. HG Example Das" required>
+          <label class="form-label" for="name">Name</label>
+          <input type="text" class="form-control" name="name" id="name" placeholder="e.g. HG Example Das" required>
         </div>
         <button class="btn btn-gold btn-sm">Add</button>
       </form>

@@ -139,8 +139,8 @@
           <p class="text-muted small">This won't delete the donation or alter the issued receipt PDF, but it will
             be excluded from totals, statements and reports, and its receipt will no longer be downloadable. This
             can be undone later from the Restore action.</p>
-          <label class="form-label">Reason for cancellation</label>
-          <textarea class="form-control" name="cancellation_reason" rows="2" required></textarea>
+          <label class="form-label" for="cancellation_reason_{{ d.id }}">Reason for cancellation</label>
+          <textarea class="form-control" name="cancellation_reason" id="cancellation_reason_{{ d.id }}" rows="2" required></textarea>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Never mind</button>

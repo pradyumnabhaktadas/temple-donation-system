@@ -36,6 +36,32 @@
   --bs-border-radius-lg: 1rem;
 }
 
+/* ---------- Focus visibility (QA report REG-002) ---------- */
+/* Bootstrap's default focus ring is a light box-shadow, and this theme's
+   own .form-control:focus ring below is a 25%-opacity saffron glow --
+   against the cream body background both are real but easy to miss,
+   which is exactly what an axe/keyboard-navigation pass flagged: "almost
+   no visible focus indicators on the donation forms".
+   :focus-visible (not a blanket :focus) so this only shows for keyboard/
+   assistive-tech navigation, not every mouse click. A single-color ring
+   isn't enough on this site specifically -- the hero, final-cta-banner
+   and several cards use a dark maroon/navy background, and a maroon
+   outline would vanish against maroon. The white-gap-then-dark-ring
+   pattern below (box-shadow, not outline, since outline can't carry two
+   colors) stays visible against light *and* dark surroundings: the white
+   inner ring separates the dark outer ring from whatever's behind it. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4.5px var(--maroon-dark);
+  border-radius: 3px;
+}
+
 body {
   background-color: var(--cream);
   color: var(--ink);

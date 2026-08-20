@@ -70,7 +70,7 @@
     </div>
   </div>
 </nav>
-<div class="container py-4">
+<main class="container py-4">
   {% with messages = get_flashed_messages() %}
     {% if messages %}
       {% for m in messages %}
@@ -79,7 +79,7 @@
     {% endif %}
   {% endwith %}
   {% block content %}{% endblock %}
-</div>
+</main>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 // Manual dropdown toggling for the admin nav -- deliberately NOT relying on

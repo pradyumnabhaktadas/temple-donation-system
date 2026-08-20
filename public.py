@@ -570,8 +570,25 @@ def create_order():
     # would propagate straight out of the request the same way the
     # now-fixed field-length crash used to, presenting to the donor's
     # browser as the connection simply dying instead of a normal error.
+    # REG-001 (QA report): the donate.html opt-out toggle now excludes the
+    # PAN/address fields from FormData once "No" is selected (they're
+    # disabled, not just hidden) -- but that's a client-side fix, and the
+    # report explicitly calls for a server-side backstop too: "verify
+    # server-side that a non-80G donation record never stores a PAN even
+    # if one arrives in the request." A PAN is only ever legitimately
+    # needed here for one of two already-enforced reasons -- this donation
+    # is 80G (checked above) or it's above the high-value reporting
+    # threshold (checked in high_value_pan_address_error above). If
+    # neither applies, any PAN that still arrived (stale form state, a
+    # non-JS client, a hand-crafted request) is spurious and must not be
+    # written to the donor's shared profile.
+    donor_data = data
+    if not (effective_is_80g or amount > HIGH_VALUE_PAN_THRESHOLD):
+        donor_data = dict(data)
+        donor_data["pan"] = ""
+
     try:
-        donor = find_or_create_donor(data)
+        donor = find_or_create_donor(donor_data)
 
         donation = Donation(
             donor_id=donor.id,

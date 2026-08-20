@@ -6,36 +6,36 @@
 <form method="post" class="card card-body shadow-sm p-4" style="max-width:600px">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="mb-3">
-    <label class="form-label">Full Name</label>
-    <input type="text" class="form-control" name="full_name" value="{{ donor.full_name }}" required>
+    <label class="form-label" for="full_name">Full Name</label>
+    <input type="text" class="form-control" name="full_name" id="full_name" value="{{ donor.full_name }}" required>
   </div>
   <div class="row">
     <div class="col-md-6 mb-3">
-      <label class="form-label">Phone</label>
-      <input type="tel" class="form-control" name="phone" value="{{ donor.phone or '' }}">
+      <label class="form-label" for="phone">Phone</label>
+      <input type="tel" class="form-control" name="phone" id="phone" value="{{ donor.phone or '' }}">
     </div>
     <div class="col-md-6 mb-3">
-      <label class="form-label">Email</label>
-      <input type="email" class="form-control" name="email" value="{{ donor.email or '' }}">
+      <label class="form-label" for="email">Email</label>
+      <input type="email" class="form-control" name="email" id="email" value="{{ donor.email or '' }}">
     </div>
   </div>
   <div class="mb-3">
-    <label class="form-label">WhatsApp Number <span class="text-muted">(if different from phone)</span></label>
-    <input type="tel" class="form-control" name="whatsapp_number" value="{{ donor.whatsapp_number or '' }}">
+    <label class="form-label" for="whatsapp_number">WhatsApp Number <span class="text-muted">(if different from phone)</span></label>
+    <input type="tel" class="form-control" name="whatsapp_number" id="whatsapp_number" value="{{ donor.whatsapp_number or '' }}">
   </div>
   <div class="mb-3">
-    <label class="form-label">PAN</label>
-    <input type="text" class="form-control" name="pan" value="{{ donor.pan or '' }}" style="text-transform:uppercase" maxlength="10"
+    <label class="form-label" for="pan">PAN</label>
+    <input type="text" class="form-control" name="pan" id="pan" value="{{ donor.pan or '' }}" style="text-transform:uppercase" maxlength="10"
            pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10 characters, e.g. ABCDE1234F">
   </div>
   <div class="mb-3">
-    <label class="form-label">Address</label>
-    <textarea class="form-control" name="address" rows="2">{{ donor.address or '' }}</textarea>
+    <label class="form-label" for="address">Address</label>
+    <textarea class="form-control" name="address" id="address" rows="2">{{ donor.address or '' }}</textarea>
   </div>
   <div class="row">
-    <div class="col-md-4 mb-3"><label class="form-label">City</label><input type="text" class="form-control" name="city" value="{{ donor.city or '' }}"></div>
-    <div class="col-md-4 mb-3"><label class="form-label">State</label><input type="text" class="form-control" name="state" value="{{ donor.state or '' }}"></div>
-    <div class="col-md-4 mb-3"><label class="form-label">Pincode</label><input type="text" class="form-control" name="pincode" value="{{ donor.pincode or '' }}"></div>
+    <div class="col-md-4 mb-3"><label class="form-label" for="city">City</label><input type="text" class="form-control" name="city" id="city" value="{{ donor.city or '' }}"></div>
+    <div class="col-md-4 mb-3"><label class="form-label" for="state">State</label><input type="text" class="form-control" name="state" id="state" value="{{ donor.state or '' }}"></div>
+    <div class="col-md-4 mb-3"><label class="form-label" for="pincode">Pincode</label><input type="text" class="form-control" name="pincode" id="pincode" value="{{ donor.pincode or '' }}"></div>
   </div>
 
   <hr class="my-4">
@@ -43,8 +43,8 @@
   <p class="text-muted small mb-3">Not shown to the donor anywhere -- for the office's own tracking and reports.</p>
   <div class="row">
     <div class="col-md-6 mb-3">
-      <label class="form-label">Donor Type</label>
-      <select class="form-select" name="donor_type">
+      <label class="form-label" for="donor_type">Donor Type</label>
+      <select class="form-select" name="donor_type" id="donor_type">
         <option value="">-- Not categorised --</option>
         {% for t in donor_types %}
         <option value="{{ t }}" {% if donor.donor_type == t %}selected{% endif %}>{{ donor_type_labels[t] }}</option>
@@ -52,8 +52,8 @@
       </select>
     </div>
     <div class="col-md-6 mb-3">
-      <label class="form-label">Connected Preacher</label>
-      <select class="form-select" name="connected_preacher_id">
+      <label class="form-label" for="connected_preacher_id">Connected Preacher</label>
+      <select class="form-select" name="connected_preacher_id" id="connected_preacher_id">
         <option value="">-- Not assigned --</option>
         {% for p in preachers %}
         <option value="{{ p.id }}" {% if donor.connected_preacher_id == p.id %}selected{% endif %}>{{ p.name }}{% if not p.is_active %} (inactive){% endif %}</option>
@@ -62,8 +62,8 @@
     </div>
   </div>
   <div class="mb-3">
-    <label class="form-label">Donation Frequency</label>
-    <select class="form-select" name="donation_frequency" style="max-width:280px">
+    <label class="form-label" for="donation_frequency">Donation Frequency</label>
+    <select class="form-select" name="donation_frequency" id="donation_frequency" style="max-width:280px">
       <option value="">-- Not set --</option>
       {% for f in donation_frequencies %}
       <option value="{{ f }}" {% if donor.donation_frequency == f %}selected{% endif %}>{{ donation_frequency_labels[f] }}</option>
@@ -71,39 +71,39 @@
     </select>
   </div>
   <div class="mb-3">
-    <label class="form-label">Gifts <span class="text-muted">(given to/received from this donor)</span></label>
-    <input type="text" class="form-control" name="gifts" value="{{ donor.gifts or '' }}" maxlength="500">
+    <label class="form-label" for="gifts">Gifts <span class="text-muted">(given to/received from this donor)</span></label>
+    <input type="text" class="form-control" name="gifts" id="gifts" value="{{ donor.gifts or '' }}" maxlength="500">
   </div>
 
   <hr class="my-4">
   <h6 class="mb-3">Family &amp; Important Dates</h6>
   <div class="row">
     <div class="col-md-6 mb-3">
-      <label class="form-label">Donor's Date of Birth</label>
-      <input type="date" class="form-control" name="dob" value="{{ donor.dob.isoformat() if donor.dob else '' }}">
+      <label class="form-label" for="dob">Donor's Date of Birth</label>
+      <input type="date" class="form-control" name="dob" id="dob" value="{{ donor.dob.isoformat() if donor.dob else '' }}">
     </div>
     <div class="col-md-6 mb-3">
-      <label class="form-label">Marriage Anniversary</label>
-      <input type="date" class="form-control" name="marriage_anniversary" value="{{ donor.marriage_anniversary.isoformat() if donor.marriage_anniversary else '' }}">
+      <label class="form-label" for="marriage_anniversary">Marriage Anniversary</label>
+      <input type="date" class="form-control" name="marriage_anniversary" id="marriage_anniversary" value="{{ donor.marriage_anniversary.isoformat() if donor.marriage_anniversary else '' }}">
     </div>
   </div>
   <div class="row">
     <div class="col-md-4 mb-3">
-      <label class="form-label">Father's Date of Birth</label>
-      <input type="date" class="form-control" name="father_dob" value="{{ donor.father_dob.isoformat() if donor.father_dob else '' }}">
+      <label class="form-label" for="father_dob">Father's Date of Birth</label>
+      <input type="date" class="form-control" name="father_dob" id="father_dob" value="{{ donor.father_dob.isoformat() if donor.father_dob else '' }}">
     </div>
     <div class="col-md-4 mb-3">
-      <label class="form-label">Mother's Date of Birth</label>
-      <input type="date" class="form-control" name="mother_dob" value="{{ donor.mother_dob.isoformat() if donor.mother_dob else '' }}">
+      <label class="form-label" for="mother_dob">Mother's Date of Birth</label>
+      <input type="date" class="form-control" name="mother_dob" id="mother_dob" value="{{ donor.mother_dob.isoformat() if donor.mother_dob else '' }}">
     </div>
     <div class="col-md-4 mb-3">
-      <label class="form-label">Wife's Date of Birth</label>
-      <input type="date" class="form-control" name="wife_dob" value="{{ donor.wife_dob.isoformat() if donor.wife_dob else '' }}">
+      <label class="form-label" for="wife_dob">Wife's Date of Birth</label>
+      <input type="date" class="form-control" name="wife_dob" id="wife_dob" value="{{ donor.wife_dob.isoformat() if donor.wife_dob else '' }}">
     </div>
   </div>
   <div class="mb-3">
-    <label class="form-label">Additional Information <span class="text-muted">(notes, preferences, family details, follow-ups, etc.)</span></label>
-    <textarea class="form-control" name="additional_info" rows="4">{{ donor.additional_info or '' }}</textarea>
+    <label class="form-label" for="additional_info">Additional Information <span class="text-muted">(notes, preferences, family details, follow-ups, etc.)</span></label>
+    <textarea class="form-control" name="additional_info" id="additional_info" rows="4">{{ donor.additional_info or '' }}</textarea>
   </div>
 
   <button class="btn btn-gold">Save Changes</button>

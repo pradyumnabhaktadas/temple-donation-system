@@ -8,12 +8,12 @@
   <form method="post" action="{{ url_for('admin.add_user') }}" class="row g-2 align-items-end">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="col-md-6">
-      <label class="form-label small">Username</label>
-      <input type="text" name="username" class="form-control" required>
+      <label class="form-label small" for="new-user-username">Username</label>
+      <input type="text" name="username" id="new-user-username" class="form-control" required>
     </div>
     <div class="col-md-4">
-      <label class="form-label small">Role</label>
-      <select name="role" class="form-select">
+      <label class="form-label small" for="new-user-role">Role</label>
+      <select name="role" id="new-user-role" class="form-select">
         {% for r in admin_roles %}
         <option value="{{ r }}" {% if r == 'staff' %}selected{% endif %}>{{ r | capitalize }}</option>
         {% endfor %}
@@ -47,7 +47,7 @@
         <td>
           <form method="post" action="{{ url_for('admin.change_user_role', user_id=u.id) }}" class="d-flex gap-1">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <select name="role" class="form-select form-select-sm" style="width:auto;" {% if u.id == current_user.id %}disabled{% endif %}>
+            <select name="role" class="form-select form-select-sm" style="width:auto;" aria-label="Role for {{ u.username }}" {% if u.id == current_user.id %}disabled{% endif %}>
               {% for r in admin_roles %}
               <option value="{{ r }}" {% if r == u.role %}selected{% endif %}>{{ r | capitalize }}</option>
               {% endfor %}

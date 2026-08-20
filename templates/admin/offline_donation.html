@@ -13,7 +13,7 @@
   <form method="post" action="{{ url_for('admin.manual_donation') }}" class="card card-body shadow-sm p-4" style="max-width:600px">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="mb-3">
-      <label class="form-label">Campaign / Purpose</label>
+      <label class="form-label" for="campaign_id">Campaign / Purpose</label>
       <select class="form-select" name="campaign_id" id="campaign_id" required>
         {% for c in campaigns %}
         <option value="{{ c.id }}" data-name="{{ c.name }}">{{ c.name }} {% if not c.is_80g %}(Non-80G){% endif %}</option>
@@ -22,7 +22,7 @@
     </div>
 
     <div class="mb-3" id="bace-property-field" style="display:none;">
-      <label class="form-label">BACE</label>
+      <label class="form-label" for="bace_property_id">BACE</label>
       <select class="form-select" name="bace_property_id" id="bace_property_id">
         <option value="">-- Select a property --</option>
         {% for p in bace_properties %}
@@ -33,7 +33,7 @@
 
     <div class="row" id="festival-fields" style="display:none;">
       <div class="col-md-6 mb-3">
-        <label class="form-label">Festival / Occasion</label>
+        <label class="form-label" for="festival_id">Festival / Occasion</label>
         <select class="form-select" name="festival_id" id="festival_id">
           <option value="">-- Select a festival --</option>
           {% for f in festivals %}
@@ -42,7 +42,7 @@
         </select>
       </div>
       <div class="col-md-6 mb-3">
-        <label class="form-label">Seva Type <span class="text-muted">(optional)</span></label>
+        <label class="form-label" for="seva_type_id">Seva Type <span class="text-muted">(optional)</span></label>
         <select class="form-select" name="seva_type_id" id="seva_type_id">
           <option value="">-- General contribution --</option>
           {% for s in seva_types %}
@@ -53,7 +53,7 @@
     </div>
 
     <div class="mb-3" id="live-to-give-purpose-field" style="display:none;">
-      <label class="form-label">Donation Purpose</label>
+      <label class="form-label" for="live_to_give_purpose_id">Donation Purpose</label>
       <select class="form-select" name="live_to_give_purpose_id" id="live_to_give_purpose_id">
         <option value="">-- Select a purpose --</option>
         {% for p in live_to_give_purposes %}
@@ -62,8 +62,8 @@
       </select>
     </div>
 
-    <div class="mb-3" id="live-to-give-receipt-type-field" style="display:none;">
-      <label class="form-label">Receipt Required</label>
+    <fieldset class="mb-3" id="live-to-give-receipt-type-field" style="display:none;border:0;margin:0;padding:0;">
+      <legend class="form-label" style="font-size:inherit;float:none;">Receipt Required</legend>
       <div class="d-flex gap-3">
         <div class="form-check">
           <input class="form-check-input" type="radio" name="receipt_type" id="receipt_type_80g" value="80g">
@@ -74,15 +74,15 @@
           <label class="form-check-label" for="receipt_type_non80g">Non 80G</label>
         </div>
       </div>
-    </div>
+    </fieldset>
 
     <div class="row">
       <div class="col-md-6 mb-3">
-        <label class="form-label">Amount (Rs.)</label>
-        <input type="number" min="1" class="form-control" name="amount" required>
+        <label class="form-label" for="amount">Amount (Rs.)</label>
+        <input type="number" min="1" class="form-control" name="amount" id="amount" required>
       </div>
       <div class="col-md-6 mb-3">
-        <label class="form-label">Payment Mode</label>
+        <label class="form-label" for="payment_mode">Payment Mode</label>
         <select class="form-select" name="payment_mode" id="payment_mode">
           <option value="cash">Cash</option>
           <option value="cheque">Cheque</option>
@@ -99,17 +99,17 @@
 
     <div class="row" id="cheque-fields" style="display:none;">
       <div class="col-md-6 mb-3">
-        <label class="form-label">Cheque Number</label>
+        <label class="form-label" for="cheque_number">Cheque Number</label>
         <input type="text" class="form-control" name="cheque_number" id="cheque_number">
       </div>
       <div class="col-md-6 mb-3">
-        <label class="form-label">Bank Name</label>
+        <label class="form-label" for="cheque_bank_name">Bank Name</label>
         <input type="text" class="form-control" name="cheque_bank_name" id="cheque_bank_name">
       </div>
     </div>
 
     <div class="mb-3" id="bank-transfer-field" style="display:none;">
-      <label class="form-label" id="bank-transaction-label">Transaction ID / UTR Number</label>
+      <label class="form-label" id="bank-transaction-label" for="bank_transaction_id">Transaction ID / UTR Number</label>
       <input type="text" class="form-control" name="bank_transaction_id" id="bank_transaction_id">
       <div class="form-text" id="bank-transaction-help" style="display:none;">
         Required -- it's what lets this donation be reconciled against the gateway's own
@@ -118,48 +118,48 @@
     </div>
 
     <div class="mb-3">
-      <label class="form-label">Donation Date</label>
-      <input type="date" class="form-control" name="donation_date" value="{{ today.isoformat() }}">
+      <label class="form-label" for="donation_date">Donation Date</label>
+      <input type="date" class="form-control" name="donation_date" id="donation_date" value="{{ today.isoformat() }}">
     </div>
     <div class="row">
       <div class="col-md-6 mb-3">
-        <label class="form-label">Donor Full Name</label>
-        <input type="text" class="form-control" name="full_name" required>
+        <label class="form-label" for="full_name">Donor Full Name</label>
+        <input type="text" class="form-control" name="full_name" id="full_name" required>
       </div>
       <div class="col-md-6 mb-3">
-        <label class="form-label">Phone</label>
-        <input type="tel" class="form-control" name="phone">
-      </div>
-    </div>
-    <div class="row">
-      <div class="col-md-6 mb-3">
-        <label class="form-label">WhatsApp Number <span class="text-muted">(if different from phone)</span></label>
-        <input type="tel" class="form-control" name="whatsapp_number">
-      </div>
-      <div class="col-md-6 mb-3">
-        <label class="form-label">Email</label>
-        <input type="email" class="form-control" name="email">
+        <label class="form-label" for="phone">Phone</label>
+        <input type="tel" class="form-control" name="phone" id="phone">
       </div>
     </div>
     <div class="row">
       <div class="col-md-6 mb-3">
-        <label class="form-label">PAN</label>
-        <input type="text" class="form-control" name="pan" style="text-transform:uppercase" maxlength="10"
+        <label class="form-label" for="whatsapp_number">WhatsApp Number <span class="text-muted">(if different from phone)</span></label>
+        <input type="tel" class="form-control" name="whatsapp_number" id="whatsapp_number">
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="email">Email</label>
+        <input type="email" class="form-control" name="email" id="email">
+      </div>
+    </div>
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="pan">PAN</label>
+        <input type="text" class="form-control" name="pan" id="pan" style="text-transform:uppercase" maxlength="10"
                pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10 characters, e.g. ABCDE1234F">
       </div>
     </div>
     <div class="mb-3">
-      <label class="form-label">Address</label>
-      <textarea class="form-control" name="address" rows="2"></textarea>
+      <label class="form-label" for="address">Address</label>
+      <textarea class="form-control" name="address" id="address" rows="2"></textarea>
     </div>
     <div class="row">
-      <div class="col-md-4 mb-3"><label class="form-label">City</label><input type="text" class="form-control" name="city"></div>
-      <div class="col-md-4 mb-3"><label class="form-label">State</label><input type="text" class="form-control" name="state"></div>
-      <div class="col-md-4 mb-3"><label class="form-label">Pincode</label><input type="text" class="form-control" name="pincode"></div>
+      <div class="col-md-4 mb-3"><label class="form-label" for="city">City</label><input type="text" class="form-control" name="city" id="city"></div>
+      <div class="col-md-4 mb-3"><label class="form-label" for="state">State</label><input type="text" class="form-control" name="state" id="state"></div>
+      <div class="col-md-4 mb-3"><label class="form-label" for="pincode">Pincode</label><input type="text" class="form-control" name="pincode" id="pincode"></div>
     </div>
     <div class="mb-3">
-      <label class="form-label">Remarks</label>
-      <input type="text" class="form-control" name="remarks">
+      <label class="form-label" for="remarks">Remarks</label>
+      <input type="text" class="form-control" name="remarks" id="remarks">
     </div>
     <button type="submit" class="btn btn-gold">Save &amp; Generate Receipt</button>
   </form>
@@ -179,8 +179,8 @@
     <form method="post" action="{{ url_for('admin.bulk_import_donations') }}" enctype="multipart/form-data">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="mb-3">
-        <label class="form-label">CSV File</label>
-        <input type="file" class="form-control" name="csv_file" accept=".csv,.xlsx" required>
+        <label class="form-label" for="csv_file">CSV File</label>
+        <input type="file" class="form-control" name="csv_file" id="csv_file" accept=".csv,.xlsx" required>
         <div class="form-text">
           Required columns: <code>full_name</code>, <code>campaign_name</code>, <code>amount</code>,
           <code>payment_mode</code> (cash / cheque / bank_transfer / online), <code>donation_date</code>

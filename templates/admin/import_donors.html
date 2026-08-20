@@ -23,8 +23,8 @@
   <form method="post" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="mb-3">
-      <label class="form-label">CSV File</label>
-      <input type="file" class="form-control" name="csv_file" accept=".csv,.xlsx" required>
+      <label class="form-label" for="csv_file">CSV File</label>
+      <input type="file" class="form-control" name="csv_file" id="csv_file" accept=".csv,.xlsx" required>
       <div class="form-text">
         Required column: <code>full_name</code>. Everything else is optional -- see the demo file for every
         column, including <code>donor_type</code> (<code>iyf</code> / <code>live_to_give</code>),

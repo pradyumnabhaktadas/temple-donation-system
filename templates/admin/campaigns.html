@@ -11,24 +11,24 @@
       <form method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="mb-2">
-          <label class="form-label">Name</label>
-          <input type="text" class="form-control" name="name" required>
+          <label class="form-label" for="name">Name</label>
+          <input type="text" class="form-control" name="name" id="name" required>
         </div>
         <div class="form-check mb-2">
           <input class="form-check-input" type="checkbox" name="is_80g" id="is80g" checked>
           <label class="form-check-label" for="is80g">80G Eligible</label>
         </div>
         <div class="mb-2">
-          <label class="form-label">Target Amount (optional)</label>
-          <input type="number" class="form-control" name="target_amount">
+          <label class="form-label" for="target_amount">Target Amount (optional)</label>
+          <input type="number" class="form-control" name="target_amount" id="target_amount">
         </div>
         <div class="mb-2">
-          <label class="form-label">Minimum Donation Amount (optional)</label>
-          <input type="number" class="form-control" name="min_amount" min="0" step="1">
+          <label class="form-label" for="min_amount">Minimum Donation Amount (optional)</label>
+          <input type="number" class="form-control" name="min_amount" id="min_amount" min="0" step="1">
         </div>
         <div class="mb-2">
-          <label class="form-label">Description</label>
-          <textarea class="form-control" name="description" rows="2"></textarea>
+          <label class="form-label" for="description">Description</label>
+          <textarea class="form-control" name="description" id="description" rows="2"></textarea>
         </div>
         <button class="btn btn-gold btn-sm">Create</button>
       </form>

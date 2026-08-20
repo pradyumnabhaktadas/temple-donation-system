@@ -6,8 +6,8 @@
 <form method="post" class="card card-body shadow-sm p-4" style="max-width:500px">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="mb-3">
-    <label class="form-label">Name</label>
-    <input type="text" class="form-control" name="name" value="{{ purpose.name }}" required>
+    <label class="form-label" for="name">Name</label>
+    <input type="text" class="form-control" name="name" id="name" value="{{ purpose.name }}" required>
   </div>
   <div class="form-check mb-3">
     <input class="form-check-input" type="checkbox" name="is_80g" id="edit-is-80g" {% if purpose.is_80g %}checked{% endif %}>
