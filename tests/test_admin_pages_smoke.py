@@ -129,6 +129,7 @@ class TestDonationsLogFilters:
         resp = client.post("/api/create-order", json={
             "campaign_id": campaign.id, "amount": 100, "full_name": "Abandoned Donor",
             "phone": "9811111111", "consent": "on",
+            "pan": "ABCDE1234F",  # Annadan is 80G-eligible; see REG-036
         })
         donation = Donation.query.get(resp.get_json()["donation_id"])
         donation.donation_date = datetime.datetime.utcnow() - datetime.timedelta(days=2)

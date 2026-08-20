@@ -539,6 +539,29 @@ def create_order():
                          'Please select "No" for the 80G receipt question, or choose a different purpose.'
             }), 400
 
+    # Mirrors Donation.effective_is_80g -- computed here, before the
+    # Donation row exists, because a PAN missing at intake can't be added
+    # after the fact without contacting the donor. The purpose-eligibility
+    # check just above already means is_80g_requested can't be True here
+    # against an ineligible purpose, so this is safe to compute directly
+    # rather than re-deriving the purpose override too.
+    effective_is_80g = is_80g_requested if is_80g_requested is not None else campaign.is_80g
+    if effective_is_80g and not pan:
+        # high_value_pan_address_error() above only requires PAN past the
+        # Rs. 49,000 income-tax threshold -- this is the separate,
+        # lower-value gap QA report REG-036 found: a donation recorded as
+        # 80G-eligible (either because the donor picked "Yes" on Live To
+        # Give, or because the campaign itself is fixed 80G) with no PAN on
+        # file is exactly the record Form 10BD can't actually report. The
+        # donate.html field label has always said "PAN (required for 80G
+        # receipt)" -- this makes the server actually enforce that.
+        return jsonify({
+            "error": "A PAN is required to issue an 80G tax receipt for this donation. Please enter "
+                     "your PAN, or select \"No\" for the 80G receipt question if you don't need one."
+                     if live_to_give_purpose_id else
+                     "A PAN is required to issue an 80G tax receipt for this donation. Please enter your PAN."
+        }), 400
+
     remarks = (data.get("remarks") or "").strip()[:300] or None
 
     # Wrapped in try/except: find_or_create_donor()/Donation(...)/flush()

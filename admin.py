@@ -22,7 +22,7 @@ from models import (
     LiveToGivePurpose, Preacher, AdminActivityLog, DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES,
     DONATION_FREQUENCY_LABELS,
 )
-from utils import get_financial_year, is_valid_pan, is_valid_phone, normalize_phone, now_ist, to_ist
+from utils import csv_safe_row, get_financial_year, is_valid_pan, is_valid_phone, normalize_phone, now_ist, to_ist
 from pdf_utils import generate_receipt_pdf
 from public import (
     find_or_create_donor, _org_cfg, high_value_pan_address_error, _finalize_success,
@@ -3411,7 +3411,7 @@ def export_bace_contributions():
             if d.payment_mode == "online"
             else d.donation_date.strftime("%d-%m-%Y")
         )
-        writer.writerow([
+        writer.writerow(csv_safe_row([
             d.receipt_number or "",
             date_str,
             d.status,
@@ -3427,7 +3427,7 @@ def export_bace_contributions():
             d.razorpay_order_id or "",
             d.recorded_by or "",
             d.remarks or "",
-        ])
+        ]))
 
     return Response(
         output.getvalue(),
@@ -4006,7 +4006,7 @@ def export_10bd():
         "PAN", "Amount", "Payment Mode", "Campaign",
     ])
     for donation, donor, campaign in rows:
-        writer.writerow([
+        writer.writerow(csv_safe_row([
             donation.receipt_number,
             donation.donation_date.strftime("%d-%m-%Y"),
             donor.full_name,
@@ -4018,7 +4018,7 @@ def export_10bd():
             float(donation.amount),
             donation.payment_mode,
             campaign.name,
-        ])
+        ]))
 
     return Response(
         output.getvalue(),
@@ -4047,7 +4047,7 @@ def export_collections():
         "Payment Mode", "Campaign", "80G Eligible",
     ])
     for donation, donor, campaign in rows:
-        writer.writerow([
+        writer.writerow(csv_safe_row([
             donation.receipt_number,
             donation.donation_date.strftime("%d-%m-%Y"),
             donor.full_name,
@@ -4059,7 +4059,7 @@ def export_collections():
             donation.payment_mode,
             campaign.name,
             "Yes" if donation.effective_is_80g else "No",
-        ])
+        ]))
 
     return Response(
         output.getvalue(),
@@ -4108,7 +4108,7 @@ def export_donations():
             if d.payment_mode == "online"
             else d.donation_date.strftime("%d-%m-%Y")
         )
-        writer.writerow([
+        writer.writerow(csv_safe_row([
             d.receipt_number or "",
             date_str,
             d.status,
@@ -4135,7 +4135,7 @@ def export_donations():
             to_ist(d.cancelled_at).strftime("%d-%m-%Y %H:%M") if d.cancelled_at else "",
             d.cancelled_by or "",
             d.cancellation_reason or "",
-        ])
+        ]))
 
     filename_status = status if status != "all" else "all-statuses"
     return Response(
@@ -4194,7 +4194,7 @@ def export_monthly_report():
         "Amount", "Payment Mode", "Reference", "Campaign", "80G Eligible", "Recorded By",
     ])
     for donation, donor, campaign in rows:
-        writer.writerow([
+        writer.writerow(csv_safe_row([
             donation.receipt_number,
             donation.donation_date.strftime("%d-%m-%Y"),
             donor.full_name,
@@ -4212,7 +4212,7 @@ def export_monthly_report():
             campaign.name,
             "Yes" if donation.effective_is_80g else "No",
             donation.recorded_by or "",
-        ])
+        ]))
 
     month_label = start.strftime("%Y-%m")
     return Response(
@@ -4819,12 +4819,12 @@ def iyf_camp_export(report):
     if report == "camp":
         writer.writerow(["Camp", "Donations", "Total"])
         for camp, count, total in _camp_totals(query):
-            writer.writerow([camp, count, float(total)])
+            writer.writerow(csv_safe_row([camp, count, float(total)]))
 
     elif report == "monthly":
         writer.writerow(["Month", "Donations", "Total"])
         for label, count, total in _camp_monthly_totals(query):
-            writer.writerow([label, count, total])
+            writer.writerow(csv_safe_row([label, count, total]))
 
     elif report == "detail":
         writer.writerow([
@@ -4833,7 +4833,7 @@ def iyf_camp_export(report):
         ])
         for d in query.order_by(Donation.camp_name, Donation.donation_date).all():
             donor = d.donor
-            writer.writerow([
+            writer.writerow(csv_safe_row([
                 d.donation_date.strftime("%d-%m-%Y") if d.donation_date else "",
                 d.receipt_number or "",
                 donor.full_name if donor else "",
@@ -4845,7 +4845,7 @@ def iyf_camp_export(report):
                 d.payment_mode or "",
                 d.reference_display or "",
                 d.recorded_by or "",
-            ])
+            ]))
     else:
         abort(404)
 

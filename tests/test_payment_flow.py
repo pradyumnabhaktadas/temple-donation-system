@@ -61,6 +61,11 @@ def _start_donation(app, client, amount=501, order_id="order_TEST1"):
             "campaign_id": campaign.id, "amount": amount,
             "full_name": "Ravi Sharma", "phone": "9876543210",
             "email": "ravi@example.com", "consent": "on",
+            # Annadan is 80G-eligible, and create_order() now refuses an
+            # 80G donation with no PAN (REG-036) -- this helper is used by
+            # tests that care about the payment flow, not 80G/PAN
+            # specifically, so it always supplies one.
+            "pan": "ABCDE1234F",
         })
     assert resp.status_code == 200, resp.get_data(as_text=True)
     return resp.get_json()["donation_id"]

@@ -32,6 +32,7 @@ class TestReceiptStorage:
             json={
                 "campaign_id": campaign.id, "amount": 251, "full_name": "Storage Test Donor",
                 "phone": "9199999999", "consent": "on",
+                "pan": "ABCDE1234F",  # Annadan is 80G-eligible; see REG-036
             },
         )
         donation_id = order_resp.get_json()["donation_id"]
@@ -50,6 +51,7 @@ class TestReceiptStorage:
             json={
                 "campaign_id": campaign.id, "amount": 251, "full_name": "Download Test Donor",
                 "phone": "9188888888", "consent": "on",
+                "pan": "ABCDE1234F",  # Annadan is 80G-eligible; see REG-036
             },
         )
         donation_id = order_resp.get_json()["donation_id"]
@@ -84,6 +86,7 @@ class TestReceiptAccessControl:
             json={
                 "campaign_id": campaign.id, "amount": 300, "full_name": "Private Donor",
                 "phone": "9155555555", "consent": "on",
+                "pan": "ABCDE1234F",  # Annadan is 80G-eligible; see REG-036
             },
         )
         donation_id = order_resp.get_json()["donation_id"]

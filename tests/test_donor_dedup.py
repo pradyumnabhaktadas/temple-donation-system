@@ -298,6 +298,7 @@ class TestConsent:
                 "full_name": "Consent Test Donor",
                 "phone": "9777777777",
                 "consent": "on",
+                "pan": "ABCDE1234F",  # Annadan is 80G-eligible; see REG-036
             },
         )
         donation_id = order_resp.get_json()["donation_id"]

@@ -86,9 +86,9 @@
       </p>
       <div class="row mb-0">
         <div class="col-md-6 mb-3">
-          <label class="form-label">PAN <span class="text-muted">(required for 80G receipt)</span></label>
+          <label class="form-label">PAN <span class="text-muted">(required -- every Festival Seva donation is 80G-eligible)</span></label>
           <input type="text" class="form-control" name="pan" id="pan" style="text-transform:uppercase" maxlength="10"
-                 pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10 characters, e.g. ABCDE1234F">
+                 pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10 characters, e.g. ABCDE1234F" required>
         </div>
       </div>
 
@@ -156,17 +156,22 @@
     updatePanAddressRequirement();
   });
 
-  // PAN + address are always visible here (Festivals is 80G-eligible), but
-  // above the high-value threshold they become mandatory rather than
-  // optional -- Income Tax rules, mirrors HIGH_VALUE_PAN_THRESHOLD in
-  // public.py (the server enforces this regardless of what happens here).
+  // PAN + address are always visible here (Festivals is 80G-eligible), and
+  // PAN is now always required -- not just above the high-value threshold.
+  // This campaign has no per-donation 80G/Non-80G choice the way Live To
+  // Give does, so every donation through this form is recorded 80G, and
+  // create_order() on the server now refuses one with no PAN (QA report
+  // REG-036: an 80G donation with no PAN can't actually be reported on
+  // Form 10BD). Address only becomes mandatory above the high-value
+  // threshold -- Income Tax rules, mirrors HIGH_VALUE_PAN_THRESHOLD in
+  // public.py (the server enforces both regardless of what happens here).
   const panInput = document.getElementById('pan');
   const addressInput = document.getElementById('address');
   const highValueNote = document.getElementById('high-value-note');
   const HIGH_VALUE_PAN_THRESHOLD = 49000;
   function updatePanAddressRequirement() {
     const isHighValue = (parseFloat(amountInput.value) || 0) > HIGH_VALUE_PAN_THRESHOLD;
-    panInput.required = isHighValue;
+    panInput.required = true;
     addressInput.required = isHighValue;
     highValueNote.style.display = isHighValue ? '' : 'none';
   }

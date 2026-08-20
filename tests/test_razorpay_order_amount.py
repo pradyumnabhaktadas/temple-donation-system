@@ -51,6 +51,7 @@ class TestRazorpayOrderAmountRounding:
                     "full_name": "Rounding Test Donor",
                     "phone": "9876512345",
                     "consent": "on",
+                    "pan": "ABCDE1234F",  # Annadan is 80G-eligible; see REG-036
                 },
             )
 

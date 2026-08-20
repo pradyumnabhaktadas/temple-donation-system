@@ -344,10 +344,24 @@
   function updatePanAddressRequirement() {
     const wants80g = document.querySelector('input[name="receipt_type"]:checked')?.value === '80g';
     const isHighValue = (parseFloat(amountInput.value) || 0) > HIGH_VALUE_PAN_THRESHOLD;
-    eightyGFields.style.display = (wants80g || isHighValue) ? '' : 'none';
+    const showFields = wants80g || isHighValue;
+    eightyGFields.style.display = showFields ? '' : 'none';
     panInput.required = wants80g || isHighValue;
     addressInput.required = isHighValue;
     highValueNote.style.display = isHighValue ? '' : 'none';
+
+    // Hiding this block with display:none only hides it visually -- the
+    // <input>/<textarea> elements inside are still part of the <form>, so
+    // `new FormData(form)` (what the submit handler actually sends) still
+    // serialized whatever PAN/address a donor had typed before switching
+    // the answer to "No", even though they'd just said they didn't want to
+    // share it. `disabled` fields are excluded from FormData natively, so
+    // toggling that alongside visibility closes the gap without losing
+    // what the donor typed if they switch back to "Yes" a moment later
+    // (unlike clearing the values, which would).
+    eightyGFields.querySelectorAll('input, textarea').forEach((field) => {
+      field.disabled = !showFields;
+    });
   }
   receiptRadios.forEach((radio) => radio.addEventListener('change', updatePanAddressRequirement));
   amountInput.addEventListener('input', updatePanAddressRequirement);
@@ -395,6 +409,13 @@
     updatePanAddressRequirement();
   }
   purposeSelect.addEventListener('change', updateReceiptTypeForPurpose);
+
+  // Run once on load too, not just on the change events above -- otherwise
+  // the PAN/address/city/state/pincode inputs start out visually hidden
+  // but still enabled (and so still submitted) until a donor's first
+  // interaction with the purpose/amount/receipt-type fields, which a
+  // browser's own autofill could beat them to.
+  updatePanAddressRequirement();
 
   TempleDonationPayment.init({
     formId: 'live-to-give-form',

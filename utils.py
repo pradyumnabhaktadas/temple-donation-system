@@ -3,6 +3,35 @@ import hashlib
 import hmac
 import re
 
+# CSV/formula injection (OWASP CSV Injection, QA report REG-059): a cell
+# whose text begins with one of these is read as a formula, not literal
+# text, the moment the file is opened in Excel or Google Sheets -- and
+# every admin CSV export in this app writes donor-controlled fields (name,
+# address, remarks, ...) straight into cells an admin later opens for a
+# government filing (Form 10BD) or a reconciliation. A donor whose name was
+# literally "=CMD(...)" would have that executed, not printed, by whoever
+# opened the export. Tab and CR are included because some spreadsheet
+# versions also parse a leading tab as a formula trigger.
+_CSV_FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def csv_safe(value):
+    """Neutralizes one cell for csv.writer: if it's a string starting with
+    a formula trigger, prefix it with a single quote so it opens as plain
+    text -- Excel/Sheets both strip a leading `'` from what's displayed, so
+    nothing about how the value reads to a human changes. Non-strings
+    (amounts, None, dates already formatted elsewhere) pass through
+    untouched."""
+    if isinstance(value, str) and value.startswith(_CSV_FORMULA_TRIGGERS):
+        return "'" + value
+    return value
+
+
+def csv_safe_row(values):
+    """Apply csv_safe() to every cell in a row about to go to
+    csv.writer.writerow() -- see csv_safe()'s docstring for why."""
+    return [csv_safe(v) for v in values]
+
 
 def receipt_access_token(donation_id, secret_key):
     """An unguessable per-donation token gating the /receipt/<id> download.

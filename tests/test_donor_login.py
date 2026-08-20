@@ -17,9 +17,43 @@ def _make_donor(phone="9812345678", full_name="Test Donor"):
 
 class TestOtpRequest:
     def test_unknown_phone_gets_no_otp(self, app, client):
+        """QA report REG-040: an unregistered number used to get a
+        distinct "No donor account found" message and land back on the
+        login page -- a donor-privacy oracle letting anyone test whether a
+        given phone number has ever donated. It now gets the same generic
+        response a registered number does (see the matching assertion in
+        test_the_response_is_identical_for_a_registered_number below)."""
         resp = client.post("/my-donations/send-otp", data={"phone": "9999999999"}, follow_redirects=True)
-        assert b"No donor account found" in resp.data
+        assert b"No donor account found" not in resp.data
+        assert b"account with us" in resp.data
         assert DonorLoginOTP.query.count() == 0
+
+    def test_the_response_is_identical_for_a_registered_number(self, app, client, monkeypatch):
+        """The actual REG-040 regression check: capture both responses and
+        compare them, rather than each in isolation -- a future wording
+        change to one side without the other would slip past a test that
+        only checks each message independently."""
+        _make_donor(phone="9812345678")
+        monkeypatch.setattr(donor_portal, "generate_otp", lambda length: "123456")
+        app.config["IS_PRODUCTION"] = True
+        try:
+            registered = client.post(
+                "/my-donations/send-otp", data={"phone": "9812345678"}, follow_redirects=True
+            )
+            unregistered = client.post(
+                "/my-donations/send-otp", data={"phone": "9999999999"}, follow_redirects=True
+            )
+            assert registered.request.path == unregistered.request.path, \
+                "both must land on the same page (the verify page), not a different one for each"
+            # The phone number itself is legitimately echoed back into the
+            # verify form (the donor just typed it, in this same request --
+            # that's not new information an enumeration attempt gains), so
+            # it's stripped out before comparing everything else.
+            normalize = lambda body: body.decode().replace("9812345678", "PHONE").replace("9999999999", "PHONE")
+            assert normalize(registered.data) == normalize(unregistered.data), \
+                "both responses must render identically once the submitted phone number itself is factored out"
+        finally:
+            app.config["IS_PRODUCTION"] = False
 
     def test_known_phone_gets_otp_in_demo_mode(self, app, client, monkeypatch):
         _make_donor()
@@ -38,13 +72,20 @@ class TestOtpRequest:
         their account (donation history, address, PAN). DEMO MODE is only
         for local development; in production it must refuse instead."""
         _make_donor()
-        monkeypatch.setattr(donor_portal, "generate_otp", lambda length: "123456")
+        # Deliberately not "123456" -- the donor phone number 9812345678
+        # contains that exact substring, which made this test pass for the
+        # wrong reason (matching the phone number echoed into the page's
+        # own canonical-URL meta tag, not a disclosed OTP).
+        monkeypatch.setattr(donor_portal, "generate_otp", lambda length: "778899")
         app.config["IS_PRODUCTION"] = True
         try:
             resp = client.post("/my-donations/send-otp", data={"phone": "9812345678"}, follow_redirects=True)
-            assert b"123456" not in resp.data
+            assert b"778899" not in resp.data
             assert b"DEMO MODE" not in resp.data
-            assert b"unable to send login codes" in resp.data
+            # Same generic message everyone gets (see REG-040 above) --
+            # nothing in the response reveals that this specific phone
+            # exists or that its OTP happened to fail to send.
+            assert b"account with us" in resp.data
             # The record was created (rate limiting still counts it) but
             # left permanently unusable -- there's no code the donor could
             # have received to submit against it.
@@ -64,14 +105,24 @@ class TestOtpRequest:
         assert record.check_otp("000000") is False
 
     def test_rate_limit_after_max_requests(self, app, client, monkeypatch):
+        """The per-phone hourly cap still applies -- it just no longer
+        says so out loud (see REG-040 above: a distinct "too many
+        attempts" message would itself reveal that this number has an
+        account and has been requesting codes). A rate-limited request now
+        gets the same generic response and, crucially, no new OTP record
+        -- confirmed here by count, since the response text can't tell the
+        two states apart on purpose."""
         _make_donor()
         monkeypatch.setattr(donor_portal, "generate_otp", lambda length: "123456")
         app.config["OTP_MAX_REQUESTS_PER_HOUR"] = 2
 
         for _ in range(2):
             client.post("/my-donations/send-otp", data={"phone": "9812345678"})
+        assert DonorLoginOTP.query.count() == 2
+
         resp = client.post("/my-donations/send-otp", data={"phone": "9812345678"}, follow_redirects=True)
-        assert b"Too many login attempts" in resp.data
+        assert b"account with us" in resp.data
+        assert DonorLoginOTP.query.count() == 2, "a 3rd, rate-limited request must not create a new record"
 
 
 class TestOtpVerify:

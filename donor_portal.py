@@ -7,7 +7,7 @@ from flask import (
 )
 from flask_login import current_user
 
-from extensions import db
+from extensions import db, limiter
 from models import Donor, Donation, DonorLoginOTP
 from pdf_utils import generate_annual_statement_pdf
 from public import _org_cfg
@@ -40,6 +40,15 @@ def login():
 
 
 @bp.route("/send-otp", methods=["POST"])
+# IP-level throttle on top of the per-phone hourly cap below -- QA report
+# REG-041 found 8 rapid POSTs for the same number all went through
+# unthrottled. On a live, SMS-configured deployment an unthrottled send is
+# an SMS-bombing / cost / harassment vector against any registered donor's
+# phone; the per-phone cap alone doesn't stop one IP from doing this to
+# many different numbers. 10/hour is looser than the 5/hour per-phone cap
+# since one IP can legitimately be a shared household/office connection
+# (the same reasoning already applied to the donation-status poll limit).
+@limiter.limit("10 per hour")
 def send_otp_route():
     # normalize_phone() so a donor typing "+91 88020 81265" (or any other
     # equivalent format) still matches the plain 10-digit number their
@@ -53,54 +62,68 @@ def send_otp_route():
         return redirect(url_for("donor_portal.login"))
 
     donor = Donor.query.filter_by(phone=phone).first()
-    if donor is None:
-        flash("No donor account found with that phone number. Have you made a donation with us before?")
-        return redirect(url_for("donor_portal.login"))
 
-    # Rate limit: don't let one phone number burn through OTP requests
-    # (matters once this is wired to a real, per-message-cost SMS provider).
-    one_hour_ago = datetime.datetime.utcnow() - datetime.timedelta(hours=1)
-    recent_count = DonorLoginOTP.query.filter(
-        DonorLoginOTP.phone == phone, DonorLoginOTP.created_at >= one_hour_ago
-    ).count()
-    if recent_count >= current_app.config["OTP_MAX_REQUESTS_PER_HOUR"]:
-        flash("Too many login attempts for this number. Please try again in an hour.")
-        return redirect(url_for("donor_portal.login"))
-
-    otp = generate_otp(current_app.config["OTP_LENGTH"])
-    record = DonorLoginOTP(
-        phone=phone,
-        expires_at=datetime.datetime.utcnow() + datetime.timedelta(minutes=current_app.config["OTP_EXPIRY_MINUTES"]),
-    )
-    record.set_otp(otp)
-    db.session.add(record)
-    db.session.commit()
-
-    was_sent = send_otp(phone, otp)
-    if not was_sent:
-        if current_app.config.get("IS_PRODUCTION"):
-            # DEMO MODE exists so the donor login flow can be tested end to
-            # end before an SMS provider is wired up (see sms_utils.py) --
-            # it must never do that in production. Until this was fixed
-            # (QA report REG-039/REG-055), knowing a donor's phone number
-            # was enough to read the OTP straight out of this response and
-            # log into their account -- donation history, address, PAN and
-            # all. Nothing was actually sent, so there's no code to give
-            # out; the honest response is to say so and stop, not to send
-            # the donor to a "enter your code" page that can never work.
-            current_app.logger.warning(
-                "send_otp: no SMS provider configured -- refusing to disclose the OTP for %s in production",
-                phone,
+    # From here on, the response is identical regardless of whether this
+    # phone number has a donor account, and regardless of whether it's
+    # already hit its hourly cap -- see QA report REG-040. The old code
+    # returned a distinct "No donor account found" message and sent the
+    # donor back to the login page for an unregistered number, versus
+    # redirecting to the verify page for a registered one; that difference
+    # is a donor-privacy oracle (anyone could test whether any given phone
+    # number has ever donated to the temple), independent of whether login
+    # would actually succeed. Everything below only decides, silently,
+    # whether a real OTP gets created and sent -- that decision never
+    # changes what the caller sees.
+    otp_for_demo_display = None
+    if donor is not None:
+        # Per-phone rate limit: don't let one number burn through OTP
+        # requests (matters once this is wired to a real, per-message-cost
+        # SMS provider). Tighter than the IP limit above on purpose --
+        # this is the one that actually protects a specific donor's phone.
+        one_hour_ago = datetime.datetime.utcnow() - datetime.timedelta(hours=1)
+        recent_count = DonorLoginOTP.query.filter(
+            DonorLoginOTP.phone == phone, DonorLoginOTP.created_at >= one_hour_ago
+        ).count()
+        if recent_count < current_app.config["OTP_MAX_REQUESTS_PER_HOUR"]:
+            otp = generate_otp(current_app.config["OTP_LENGTH"])
+            record = DonorLoginOTP(
+                phone=phone,
+                expires_at=datetime.datetime.utcnow() + datetime.timedelta(
+                    minutes=current_app.config["OTP_EXPIRY_MINUTES"]),
             )
-            record.consumed = True
+            record.set_otp(otp)
+            db.session.add(record)
             db.session.commit()
-            flash("We're unable to send login codes by SMS right now. Please contact the temple office for help.")
-            return redirect(url_for("donor_portal.login"))
-        # Local/dev only: show the code directly instead of texting it.
-        flash(f"DEMO MODE (no SMS provider configured): your OTP is {otp}")
-    else:
-        flash(f"An OTP has been sent to {phone}.")
 
+            was_sent = send_otp(phone, otp)
+            if not was_sent:
+                if current_app.config.get("IS_PRODUCTION"):
+                    # DEMO MODE exists so the donor login flow can be tested
+                    # end to end before an SMS provider is wired up (see
+                    # sms_utils.py) -- it must never do that in production.
+                    # Until this was fixed (REG-039/REG-055), knowing a
+                    # donor's phone number was enough to read the OTP
+                    # straight out of this response and log into their
+                    # account -- donation history, address, PAN and all.
+                    current_app.logger.warning(
+                        "send_otp: no SMS provider configured -- refusing to disclose the OTP for %s in production",
+                        phone,
+                    )
+                    record.consumed = True
+                    db.session.commit()
+                else:
+                    # Local/dev only: show the code directly instead of
+                    # texting it. Only reachable when a real donor exists
+                    # and wasn't rate-limited -- outside production this
+                    # convenience revealing that fact isn't the concern
+                    # REG-040 is about (no real donor privacy is at stake
+                    # against a developer's own local database).
+                    otp_for_demo_display = otp
+
+    if otp_for_demo_display:
+        flash(f"DEMO MODE (no SMS provider configured): your OTP is {otp_for_demo_display}")
+    else:
+        flash("If that phone number has an account with us, a login code has been sent to it.")
     return redirect(url_for("donor_portal.verify", phone=phone))
 
 

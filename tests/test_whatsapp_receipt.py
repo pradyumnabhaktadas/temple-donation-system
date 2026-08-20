@@ -147,6 +147,7 @@ class TestWhatsAppReceipt:
                 "full_name": "WhatsApp Test Donor",
                 "phone": "9123456780",
                 "consent": "on",
+                "pan": "ABCDE1234F",  # Annadan is 80G-eligible; see REG-036
             },
         )
         donation_id = order_resp.get_json()["donation_id"]
