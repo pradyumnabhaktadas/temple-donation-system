@@ -86,8 +86,23 @@ class TestDonorSeesTheirReceipt:
         body = resp.get_json()
         assert body["ok"] is True and body["receipt_number"]
 
-        # The page the browser is sent to must actually show the receipt.
-        page = client.get(f"/donate/success/{donation_id}")
+        # verify-payment just proved (via the Razorpay signature) that this
+        # caller made this exact payment, so its response carries the same
+        # token /receipt/<id> and /donate/success/<id> require -- see
+        # public.py's donate_success()/REG-056 comment. The real JS appends
+        # this to the redirect it makes (donation-payment.js's goToReceipt).
+        assert body["token"], "verify-payment must hand back a receipt token"
+
+        # Without that token, the success page must not show donor-specific
+        # detail to just anyone who knows the id.
+        bare = client.get(f"/donate/success/{donation_id}")
+        assert bare.status_code == 200
+        assert body["receipt_number"].encode() not in bare.data, \
+            "success page showed the receipt number with no proof of ownership"
+
+        # The page the browser is actually sent to (with the token) must
+        # show the receipt.
+        page = client.get(f"/donate/success/{donation_id}?t={body['token']}")
         assert page.status_code == 200
         assert b"Thank you" in page.data
         assert body["receipt_number"].encode() in page.data, \
@@ -365,6 +380,20 @@ class TestRedirectFlowCallback:
         assert resp.status_code == 302
         assert f"/donate/success/{donation_id}" in resp.headers["Location"]
         assert Donation.query.get(donation_id).receipt_number
+
+        # This flow (Instagram/Messenger/Opera/UC Browser) has no session or
+        # cookie of its own -- see payment_callback()'s docstring -- so the
+        # only way the donor's own browser can see its own receipt on the
+        # page it's redirected to is a token in that redirect's URL itself.
+        # Without one, REG-056 is back: the success page would either show
+        # nothing donor-specific (safe but broken for this flow) or leak it
+        # to anyone (unsafe). Confirm the redirect actually carries a token
+        # that works.
+        assert "t=" in resp.headers["Location"], \
+            "redirect-flow callback must carry a receipt token; donate_success now requires one"
+        page = client.get(resp.headers["Location"])
+        assert page.status_code == 200
+        assert Donation.query.get(donation_id).receipt_number.encode() in page.data
 
     def test_bad_signature_issues_no_receipt(self, app, client):
         from models import Donation

@@ -205,9 +205,19 @@ window.TempleDonationPayment = (function () {
     try { localStorage.removeItem(PENDING_KEY); } catch (err) { /* nothing to clear */ }
   }
 
-  function goToReceipt(donationId) {
+  /* `token` is the same signed value /receipt/<id> requires -- see
+   * public.py's donate_success() for why. Only /api/verify-payment's
+   * success response can supply one (it just proved this browser made this
+   * exact payment via the Razorpay signature); every other caller here
+   * only knows "the server says this donation is now successful" from an
+   * unauthenticated status poll, which isn't proof of ownership, so they
+   * call this with no token and land on the generic version of the page.
+   * The donor's receipt still reaches them by email/WhatsApp either way. */
+  function goToReceipt(donationId, token) {
     clearPendingMarker();
-    window.location.href = '/donate/success/' + encodeURIComponent(donationId);
+    let url = '/donate/success/' + encodeURIComponent(donationId);
+    if (token) url += '?t=' + encodeURIComponent(token);
+    window.location.href = url;
   }
 
   /* Resolve once Razorpay's checkout.js has defined the global, or reject
@@ -483,7 +493,7 @@ window.TempleDonationPayment = (function () {
             // `ok` range, so trusting the status alone would send the
             // donor to a receipt page that has no receipt on it.
             if (result.ok && result.data && result.data.ok) {
-              goToReceipt(order.donation_id);
+              goToReceipt(order.donation_id, result.data.token);
             } else {
               // Not confirmed *yet*. That is not proof the payment
               // failed -- the webhook is the source of truth and may
@@ -626,7 +636,7 @@ window.TempleDonationPayment = (function () {
         if (!razorpayEnabled) {
           const sim = await postJSON('/api/simulate-payment', { donation_id: order.donation_id }, csrfToken);
           if (sim.ok) {
-            goToReceipt(order.donation_id);
+            goToReceipt(order.donation_id, sim.data && sim.data.token);
           } else {
             setNote(sim.data.error || 'Simulation failed.');
             submitting = false;

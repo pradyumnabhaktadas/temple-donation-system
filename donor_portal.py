@@ -78,8 +78,25 @@ def send_otp_route():
 
     was_sent = send_otp(phone, otp)
     if not was_sent:
-        # Demo mode -- no SMS provider configured yet. Show the code
-        # directly instead of texting it, clearly marked as such.
+        if current_app.config.get("IS_PRODUCTION"):
+            # DEMO MODE exists so the donor login flow can be tested end to
+            # end before an SMS provider is wired up (see sms_utils.py) --
+            # it must never do that in production. Until this was fixed
+            # (QA report REG-039/REG-055), knowing a donor's phone number
+            # was enough to read the OTP straight out of this response and
+            # log into their account -- donation history, address, PAN and
+            # all. Nothing was actually sent, so there's no code to give
+            # out; the honest response is to say so and stop, not to send
+            # the donor to a "enter your code" page that can never work.
+            current_app.logger.warning(
+                "send_otp: no SMS provider configured -- refusing to disclose the OTP for %s in production",
+                phone,
+            )
+            record.consumed = True
+            db.session.commit()
+            flash("We're unable to send login codes by SMS right now. Please contact the temple office for help.")
+            return redirect(url_for("donor_portal.login"))
+        # Local/dev only: show the code directly instead of texting it.
         flash(f"DEMO MODE (no SMS provider configured): your OTP is {otp}")
     else:
         flash(f"An OTP has been sent to {phone}.")

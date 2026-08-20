@@ -4,7 +4,7 @@
 <div class="row justify-content-center">
   <div class="col-lg-6">
     <div class="card card-body success-card text-center p-4">
-      {% if donation.status == 'success' %}
+      {% if donation.status == 'success' and may_view %}
         <span class="success-symbol"><img src="{{ url_for('static', filename='branding/iskcon_dwarka_logo.png') }}" alt="ISKCON Dwarka Delhi"></span>
         <span class="section-kicker">Offering received</span>
         <h3 class="mt-2">Thank you for your seva.</h3>
@@ -21,6 +21,19 @@
         {% else %}
         <a class="btn btn-link" href="{{ url_for('public.donate_form') }}">Make another offering</a>
         {% endif %}
+      {% elif donation.status == 'success' %}
+        {# Donation succeeded, but this visit carries no proof it's the
+           paying donor's own browser (no token, not logged in as admin or
+           into the donor portal) -- see donate_success()'s comment in
+           public.py. Donation ids are sequential and guessable, so nothing
+           donor-specific (amount, campaign, receipt number, download link)
+           is shown here; the donor already has all of that by email or
+           WhatsApp. #}
+        <span class="success-symbol"><img src="{{ url_for('static', filename='branding/iskcon_dwarka_logo.png') }}" alt="ISKCON Dwarka Delhi"></span>
+        <span class="section-kicker">Offering received</span>
+        <h3 class="mt-2">Thank you for your seva.</h3>
+        <p>Your donation has been recorded. A confirmation and receipt have been sent to the email/WhatsApp number on file, or you can view it any time in <a href="{{ url_for('donor_portal.login') }}">My Donations</a>.</p>
+        <a class="btn btn-link" href="{{ url_for('public.donate_form') }}">Make another offering</a>
       {% elif donation.status == 'cancelled' %}
         <span style="font-size:2.5rem;">ⓘ</span>
         <h3 class="mt-2" style="color: var(--saffron-dark);">Donation Cancelled</h3>

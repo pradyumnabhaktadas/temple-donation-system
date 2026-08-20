@@ -861,7 +861,16 @@ def verify_payment():
             "error": "Payment verified, but we couldn't finish issuing the receipt. "
                      "Please check back in a minute or contact the temple office."
         }), 500
-    return jsonify({"ok": True, "receipt_number": donation.receipt_number})
+    # The signature check above already proved this caller is the browser
+    # that made this exact payment, so it's safe to hand back the same
+    # token /receipt/<id> requires -- the browser uses it to reach
+    # /donate/success/<id> with proof of ownership instead of a bare id.
+    # See donate_success()'s docstring-length comment for why that matters.
+    return jsonify({
+        "ok": True,
+        "receipt_number": donation.receipt_number,
+        "token": receipt_access_token(donation.id, current_app.config["SECRET_KEY"]),
+    })
 
 
 def _verify_checkout_signature(donation, payment_id, signature):
@@ -928,12 +937,20 @@ def payment_callback():
 
         donation.razorpay_payment_id = payment_id
 
+        # The signature check above already proved this request is the tail
+        # end of a real payment for this exact donation, so every redirect
+        # to donate_success from here on carries the same proof-of-ownership
+        # token /receipt/<id> and donate_success() now require -- this flow
+        # has no session/cookie of its own (see the docstring) to prove it
+        # any other way.
+        success_token = receipt_access_token(donation.id, current_app.config["SECRET_KEY"])
+
         # Same rule as everywhere else: authorized isn't good enough, since
         # uncaptured payments are auto-refunded and the receipt would end up
         # certifying a donation that reversed.
         if not _payment_is_captured(payment_id):
             db.session.commit()
-            return redirect(url_for("public.donate_success", donation_id=donation.id))
+            return redirect(url_for("public.donate_success", donation_id=donation.id, t=success_token))
 
         _finalize_success(donation)
     except Exception:
@@ -943,8 +960,10 @@ def payment_callback():
         # once confirmation lands.
         db.session.rollback()
         current_app.logger.exception("payment-callback failed for donation %s", donation.id)
+        return redirect(url_for("public.donate_success", donation_id=donation.id,
+                                 t=receipt_access_token(donation.id, current_app.config["SECRET_KEY"])))
 
-    return redirect(url_for("public.donate_success", donation_id=donation.id))
+    return redirect(url_for("public.donate_success", donation_id=donation.id, t=success_token))
 
 
 @bp.route("/api/donation-status/<int:donation_id>", methods=["GET"])
@@ -1102,7 +1121,11 @@ def simulate_payment():
     donation.razorpay_payment_id = "SIMULATED"
     if not _finalize_success(donation):
         return jsonify({"error": "Couldn't finish issuing the receipt. Please try again."}), 500
-    return jsonify({"ok": True, "receipt_number": donation.receipt_number})
+    return jsonify({
+        "ok": True,
+        "receipt_number": donation.receipt_number,
+        "token": receipt_access_token(donation.id, current_app.config["SECRET_KEY"]),
+    })
 
 
 @bp.route("/webhooks/razorpay", methods=["POST"])
@@ -1304,7 +1327,26 @@ def _apply_payment_details(donation, payment_entity):
 @bp.route("/donate/success/<int:donation_id>")
 def donate_success(donation_id):
     donation = Donation.query.get_or_404(donation_id)
-    return render_template("donate_success.html", donation=donation)
+    # Donation ids are sequential and this route takes no other input, so
+    # without a gate here anyone can page through ids and read another
+    # donor's amount/campaign -- and, worse, the page used to embed a live
+    # receipt_token() download link for whoever it belonged to (QA report
+    # REG-026/REG-056: the /receipt/<id> route itself is correctly token-
+    # gated, but this page was handing that same token to anyone who asked,
+    # unauthenticated, undoing the point of gating the other route at all).
+    #
+    # _may_download_receipt() is the same check /receipt/<id> already uses.
+    # The donor's own browser reaches this page in one of two ways that can
+    # legitimately carry that authorization forward without asking them to
+    # log in seconds after paying: payment_callback() and /api/verify-
+    # payment both redirect/report back only after checking this donation's
+    # Razorpay signature, and both now append the same token to the URL --
+    # see the two call sites below. A donation confirmed purely by the
+    # webhook + polling (no signed round trip in this browser) has no way
+    # to prove it's the paying donor, so it falls back to a generic page;
+    # the donor already has the PDF by email/WhatsApp either way.
+    may_view = _may_download_receipt(donation)
+    return render_template("donate_success.html", donation=donation, may_view=may_view)
 
 
 def _may_download_receipt(donation):

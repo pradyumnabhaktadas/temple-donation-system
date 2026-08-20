@@ -30,6 +30,29 @@ class TestOtpRequest:
         assert b"123456" in resp.data
         assert DonorLoginOTP.query.count() == 1
 
+    def test_demo_mode_never_discloses_the_otp_in_production(self, app, client, monkeypatch):
+        """QA report REG-039/REG-055: with no SMS provider configured,
+        this endpoint used to flash the real OTP into the HTTP response
+        regardless of environment -- knowing a donor's phone number was
+        enough to read their login code straight off the page and get into
+        their account (donation history, address, PAN). DEMO MODE is only
+        for local development; in production it must refuse instead."""
+        _make_donor()
+        monkeypatch.setattr(donor_portal, "generate_otp", lambda length: "123456")
+        app.config["IS_PRODUCTION"] = True
+        try:
+            resp = client.post("/my-donations/send-otp", data={"phone": "9812345678"}, follow_redirects=True)
+            assert b"123456" not in resp.data
+            assert b"DEMO MODE" not in resp.data
+            assert b"unable to send login codes" in resp.data
+            # The record was created (rate limiting still counts it) but
+            # left permanently unusable -- there's no code the donor could
+            # have received to submit against it.
+            record = DonorLoginOTP.query.one()
+            assert record.consumed is True
+        finally:
+            app.config["IS_PRODUCTION"] = False
+
     def test_otp_is_hashed_not_stored_in_plaintext(self, app, client, monkeypatch):
         _make_donor()
         monkeypatch.setattr(donor_portal, "generate_otp", lambda length: "123456")
