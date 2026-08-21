@@ -9,7 +9,7 @@ load_dotenv()
 from config import Config
 from extensions import db, login_manager, csrf, limiter, LIMITER_AVAILABLE
 from models import AdminUser
-from utils import format_inr, normalize_phone, to_ist, receipt_access_token, mask_pan
+from utils import HIGH_VALUE_PAN_THRESHOLD, format_inr, normalize_phone, to_ist, receipt_access_token, mask_pan
 
 
 def create_app(test_config=None):
@@ -207,6 +207,12 @@ def create_app(test_config=None):
     app.jinja_env.globals["receipt_token"] = lambda donation_id: receipt_access_token(
         donation_id, app.config["SECRET_KEY"]
     )
+
+    # Lets admin templates gate PAN/Address display on the same rule
+    # receipts already use (Donation.effective_is_80g or amount above this
+    # threshold) without a second hardcoded copy of the number -- see
+    # templates/admin/donations.html's "Full details" modal.
+    app.jinja_env.globals["HIGH_VALUE_PAN_THRESHOLD"] = HIGH_VALUE_PAN_THRESHOLD
 
     @login_manager.user_loader
     def load_user(user_id):

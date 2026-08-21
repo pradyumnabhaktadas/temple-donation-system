@@ -161,9 +161,18 @@
             <tr><th class="text-muted">Phone</th><td>{{ d.donor.phone or '-' }}</td></tr>
             <tr><th class="text-muted">WhatsApp</th><td>{{ d.donor.whatsapp_number or '-' }}</td></tr>
             <tr><th class="text-muted">Email</th><td>{{ d.donor.email or '-' }}</td></tr>
+            {# PAN/Address are only legally relevant to *this* donation when
+               it's 80G-eligible or crosses the same high-value threshold
+               that requires collecting them at all -- same rule the receipt
+               PDF itself uses (pdf_utils.generate_receipt_pdf). Showing them
+               unconditionally for every donation, regardless of whether
+               there was ever a reason to collect them, needlessly widens who
+               sees a donor's PAN/address on a routine low-value gift. #}
+            {% if d.effective_is_80g or d.amount > HIGH_VALUE_PAN_THRESHOLD %}
             <tr><th class="text-muted">PAN</th><td>{{ d.donor.pan or '-' }}</td></tr>
             <tr><th class="text-muted">Address</th><td>{{ d.donor.address or '-' }}</td></tr>
             <tr><th class="text-muted">City / State / Pincode</th><td>{{ [d.donor.city, d.donor.state, d.donor.pincode] | select | join(', ') or '-' }}</td></tr>
+            {% endif %}
             <tr><th class="text-muted">Campaign</th><td>{{ d.campaign.name }}</td></tr>
             {% if d.bace_property %}<tr><th class="text-muted">BACE Property</th><td>{{ d.bace_property.name }}</td></tr>{% endif %}
             {% if d.festival %}<tr><th class="text-muted">Festival</th><td>{{ d.festival.name }}</td></tr>{% endif %}

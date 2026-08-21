@@ -7,7 +7,7 @@
     <h1>Offer a <em>seva</em> this festival.</h1>
     <p class="hero-lede">Choose an upcoming occasion and a seva or sponsorship tier -- a receipt is generated automatically after payment.</p>
     <div class="hero-trust-row">
-      <span><b>100%</b> secure payment</span><span><b>80G</b> eligible</span><span><b>∞</b> gratitude</span>
+      <span><b>100%</b> secure payment</span>{% if campaign.is_80g %}<span><b>80G</b> eligible</span>{% endif %}<span><b>∞</b> gratitude</span>
     </div>
   </div>
   <div class="hero-lotus" aria-hidden="true"><div class="lotus-glow"><img src="{{ url_for('static', filename='branding/iskcon_dwarka_logo.png') }}" alt="" class="lotus-glow-logo"></div><i></i><i></i><i></i><i></i></div>
@@ -82,14 +82,15 @@
         </div>
       </div>
 
-      <p class="field-note text-muted mb-2" id="high-value-note" style="display:none;">
+      <div id="pan-address-fields" {% if not campaign.is_80g %}style="display:none;"{% endif %}>
+      <p class="field-note text-muted mb-2" id="high-value-note" {% if campaign.is_80g %}style="display:none;"{% endif %}>
         PAN and address are mandatory for donations above Rs. 49,000, per Income Tax rules.
       </p>
       <div class="row mb-0">
         <div class="col-md-6 mb-3">
-          <label class="form-label" for="pan">PAN <span class="text-muted">(required -- every Festival Seva donation is 80G-eligible)</span></label>
+          <label class="form-label" for="pan">PAN{% if campaign.is_80g %} <span class="text-muted">(required for 80G receipt)</span>{% endif %}</label>
           <input type="text" class="form-control" name="pan" id="pan" style="text-transform:uppercase" maxlength="10"
-                 pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10 characters, e.g. ABCDE1234F" required>
+                 pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10 characters, e.g. ABCDE1234F" {% if campaign.is_80g %}required{% endif %}>
         </div>
       </div>
 
@@ -112,6 +113,7 @@
           <input type="text" class="form-control" name="pincode" id="pincode"
                  maxlength="6" pattern="[0-9]{6}" inputmode="numeric" title="6-digit PIN code">
         </div>
+      </div>
       </div>
       </div>
 
@@ -158,26 +160,39 @@
     updatePanAddressRequirement();
   });
 
-  // PAN + address are always visible here (Festivals is 80G-eligible), and
-  // PAN is now always required -- not just above the high-value threshold.
-  // This campaign has no per-donation 80G/Non-80G choice the way Live To
-  // Give does, so every donation through this form is recorded 80G, and
-  // create_order() on the server now refuses one with no PAN (QA report
-  // REG-036: an 80G donation with no PAN can't actually be reported on
-  // Form 10BD). Address only becomes mandatory above the high-value
-  // threshold -- Income Tax rules, mirrors HIGH_VALUE_PAN_THRESHOLD in
-  // public.py (the server enforces both regardless of what happens here).
+  // Whether PAN/address are shown (and PAN required) unconditionally, or
+  // only above the high-value threshold, follows the *actual* Festivals
+  // campaign record (campaign.is_80g) rather than assuming one or the
+  // other -- QA feedback (2026-08-21) caught this page's copy/required-PAN
+  // logic hardcoded to "every Festival Seva donation is 80G-eligible" when
+  // it isn't. create_order() on the server derives the same thing from
+  // Campaign.is_80g (see Donation.effective_is_80g), so this stays in sync
+  // with whatever's actually set in Admin -> Campaigns -> Festivals
+  // without needing another code change if that ever changes again.
+  const CAMPAIGN_IS_80G = {{ campaign.is_80g | tojson }};
   const panInput = document.getElementById('pan');
   const addressInput = document.getElementById('address');
   const highValueNote = document.getElementById('high-value-note');
+  const panAddressFields = document.getElementById('pan-address-fields');
   const HIGH_VALUE_PAN_THRESHOLD = 49000;
   function updatePanAddressRequirement() {
     const isHighValue = (parseFloat(amountInput.value) || 0) > HIGH_VALUE_PAN_THRESHOLD;
-    panInput.required = true;
-    addressInput.required = isHighValue;
-    highValueNote.style.display = isHighValue ? '' : 'none';
+    if (CAMPAIGN_IS_80G) {
+      // PAN is always required and visible; only Address becomes
+      // mandatory once the amount crosses the high-value threshold.
+      panInput.required = true;
+      addressInput.required = isHighValue;
+      highValueNote.style.display = isHighValue ? '' : 'none';
+    } else {
+      // Mirrors /bace-rent: the whole PAN/address block stays hidden and
+      // optional until the amount itself requires collecting them.
+      panAddressFields.style.display = isHighValue ? '' : 'none';
+      panInput.required = isHighValue;
+      addressInput.required = isHighValue;
+    }
   }
   amountInput.addEventListener('input', updatePanAddressRequirement);
+  updatePanAddressRequirement();
 
   TempleDonationPayment.init({
     formId: 'festival-seva-form',
