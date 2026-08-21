@@ -368,7 +368,7 @@ class TestTheExcelTemplates:
         """Downloaded and uploaded straight back, with no editing. If the
         example rows don't import, neither will anything modelled on them."""
         from extensions import db
-        from models import Campaign, Donation, LiveToGivePurpose
+        from models import Campaign, Donation, LiveToGivePurpose, AssociatedWith
         login(client)
         with app.app_context():
             # Only what's missing -- the test app seeds some of these
@@ -379,6 +379,9 @@ class TestTheExcelTemplates:
             purpose = "Temple Construction (मंदिर निर्माण के लिए)"
             if not LiveToGivePurpose.query.filter_by(name=purpose).first():
                 db.session.add(LiveToGivePurpose(name=purpose, is_80g=True))
+            associated_with = "IYF Dwarka Temple Preaching"
+            if not AssociatedWith.query.filter_by(name=associated_with).first():
+                db.session.add(AssociatedWith(name=associated_with))
             db.session.commit()
 
         data = client.get("/admin/donations/bulk-import/demo.xlsx").data

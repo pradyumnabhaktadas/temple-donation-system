@@ -30,6 +30,49 @@ class Preacher(db.Model):
         return f"<Preacher {self.name}>"
 
 
+class AssociatedWith(db.Model):
+    """Which preaching program, department, devotee, or initiative a donor
+    is connected to for a *specific donation* -- e.g. "IYF Dwarka Temple
+    Preaching", "Online Preaching", "HG Achyutanand Pr", "IYF Bhakti
+    Vriksha -- Sujeet Pr".
+
+    Deliberately a per-donation field (Donation.associated_with_id), not a
+    per-donor one like Preacher/Donor.connected_preacher_id -- the same
+    donor can give one donation through one preaching program and a later
+    one through a different devotee or initiative entirely, and each
+    donation needs to record which. It's also deliberately independent of
+    Donation Purpose/Campaign: "IYF Dwarka Temple Preaching" (who/what the
+    donor is connected to) and "Temple Construction" (what the money is
+    for) are two separate questions a donor can answer in any combination,
+    so this is never conflated with campaign_id/live_to_give_purpose_id.
+
+    Same admin-editable-lookup-list pattern as BaceProperty/Festival/
+    SevaType/LiveToGivePurpose/Preacher, editable from Admin -> Associated
+    With. Offered on the Give to Krishna (Live To Give) and Festival Seva
+    forms, plus the admin offline-entry forms; optional everywhere (NULL
+    just means "not specified")."""
+
+    __tablename__ = "associated_withs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False, unique=True)
+    # Admin-controlled sort position for the public dropdown (Move Up/Move
+    # Down in Admin -> Associated With) -- lower sorts first. Deliberately
+    # not alphabetical like every other lookup list here: the office wants
+    # to put their most-used options up top rather than wherever they land
+    # alphabetically. Ties (including the default 0 a freshly-added option
+    # starts at until it's moved) fall back to name so ordering is always
+    # deterministic.
+    display_order = db.Column(db.Integer, default=0, nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    donations = db.relationship("Donation", backref="associated_with", lazy="dynamic")
+
+    def __repr__(self):
+        return f"<AssociatedWith {self.name}>"
+
+
 # Donor.donor_type values -- an IYF (ISKCON Youth Forum) donor vs. a
 # Live To Give (Nitya Seva) donor. Kept as a plain string rather than a
 # separate lookup table since this is a fixed, small, code-meaningful set
@@ -293,6 +336,14 @@ class Donation(db.Model):
     # purpose (Cow Protection, Temple Construction, Sudama Seva, ...) the
     # payment is for. NULL for every other campaign.
     live_to_give_purpose_id = db.Column(db.Integer, db.ForeignKey("live_to_give_purposes.id"), nullable=True)
+    # Which preaching program/department/devotee/initiative this donation
+    # is connected to -- see AssociatedWith's docstring. Deliberately
+    # independent of campaign_id/live_to_give_purpose_id (Donation
+    # Purpose): a donor's answer to "who are you associated with" and
+    # "what is this donation for" are two separate questions. Offered on
+    # the Give to Krishna (Live To Give) and Festival Seva forms, plus
+    # admin offline entry; NULL means "not specified" everywhere.
+    associated_with_id = db.Column(db.Integer, db.ForeignKey("associated_withs.id"), nullable=True)
     # The Live To Give form lets the donor choose 80G vs Non-80G for this
     # specific donation (unlike every other form, where 80G-eligibility is
     # fixed per campaign) -- NULL here means "not asked" (every other

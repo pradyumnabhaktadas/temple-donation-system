@@ -33,7 +33,7 @@ from app import create_app
 from extensions import db
 from models import (
     Camp, Donation, Donor, Campaign, BaceProperty, Festival, SevaType,
-    LiveToGivePurpose, Preacher, ReceiptCounter, DonorLoginOTP,
+    LiveToGivePurpose, Preacher, AssociatedWith, ReceiptCounter, DonorLoginOTP,
     AdminActivityLog, AdminUser,
 )
 
@@ -62,6 +62,7 @@ MODELS_IN_DELETE_ORDER = [
     SevaType,
     LiveToGivePurpose,
     Preacher,
+    AssociatedWith,
     Camp,
     AdminUser,
 ]
@@ -106,7 +107,7 @@ def main():
         print(
             "\nAll data deleted. Run `python seed.py` now to restore the default "
             "campaigns, BACE properties, festivals, seva types, Live To Give "
-            "purposes, and a default admin login."
+            "purposes, associated-with options, and a default admin login."
         )
 
 

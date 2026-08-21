@@ -1,0 +1,14 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Edit Associated With{% endblock %}
+{% block content %}
+<a href="{{ url_for('admin.associated_withs') }}">&larr; Back to Associated With</a>
+<h3 class="mt-2 mb-3">✏️ Edit Associated With</h3>
+<form method="post" class="card card-body shadow-sm p-4" style="max-width:500px">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="mb-3">
+    <label class="form-label" for="name">Name</label>
+    <input type="text" class="form-control" name="name" id="name" value="{{ item.name }}" required>
+  </div>
+  <button class="btn btn-gold">Save Changes</button>
+</form>
+{% endblock %}

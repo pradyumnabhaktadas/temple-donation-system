@@ -5,7 +5,7 @@ Usage: python seed.py
 """
 from app import create_app
 from extensions import db
-from models import Campaign, AdminUser, BaceProperty, Festival, SevaType, LiveToGivePurpose
+from models import Campaign, AdminUser, BaceProperty, Festival, SevaType, LiveToGivePurpose, AssociatedWith
 
 CAMPAIGNS = [
     # (name, is_80g, min_amount) -- min_amount is None unless noted; only
@@ -18,7 +18,7 @@ CAMPAIGNS = [
     ("Temple Construction", True, None),
     ("Deity Worship", True, None),
     ("Youth Preaching", True, None),
-    ("Festivals", True, None),
+    ("Festivals", False, None),
     ("Annadan", True, None),
     ("General Donations", True, None),
     ("Other Charitable Activities", True, None),
@@ -93,6 +93,23 @@ LIVE_TO_GIVE_PURPOSES = [
     ("Annadan", True),
 ]
 
+# Starting list for the "I am associated with" dropdown on the donation
+# forms -- editable afterwards from Admin -> Associated With without
+# touching code. Order here becomes the initial display_order (0, 10, 20,
+# ...), matching the seed rows the associated_withs migration itself
+# inserts, so a fresh install (this file) and an existing deployment
+# (migration) start out identical.
+ASSOCIATED_WITH_OPTIONS = [
+    "IYF Dwarka Temple Preaching",
+    "Online Preaching",
+    "HG Achyutanand Pr",
+    "IYF Bhakti Vriksha - Sujeet Pr",
+    "IYF Bhakti Vriksha - HG Sri Gaur Pr",
+    "IYF Bhakti Vriksha - General",
+    "College Preaching",
+    "HG Veer Chaitanya Pr",
+]
+
 app = create_app()
 
 with app.app_context():
@@ -115,6 +132,10 @@ with app.app_context():
     for name, is_80g in LIVE_TO_GIVE_PURPOSES:
         if not LiveToGivePurpose.query.filter_by(name=name).first():
             db.session.add(LiveToGivePurpose(name=name, is_80g=is_80g))
+
+    for i, name in enumerate(ASSOCIATED_WITH_OPTIONS):
+        if not AssociatedWith.query.filter_by(name=name).first():
+            db.session.add(AssociatedWith(name=name, display_order=i * 10))
 
     if not AdminUser.query.filter_by(username="admin").first():
         admin = AdminUser(username="admin", role="admin", must_change_password=True)

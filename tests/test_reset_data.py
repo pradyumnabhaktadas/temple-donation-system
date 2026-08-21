@@ -23,8 +23,8 @@ from conftest import login
 
 def _populate(db):
     """One row in every table a live system has."""
-    from models import (AdminActivityLog, AdminUser, BaceProperty, Camp, Campaign,
-                        Donation, Donor, DonorLoginOTP, Festival, LiveToGivePurpose,
+    from models import (AdminActivityLog, AdminUser, AssociatedWith, BaceProperty, Camp,
+                        Campaign, Donation, Donor, DonorLoginOTP, Festival, LiveToGivePurpose,
                         Preacher, ReceiptCounter, SevaType)
     campaign = Campaign.query.filter_by(name="Annadan").first() or Campaign(
         name="Annadan", is_80g=True)
@@ -33,6 +33,7 @@ def _populate(db):
         BaceProperty(name="Test BACE"), Festival(name="Test Festival"),
         SevaType(name="Test Seva"), LiveToGivePurpose(name="Test Purpose"),
         Preacher(name="Test Preacher"), Camp(name="Test Camp"),
+        AssociatedWith(name="Test Associated With"),
     ])
     db.session.flush()
     donor = Donor(full_name="Test Donor", phone="9876543210")

@@ -11,7 +11,7 @@
     <div class="collapse navbar-collapse" id="adminNav">
       {% set offline_donation_endpoints = ['admin.manual_donation', 'admin.bulk_import_donations'] %}
       {% set donors_endpoints = ['admin.donors', 'admin.birthdays', 'admin.donor_insights', 'admin.lapsed_donors', 'admin.duplicate_donors', 'admin.import_donors'] %}
-      {% set settings_endpoints = ['admin.campaigns', 'admin.bace_properties', 'admin.bace_contributions', 'admin.festivals', 'admin.seva_types', 'admin.live_to_give_purposes', 'admin.preachers', 'admin.data_backup', 'admin.manage_users', 'admin.activity_log'] %}
+      {% set settings_endpoints = ['admin.campaigns', 'admin.bace_properties', 'admin.bace_contributions', 'admin.festivals', 'admin.seva_types', 'admin.live_to_give_purposes', 'admin.preachers', 'admin.associated_withs', 'admin.associated_with_report', 'admin.data_backup', 'admin.manage_users', 'admin.activity_log'] %}
       <div class="navbar-nav ms-auto flex-wrap">
         <a class="nav-link {% if request.endpoint == 'admin.dashboard' %}active{% endif %}" href="{{ url_for('admin.dashboard') }}">Dashboard</a>
         <a class="nav-link {% if request.endpoint == 'admin.analytics' %}active{% endif %}" href="{{ url_for('admin.analytics') }}">Analytics</a>
@@ -48,6 +48,8 @@
             <li><a class="dropdown-item {% if request.endpoint == 'admin.seva_types' %}active{% endif %}" href="{{ url_for('admin.seva_types') }}">Seva Types</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.live_to_give_purposes' %}active{% endif %}" href="{{ url_for('admin.live_to_give_purposes') }}">Live To Give Purposes</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.preachers' %}active{% endif %}" href="{{ url_for('admin.preachers') }}">Preachers</a></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'admin.associated_withs' %}active{% endif %}" href="{{ url_for('admin.associated_withs') }}">Associated With</a></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'admin.associated_with_report' %}active{% endif %}" href="{{ url_for('admin.associated_with_report') }}">Associated With Report</a></li>
             {% if current_user.is_authenticated and current_user.role == 'admin' %}
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.data_backup' %}active{% endif %}" href="{{ url_for('admin.data_backup') }}">Data Backup</a></li>

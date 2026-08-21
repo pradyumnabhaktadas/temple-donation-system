@@ -1,0 +1,70 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Associated With{% endblock %}
+{% block content %}
+<h3 class="mb-3">🤝 Associated With</h3>
+<p class="text-muted">Which preaching program, department, devotee, or initiative a donor is connected to. Shown as
+  "I am associated with" on the <a href="{{ url_for('public.donate_form') }}" target="_blank">Give to Krishna</a>
+  and <a href="{{ url_for('public.festival_seva_form') }}" target="_blank">Festival Seva</a> forms, in the order
+  arranged below.</p>
+
+<div class="row">
+  {% if current_user.role == 'admin' %}
+  <div class="col-md-5">
+    <div class="card card-body shadow-sm mb-3 p-4">
+      <h6 class="mb-3">New Option</h6>
+      <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-2">
+          <label class="form-label" for="name">Name</label>
+          <input type="text" class="form-control" name="name" id="name" placeholder="e.g. IYF Dwarka Temple Preaching" required>
+        </div>
+        <button class="btn btn-gold btn-sm">Add</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+  <div class="{% if current_user.role == 'admin' %}col-md-7{% else %}col-12{% endif %}">
+    <div class="table-responsive">
+    <table class="table table-sm bg-white shadow-sm align-middle">
+      <thead><tr><th>Name</th><th>Status</th>{% if current_user.role == 'admin' %}<th style="width:1%;white-space:nowrap;">Order</th><th style="width:1%;white-space:nowrap;">Actions</th>{% endif %}</tr></thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          <td>{{ item.name }}</td>
+          <td>{% if item.is_active %}<span class="badge bg-success">Active</span>{% else %}<span class="badge bg-secondary">Inactive</span>{% endif %}</td>
+          {% if current_user.role == 'admin' %}
+          <td class="text-nowrap">
+            <form method="post" action="{{ url_for('admin.move_associated_with', item_id=item.id) }}" class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="direction" value="up">
+              <button type="submit" class="btn btn-sm btn-outline-secondary" {% if loop.first %}disabled{% endif %} aria-label="Move {{ item.name }} up">&uarr;</button>
+            </form>
+            <form method="post" action="{{ url_for('admin.move_associated_with', item_id=item.id) }}" class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="direction" value="down">
+              <button type="submit" class="btn btn-sm btn-outline-secondary" {% if loop.last %}disabled{% endif %} aria-label="Move {{ item.name }} down">&darr;</button>
+            </form>
+          </td>
+          <td class="text-nowrap">
+            <form method="post" action="{{ url_for('admin.toggle_associated_with', item_id=item.id) }}" class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-sm btn-outline-secondary">{{ 'Deactivate' if item.is_active else 'Activate' }}</button>
+            </form>
+            <a href="{{ url_for('admin.associated_with_edit', item_id=item.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+            <form method="post" action="{{ url_for('admin.associated_with_delete', item_id=item.id) }}" class="d-inline"
+                  data-confirm="Delete '{{ item.name }}'? Only possible if it has no donations recorded.">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-sm btn-outline-danger">Delete</button>
+            </form>
+          </td>
+          {% endif %}
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="text-muted">No options yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

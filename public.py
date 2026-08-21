@@ -44,7 +44,10 @@ from flask_login import current_user
 from werkzeug.exceptions import HTTPException
 
 from extensions import db, csrf, limiter
-from models import Donor, Campaign, Donation, ReceiptCounter, BaceProperty, Festival, SevaType, LiveToGivePurpose
+from models import (
+    Donor, Campaign, Donation, ReceiptCounter, BaceProperty, Festival, SevaType, LiveToGivePurpose,
+    AssociatedWith,
+)
 from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email
 from whatsapp_utils import send_receipt_whatsapp
@@ -128,7 +131,7 @@ class _InvalidFkError(Exception):
 
 _FK_LABELS = {
     "bace_property_id": "BACE property", "festival_id": "festival", "seva_type_id": "seva type",
-    "live_to_give_purpose_id": "donation purpose",
+    "live_to_give_purpose_id": "donation purpose", "associated_with_id": "associated-with option",
 }
 
 
@@ -311,10 +314,14 @@ def donate_form():
     purposes = []
     if campaign is not None and campaign.is_active:
         purposes = LiveToGivePurpose.query.filter_by(is_active=True).order_by(LiveToGivePurpose.name).all()
+    associated_withs = AssociatedWith.query.filter_by(is_active=True).order_by(
+        AssociatedWith.display_order, AssociatedWith.name
+    ).all()
     return render_template(
         "donate.html",
         campaign=campaign,
         purposes=purposes,
+        associated_withs=associated_withs,
         razorpay_enabled=current_app.config["RAZORPAY_ENABLED"],
         razorpay_key_id=current_app.config["RAZORPAY_KEY_ID"],
         org_name=current_app.config["ORG_NAME"],
@@ -360,11 +367,15 @@ def festival_seva_form():
         Festival.event_date.is_(None), Festival.event_date, Festival.name
     ).all()
     seva_types = SevaType.query.filter_by(is_active=True).order_by(SevaType.name).all()
+    associated_withs = AssociatedWith.query.filter_by(is_active=True).order_by(
+        AssociatedWith.display_order, AssociatedWith.name
+    ).all()
     return render_template(
         "festival_seva.html",
         campaign=campaign,
         festivals=festivals,
         seva_types=seva_types,
+        associated_withs=associated_withs,
         razorpay_enabled=current_app.config["RAZORPAY_ENABLED"],
         razorpay_key_id=current_app.config["RAZORPAY_KEY_ID"],
         org_name=current_app.config["ORG_NAME"],
@@ -485,6 +496,13 @@ def create_order():
         festival_id = _validated_fk_id(data, "festival_id", Festival)
         seva_type_id = _validated_fk_id(data, "seva_type_id", SevaType)
         live_to_give_purpose_id = _validated_fk_id(data, "live_to_give_purpose_id", LiveToGivePurpose)
+        # "I am associated with" -- offered on Give to Krishna (Live To
+        # Give) and Festival Seva, but validated here unconditionally like
+        # every other optional FK above: which forms a client claims to be
+        # submitting from is incidental, not something to trust. Entirely
+        # independent of campaign/purpose -- see AssociatedWith's
+        # docstring -- so no campaign-specific gating applies to it here.
+        associated_with_id = _validated_fk_id(data, "associated_with_id", AssociatedWith)
     except _InvalidFkError as e:
         return jsonify({"error": str(e)}), 400
 
@@ -605,6 +623,7 @@ def create_order():
             Donation.festival_id == festival_id,
             Donation.seva_type_id == seva_type_id,
             Donation.live_to_give_purpose_id == live_to_give_purpose_id,
+            Donation.associated_with_id == associated_with_id,
             Donation.donation_date >= dedup_cutoff,
         ).order_by(Donation.id.desc()).first()
         if existing_donation and (
@@ -629,6 +648,7 @@ def create_order():
             festival_id=festival_id,
             seva_type_id=seva_type_id,
             live_to_give_purpose_id=live_to_give_purpose_id,
+            associated_with_id=associated_with_id,
             is_80g_requested=is_80g_requested,
             remarks=remarks,
             consent_given=True,

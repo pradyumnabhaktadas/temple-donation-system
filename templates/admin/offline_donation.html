@@ -21,6 +21,16 @@
       </select>
     </div>
 
+    <div class="mb-3">
+      <label class="form-label" for="associated_with_id">I am associated with <span class="text-muted">(optional)</span></label>
+      <select class="form-select" name="associated_with_id" id="associated_with_id">
+        <option value="">-- Not specified --</option>
+        {% for a in associated_withs %}
+        <option value="{{ a.id }}">{{ a.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
     <div class="mb-3" id="bace-property-field" style="display:none;">
       <label class="form-label" for="bace_property_id">BACE</label>
       <select class="form-select" name="bace_property_id" id="bace_property_id">

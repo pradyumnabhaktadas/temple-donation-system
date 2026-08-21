@@ -20,8 +20,8 @@ from extensions import db, limiter
 from models import (
     Camp,
     Donor, Campaign, Donation, AdminUser, ReceiptCounter, BaceProperty, Festival, SevaType,
-    LiveToGivePurpose, Preacher, AdminActivityLog, DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES,
-    DONATION_FREQUENCY_LABELS,
+    LiveToGivePurpose, Preacher, AssociatedWith, AdminActivityLog, DONOR_TYPES, DONOR_TYPE_LABELS,
+    DONATION_FREQUENCIES, DONATION_FREQUENCY_LABELS,
 )
 from utils import csv_safe_row, get_financial_year, is_valid_pan, is_valid_phone, normalize_phone, now_ist, to_ist
 from pdf_utils import generate_receipt_pdf
@@ -1258,6 +1258,10 @@ def _apply_donations_filters(query):
     if mode:
         query = query.filter_by(payment_mode=mode)
 
+    associated_with_id = request.args.get("associated_with_id", type=int)
+    if associated_with_id:
+        query = query.filter_by(associated_with_id=associated_with_id)
+
     date_from_raw = request.args.get("date_from") or ""
     date_to_raw = request.args.get("date_to") or ""
 
@@ -1322,6 +1326,7 @@ def _apply_donations_filters(query):
 
     return query, {
         "status": status, "campaign_id": campaign_id, "mode": mode,
+        "associated_with_id": associated_with_id,
         "date_from": date_from_raw, "date_to": date_to_raw,
         "date_range": date_range,
     }
@@ -1371,9 +1376,10 @@ def donations():
     page = request.args.get("page", 1, type=int)
     pagination = db.paginate(query, page=page, per_page=DONATIONS_PER_PAGE, error_out=False)
     campaigns = Campaign.query.order_by(Campaign.name).all()
+    associated_withs = AssociatedWith.query.order_by(AssociatedWith.display_order, AssociatedWith.name).all()
     return render_template(
         "admin/donations.html", donations=pagination.items, pagination=pagination, campaigns=campaigns,
-        sort=sort, **filters,
+        associated_withs=associated_withs, sort=sort, **filters,
     )
 
 
@@ -1514,6 +1520,8 @@ def _offline_donation_form_context():
         "festivals": Festival.query.filter_by(is_active=True).order_by(Festival.name).all(),
         "seva_types": SevaType.query.filter_by(is_active=True).order_by(SevaType.name).all(),
         "live_to_give_purposes": LiveToGivePurpose.query.filter_by(is_active=True).order_by(LiveToGivePurpose.name).all(),
+        "associated_withs": AssociatedWith.query.filter_by(is_active=True)
+            .order_by(AssociatedWith.display_order, AssociatedWith.name).all(),
         # now_ist(), not datetime.date.today() -- see the same fix applied
         # throughout this file for "today"-as-server-clock bugs. This one
         # only sets the Donation Date field's default value (staff can
@@ -1837,6 +1845,7 @@ def _payment_reference_error(payment_mode, cheque_number=None, bank_transaction_
 def _create_offline_donation(
     *, donor_data, campaign, amount, payment_mode, donation_date, recorded_by,
     bace_property_id=None, festival_id=None, seva_type_id=None, live_to_give_purpose_id=None,
+    associated_with_id=None,
     is_80g_requested=None, cheque_number=None, cheque_bank_name=None, bank_transaction_id=None,
     remarks=None, send_notifications=True, camp_name=None, batch_name=None,
 ):
@@ -1902,6 +1911,7 @@ def _create_offline_donation(
             festival_id=festival_id,
             seva_type_id=seva_type_id,
             live_to_give_purpose_id=live_to_give_purpose_id,
+            associated_with_id=associated_with_id,
             is_80g_requested=is_80g_requested,
             cheque_number=(cheque_number or "").strip()[:50] or None,
             cheque_bank_name=(cheque_bank_name or "").strip()[:150] or None,
@@ -2015,6 +2025,12 @@ def manual_donation():
         if error:
             flash(error)
             return redirect(url_for("admin.manual_donation"))
+        associated_with_id, error = _validated_id_from_form(
+            form, "associated_with_id", AssociatedWith, "associated-with option"
+        )
+        if error:
+            flash(error)
+            return redirect(url_for("admin.manual_donation"))
 
         receipt_type = form.get("receipt_type")
         if receipt_type == "80g":
@@ -2067,6 +2083,7 @@ def manual_donation():
             festival_id=festival_id,
             seva_type_id=seva_type_id,
             live_to_give_purpose_id=live_to_give_purpose_id,
+            associated_with_id=associated_with_id,
             is_80g_requested=is_80g_requested,
             cheque_number=cheque_number,
             cheque_bank_name=cheque_bank_name,
@@ -2103,6 +2120,7 @@ BULK_IMPORT_COLUMNS = [
     "campaign_name", "amount", "payment_mode", "donation_date",
     "cheque_number", "cheque_bank_name", "bank_transaction_id",
     "receipt_type", "bace_property_name", "festival_name", "seva_type_name", "live_to_give_purpose_name",
+    "associated_with_name",
     "remarks",
 ]
 BULK_IMPORT_DEMO_ROWS = [
@@ -2112,7 +2130,8 @@ BULK_IMPORT_DEMO_ROWS = [
         "campaign_name": "General Donations", "amount": "1100", "payment_mode": "cash",
         "donation_date": "2026-04-15", "cheque_number": "", "cheque_bank_name": "", "bank_transaction_id": "",
         "receipt_type": "", "bace_property_name": "", "festival_name": "", "seva_type_name": "",
-        "live_to_give_purpose_name": "", "remarks": "Monthly seva",
+        "live_to_give_purpose_name": "", "associated_with_name": "IYF Dwarka Temple Preaching",
+        "remarks": "Monthly seva",
     },
     {
         "full_name": "Sita Devi", "phone": "9123456780", "whatsapp_number": "", "email": "",
@@ -2120,7 +2139,8 @@ BULK_IMPORT_DEMO_ROWS = [
         "campaign_name": "Temple Construction", "amount": "5000", "payment_mode": "cheque",
         "donation_date": "2026-04-20", "cheque_number": "123456", "cheque_bank_name": "HDFC Bank",
         "bank_transaction_id": "", "receipt_type": "", "bace_property_name": "", "festival_name": "",
-        "seva_type_name": "", "live_to_give_purpose_name": "", "remarks": "",
+        "seva_type_name": "", "live_to_give_purpose_name": "", "associated_with_name": "",
+        "remarks": "",
     },
     {
         "full_name": "Amit Sharma", "phone": "", "whatsapp_number": "9988776655", "email": "amit@example.com",
@@ -2130,6 +2150,7 @@ BULK_IMPORT_DEMO_ROWS = [
         "bank_transaction_id": "UTR2026042212345", "receipt_type": "80g", "bace_property_name": "",
         "festival_name": "", "seva_type_name": "",
         "live_to_give_purpose_name": "Temple Construction (मंदिर निर्माण के लिए)",
+        "associated_with_name": "",
         "remarks": "",
     },
 ]
@@ -2334,6 +2355,7 @@ def bulk_import_donations():
     festivals_by_name = {f.name.strip().lower(): f for f in Festival.query.all()}
     seva_by_name = {s.name.strip().lower(): s for s in SevaType.query.all()}
     purposes_by_name = {p.name.strip().lower(): p for p in LiveToGivePurpose.query.all()}
+    associated_withs_by_name = {a.name.strip().lower(): a for a in AssociatedWith.query.all()}
 
     results = []
     created = 0
@@ -2406,6 +2428,9 @@ def bulk_import_donations():
         live_to_give_purpose_id = _lookup_by_name(
             purposes_by_name, row.get("live_to_give_purpose_name"), "donation purpose", row_errors
         )
+        associated_with_id = _lookup_by_name(
+            associated_withs_by_name, row.get("associated_with_name"), "associated-with option", row_errors
+        )
 
         receipt_type = (row.get("receipt_type") or "").lower()
         if receipt_type == "80g":
@@ -2457,6 +2482,7 @@ def bulk_import_donations():
             festival_id=festival_id,
             seva_type_id=seva_type_id,
             live_to_give_purpose_id=live_to_give_purpose_id,
+            associated_with_id=associated_with_id,
             is_80g_requested=is_80g_requested,
             cheque_number=row.get("cheque_number"),
             cheque_bank_name=row.get("cheque_bank_name"),
@@ -3556,6 +3582,301 @@ def festival_delete(festival_id):
     return redirect(url_for("admin.festivals"))
 
 
+def _renumbered_associated_withs():
+    """Re-lays every AssociatedWith's display_order out as 0, 10, 20, ...
+    in its current sorted order (display_order, then name as a
+    tie-breaker) and returns that list, already ordered.
+
+    Called before every Move Up/Move Down so the swap below always has
+    clean, gap-free neighbours to work with -- ties (most commonly every
+    row still sitting at the default 0 before anyone's arranged them)
+    would otherwise make "swap with the row before/after me" ambiguous.
+    Cheap at this list's realistic size (a temple's preaching-program
+    list, not thousands of rows), and doesn't need its own commit --
+    callers commit once after making their actual change too."""
+    items = AssociatedWith.query.order_by(AssociatedWith.display_order, AssociatedWith.name).all()
+    for i, item in enumerate(items):
+        item.display_order = i * 10
+    return items
+
+
+@bp.route("/associated-with", methods=["GET", "POST"])
+@login_required
+def associated_withs():
+    if request.method == "POST":
+        if current_user.role != "admin":
+            flash("That action requires an administrator account.")
+            return redirect(url_for("admin.associated_withs"))
+        name = request.form.get("name", "").strip()
+        if not name:
+            flash("Name can't be blank.")
+            return redirect(url_for("admin.associated_withs"))
+        if AssociatedWith.query.filter_by(name=name).first():
+            flash(f"'{name}' already exists.")
+            return redirect(url_for("admin.associated_withs"))
+        # New entries land at the end of the list rather than the default
+        # 0 -- otherwise every freshly-added option would jump ahead of
+        # everything the office already arranged, which is the opposite
+        # of what "add a new option" should do to an existing order.
+        last = AssociatedWith.query.order_by(AssociatedWith.display_order.desc()).first()
+        next_order = (last.display_order + 10) if last else 0
+        db.session.add(AssociatedWith(name=name, display_order=next_order))
+        db.session.commit()
+        flash(f"'{name}' added.")
+        return redirect(url_for("admin.associated_withs"))
+
+    items = AssociatedWith.query.order_by(AssociatedWith.display_order, AssociatedWith.name).all()
+    return render_template("admin/associated_withs.html", items=items)
+
+
+@bp.route("/associated-with/<int:item_id>/toggle", methods=["POST"])
+@login_required
+@admin_role_required
+def toggle_associated_with(item_id):
+    item = AssociatedWith.query.get_or_404(item_id)
+    item.is_active = not item.is_active
+    db.session.commit()
+    return redirect(url_for("admin.associated_withs"))
+
+
+@bp.route("/associated-with/<int:item_id>/move", methods=["POST"])
+@login_required
+@admin_role_required
+def move_associated_with(item_id):
+    """Swaps display_order with the item immediately before/after this one
+    in the current list -- the "Arrange the display order" control. Always
+    re-numbers the whole list first (see _renumbered_associated_withs) so
+    the swap is well-defined even if two rows currently share an order
+    value."""
+    direction = request.form.get("direction")
+    items = _renumbered_associated_withs()
+    index = next((i for i, it in enumerate(items) if it.id == item_id), None)
+    if index is None:
+        abort(404)
+    swap_index = index - 1 if direction == "up" else index + 1 if direction == "down" else None
+    if swap_index is not None and 0 <= swap_index < len(items):
+        items[index].display_order, items[swap_index].display_order = (
+            items[swap_index].display_order, items[index].display_order,
+        )
+    db.session.commit()
+    return redirect(url_for("admin.associated_withs"))
+
+
+@bp.route("/associated-with/<int:item_id>/edit", methods=["GET", "POST"])
+@login_required
+@admin_role_required
+def associated_with_edit(item_id):
+    item = AssociatedWith.query.get_or_404(item_id)
+    if request.method == "POST":
+        new_name = request.form.get("name", "").strip()
+        if not new_name:
+            flash("Name can't be blank.")
+            return redirect(url_for("admin.associated_with_edit", item_id=item_id))
+        existing = AssociatedWith.query.filter(
+            AssociatedWith.name == new_name, AssociatedWith.id != item.id
+        ).first()
+        if existing:
+            flash(f"Another option is already named '{new_name}'.")
+            return redirect(url_for("admin.associated_with_edit", item_id=item_id))
+
+        item.name = new_name
+        db.session.commit()
+        flash(f"Renamed to '{item.name}'.")
+        return redirect(url_for("admin.associated_withs"))
+
+    return render_template("admin/associated_with_edit.html", item=item)
+
+
+@bp.route("/associated-with/<int:item_id>/delete", methods=["POST"])
+@login_required
+@admin_role_required
+def associated_with_delete(item_id):
+    item = AssociatedWith.query.get_or_404(item_id)
+    has_donations = Donation.query.filter_by(associated_with_id=item.id).first() is not None
+    if has_donations:
+        flash(
+            f"Can't delete '{item.name}' -- it has donations recorded against it. "
+            "Deactivate it instead to hide it from the donation forms."
+        )
+        return redirect(url_for("admin.associated_withs"))
+
+    db.session.delete(item)
+    db.session.commit()
+    flash(f"'{item.name}' deleted.")
+    return redirect(url_for("admin.associated_withs"))
+
+
+def _associated_with_date_status_conditions():
+    """Resolves status + the same this_month/last_month/last_3_months/
+    this_fy/custom/all date-range presets _apply_donations_filters uses,
+    but returns them as a list of SQLAlchemy filter conditions rather than
+    applying them to one query -- the Associated With Report needs the
+    *same* status/date filter applied twice (the per-option summary
+    aggregate, and the detail row list below it), and building the
+    conditions once keeps those two queries from ever drifting apart.
+
+    Deliberately doesn't touch associated_with_id -- that filter only
+    narrows the detail list/export, not the summary breakdown (which is
+    the whole point of a breakdown: every option's total stays visible
+    even while looking at one of them in detail)."""
+    status = request.args.get("status", "success")
+    date_from_raw = request.args.get("date_from") or ""
+    date_to_raw = request.args.get("date_to") or ""
+    date_range = request.args.get("range") or ""
+    if date_from_raw or date_to_raw:
+        date_range = "custom"
+    elif not date_range:
+        date_range = "this_month"
+
+    if date_range not in ("custom", "all"):
+        today = datetime.date.today()
+        start = end = None
+        if date_range == "this_month":
+            start, end = today.replace(day=1), today
+        elif date_range == "last_month":
+            end = today.replace(day=1) - datetime.timedelta(days=1)
+            start = end.replace(day=1)
+        elif date_range == "last_3_months":
+            month, year = today.month - 2, today.year
+            if month <= 0:
+                month, year = month + 12, year - 1
+            start, end = datetime.date(year, month, 1), today
+        elif date_range == "this_fy":
+            fy_start_year = today.year if today.month >= 4 else today.year - 1
+            start, end = datetime.date(fy_start_year, 4, 1), today
+        else:
+            date_range = "all"
+
+        if start:
+            date_from_raw, date_to_raw = start.isoformat(), end.isoformat()
+
+    conditions = []
+    if status != "all":
+        conditions.append(Donation.status == status)
+    try:
+        if date_from_raw:
+            date_from = datetime.datetime.strptime(date_from_raw, "%Y-%m-%d")
+            conditions.append(Donation.donation_date >= date_from)
+        if date_to_raw:
+            date_to = datetime.datetime.strptime(date_to_raw, "%Y-%m-%d")
+            conditions.append(Donation.donation_date < date_to + datetime.timedelta(days=1))
+    except ValueError:
+        date_from_raw = date_to_raw = ""
+
+    return conditions, {
+        "status": status, "date_from": date_from_raw, "date_to": date_to_raw, "date_range": date_range,
+    }
+
+
+@bp.route("/associated-with-report")
+@login_required
+def associated_with_report():
+    """Association-wise donation totals -- "how much came in through each
+    preaching program/devotee/initiative", answering the same "this
+    month"/"this financial year"/custom-range question the Donations Log
+    already answers for campaigns, just grouped by Associated With
+    instead. Unlike bace_contributions() (one fixed campaign), this spans
+    every campaign -- Associated With is a cross-cutting tag, not tied to
+    one collection form."""
+    conditions, filters = _associated_with_date_status_conditions()
+    associated_with_id = request.args.get("associated_with_id", type=int)
+    filters["associated_with_id"] = associated_with_id
+
+    join_condition = Donation.associated_with_id == AssociatedWith.id
+    for condition in conditions:
+        join_condition = join_condition & condition
+
+    summary_rows = (
+        db.session.query(
+            AssociatedWith.id, AssociatedWith.name, AssociatedWith.is_active,
+            func.coalesce(func.sum(Donation.amount), 0),
+            func.count(Donation.id),
+        )
+        .outerjoin(Donation, join_condition)
+        .group_by(AssociatedWith.id, AssociatedWith.name, AssociatedWith.is_active)
+        .order_by(AssociatedWith.display_order, AssociatedWith.name)
+        .all()
+    )
+    summary = [
+        {"id": aid, "name": name, "is_active": is_active, "total": float(total), "count": count}
+        for aid, name, is_active, total, count in summary_rows
+    ]
+
+    # Donations in the period that never got an Associated With at all --
+    # surfaced as its own row so the summary visibly accounts for every
+    # donation in the period, not just the ones that specified one.
+    unspecified_query = Donation.query.filter(Donation.associated_with_id.is_(None), *conditions)
+    unspecified_total = float(
+        unspecified_query.with_entities(func.coalesce(func.sum(Donation.amount), 0)).scalar() or 0
+    )
+    unspecified_count = unspecified_query.count()
+
+    query = Donation.query.filter(*conditions)
+    if associated_with_id:
+        query = query.filter_by(associated_with_id=associated_with_id)
+    query = query.order_by(Donation.donation_date.desc())
+    page = request.args.get("page", 1, type=int)
+    pagination = db.paginate(query, page=page, per_page=DONATIONS_PER_PAGE, error_out=False)
+
+    return render_template(
+        "admin/associated_with_report.html",
+        summary=summary, unspecified_total=unspecified_total, unspecified_count=unspecified_count,
+        donations=pagination.items, pagination=pagination, **filters,
+    )
+
+
+@bp.route("/associated-with-report/export")
+@login_required
+def export_associated_with_report():
+    """CSV export of the Associated With Report, honoring whatever
+    status/date/associated_with filters are currently applied -- same
+    convention as export_donations()/export_bace_contributions()."""
+    conditions, _filters = _associated_with_date_status_conditions()
+    associated_with_id = request.args.get("associated_with_id", type=int)
+
+    query = Donation.query.filter(*conditions)
+    if associated_with_id:
+        query = query.filter_by(associated_with_id=associated_with_id)
+    rows = query.order_by(Donation.donation_date.desc()).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Receipt No", "Date", "Status", "Associated With", "Donor Name", "Phone", "Email", "PAN",
+        "Campaign", "Specific Purpose", "Amount", "Payment Mode", "Reference", "Recorded By", "Remarks",
+    ])
+    for d in rows:
+        donor = d.donor
+        date_str = (
+            to_ist(d.donation_date).strftime("%d-%m-%Y %H:%M")
+            if d.payment_mode == "online"
+            else d.donation_date.strftime("%d-%m-%Y")
+        )
+        writer.writerow(csv_safe_row([
+            d.receipt_number or "",
+            date_str,
+            d.status,
+            d.associated_with.name if d.associated_with else "",
+            donor.full_name,
+            donor.phone or "",
+            donor.email or "",
+            donor.pan or "",
+            d.campaign.name,
+            d.specific_purpose,
+            float(d.amount),
+            d.payment_mode,
+            d.reference_display or "",
+            d.recorded_by or "",
+            d.remarks or "",
+        ]))
+
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment;filename=Associated_With_Report.csv"},
+    )
+
+
 @bp.route("/seva-types", methods=["GET", "POST"])
 @login_required
 def seva_types():
@@ -4122,7 +4443,7 @@ def export_donations():
     writer.writerow([
         "Receipt No", "Date", "Status", "Donor Name", "Phone", "WhatsApp", "Email", "PAN",
         "Address", "City", "State", "Pincode",
-        "Amount", "Payment Mode", "Reference", "Order ID", "Campaign", "Specific Purpose", "80G Eligible",
+        "Amount", "Payment Mode", "Reference", "Order ID", "Campaign", "Specific Purpose", "Associated With", "80G Eligible",
         "Camp", "Batch",
         "Recorded By", "Remarks", "Cancelled At", "Cancelled By", "Cancellation Reason",
     ])
@@ -4158,6 +4479,7 @@ def export_donations():
             d.razorpay_order_id or "",
             d.campaign.name,
             specific_purpose,
+            d.associated_with.name if d.associated_with else "",
             "Yes" if d.effective_is_80g else "No",
             d.camp_name or "",
             d.batch_name or "",

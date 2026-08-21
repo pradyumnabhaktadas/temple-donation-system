@@ -157,6 +157,16 @@
       </div>
       </div>
 
+      <div class="form-section">
+        <label class="form-label" for="associated_with_id">I am associated with <span class="text-muted">(optional)</span></label>
+        <select class="form-select" name="associated_with_id" id="associated_with_id">
+          <option value="">-- Select an option --</option>
+          {% for a in associated_withs %}
+          <option value="{{ a.id }}">{{ a.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
       <div class="form-section mb-0">
         <label class="form-label" for="remarks">Remarks <span class="text-muted">(optional)</span></label>
         <input type="text" class="form-control" name="remarks" id="remarks" maxlength="300">
