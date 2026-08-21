@@ -41,8 +41,8 @@ CONFIRMATION_PHRASE = "DELETE ALL DATA"
 
 # Deletion order matters -- children before parents, so foreign key
 # constraints never block a delete (Donation references donors/campaigns/
-# bace_properties/festivals/seva_types/live_to_give_purposes; Donor
-# references preachers).
+# bace_properties/festivals/seva_types/live_to_give_purposes/
+# associated_withs; Donor references preachers).
 #
 # Every model in models.py must appear here. tests/test_reset_data.py
 # enforces that by comparing this list against SQLAlchemy's own registry --

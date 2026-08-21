@@ -52,6 +52,34 @@ class TestBackupContents:
             names = set(zf.namelist())
         assert {"donors.csv", "donations.csv", "campaigns.csv"} <= names
 
+    def test_backup_includes_associated_withs(self, app, client):
+        """Regression: this table was added to the app (models.py,
+        reset_data.py, seed.py) but initially missed here -- a weekly
+        backup would have silently dropped the whole lookup list, and a
+        restore would leave donations.associated_with_id referencing rows
+        that no longer existed anywhere in the backup."""
+        login(client)
+        with zipfile.ZipFile(io.BytesIO(_take_backup(client))) as zf:
+            names = set(zf.namelist())
+        assert "associated_withs.csv" in names
+
+    def test_associated_with_data_round_trips_through_restore(self, app, client):
+        from extensions import db
+        from models import AssociatedWith
+        login(client)
+        client.post("/admin/associated-with", data={"name": "IYF Dwarka Temple Preaching"},
+                    follow_redirects=True)
+        backup = _take_backup(client)
+
+        item = AssociatedWith.query.one()
+        item.name = "Renamed After Backup"
+        db.session.commit()
+
+        resp = _upload(client, backup, mode="apply", confirm="RESTORE")
+        assert b"Restore complete" in resp.data
+        db.session.expire_all()
+        assert AssociatedWith.query.one().name == "IYF Dwarka Temple Preaching"
+
     def test_backup_excludes_credentials(self, app, client):
         """Login secrets must not leave the database in a portable file."""
         login(client)

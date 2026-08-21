@@ -1,6 +1,7 @@
 """Builds a full data backup as a ZIP of CSV files, one per table -- donors,
 donations, campaigns, and every admin-editable lookup list (BACE
-properties, festivals, seva types, Live To Give purposes, preachers).
+properties, festivals, seva types, Live To Give purposes, preachers,
+associated-with options).
 
 Deliberately built on the SQLAlchemy ORM rather than a database-specific
 dump tool (pg_dump, sqlite3 .dump, etc.) so it works identically whether
@@ -27,7 +28,7 @@ import zipfile
 
 from models import (
     Donor, Donation, Campaign, BaceProperty, Festival, SevaType,
-    LiveToGivePurpose, Preacher, ReceiptCounter,
+    LiveToGivePurpose, Preacher, AssociatedWith, ReceiptCounter,
 )
 
 # (CSV filename, model, columns-to-exclude) -- one entry per table included
@@ -40,6 +41,7 @@ _BACKUP_TABLES = [
     ("festivals.csv", Festival, []),
     ("seva_types.csv", SevaType, []),
     ("live_to_give_purposes.csv", LiveToGivePurpose, []),
+    ("associated_withs.csv", AssociatedWith, []),
     ("donors.csv", Donor, []),
     ("donations.csv", Donation, ["receipt_pdf", "razorpay_raw_payload"]),
     ("receipt_counters.csv", ReceiptCounter, []),
