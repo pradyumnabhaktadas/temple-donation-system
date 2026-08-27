@@ -370,3 +370,28 @@ class TestCampaignEditSuppressReceipt:
             "name": "Another Test Campaign", "is_80g": "on",
         }, follow_redirects=True)
         assert Campaign.query.get(campaign.id).suppress_receipt is False
+
+
+class TestCampaignsListBadge:
+    def test_no_receipt_badge_shown_only_for_suppressed_campaigns(self, app, client):
+        """Admin-clarity gap found on recheck: nothing on the Campaigns
+        list previously distinguished a suppress_receipt campaign from a
+        normal one, even though the dedicated Edit page already has the
+        checkbox -- an admin scanning the list had no way to tell why a
+        campaign's donations come out with no receipt."""
+        from extensions import db
+        login(client)
+        _mk_campaign(db)
+
+        html = client.get("/admin/campaigns").data.decode()
+
+        # The admin nav also has a "Dhoti Kurta Contributions" (plural)
+        # link, so search only within the campaign cards themselves,
+        # after the page's own heading.
+        list_start = html.index("Campaigns / Collection Categories")
+
+        dk_start = html.index("Dhoti Kurta Contribution", list_start)
+        assert "No Receipt" in html[dk_start:dk_start + 600]
+
+        annadan_start = html.index("Annadan", list_start)
+        assert "No Receipt" not in html[annadan_start:annadan_start + 600]
