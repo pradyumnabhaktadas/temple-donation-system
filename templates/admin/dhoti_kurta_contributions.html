@@ -1,0 +1,92 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Dhoti Kurta Contributions{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h3 class="mb-0">🪔 Dhoti Kurta Contributions</h3>
+  {% if campaign %}
+  {% set export_args = request.args.to_dict() %}
+  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.export_dhoti_kurta_contributions', **export_args) }}">⬇ Export CSV (all filtered rows)</a>
+  {% endif %}
+</div>
+
+{% if not campaign %}
+<div class="alert alert-warning">The Dhoti Kurta Contribution campaign isn't set up yet -- see Admin &rarr; Campaigns.</div>
+{% else %}
+
+<p class="text-muted small">
+  Every contribution made through the small "Dhoti Kurta Contribution" link in the site footer -- kept separate from
+  the main Donations Log. No receipt is ever issued for these (Donation Purpose is recorded as a plain General
+  Donation with no receipt, per how this campaign is configured).
+</p>
+
+<form class="row g-2 mb-3">
+  <div class="col-auto">
+    <input type="search" name="q" class="form-control" placeholder="Search name or mobile number" value="{{ q }}" aria-label="Search">
+  </div>
+  <div class="col-auto">
+    <select name="status" class="form-select" aria-label="Status" onchange="this.form.submit()">
+      <option value="success" {% if status == 'success' %}selected{% endif %}>Success (default)</option>
+      <option value="cancelled" {% if status == 'cancelled' %}selected{% endif %}>Cancelled</option>
+      <option value="pending" {% if status == 'pending' %}selected{% endif %}>Pending</option>
+      <option value="failed" {% if status == 'failed' %}selected{% endif %}>Failed</option>
+      <option value="all" {% if status == 'all' %}selected{% endif %}>All Statuses</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <select name="range" class="form-select" aria-label="Date range"
+            onchange="this.form.date_from.value=''; this.form.date_to.value=''; this.form.submit()">
+      <option value="this_month" {% if date_range == 'this_month' %}selected{% endif %}>This month</option>
+      <option value="last_month" {% if date_range == 'last_month' %}selected{% endif %}>Last month</option>
+      <option value="last_3_months" {% if date_range == 'last_3_months' %}selected{% endif %}>Last 3 months</option>
+      <option value="this_fy" {% if date_range == 'this_fy' %}selected{% endif %}>This financial year</option>
+      <option value="all" {% if date_range == 'all' %}selected{% endif %}>All time</option>
+      {% if date_range == 'custom' %}
+      <option value="custom" selected>Custom range</option>
+      {% endif %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <input type="date" name="date_from" class="form-control" value="{{ date_from }}" aria-label="From date">
+  </div>
+  <div class="col-auto">
+    <input type="date" name="date_to" class="form-control" value="{{ date_to }}" aria-label="To date">
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-outline-secondary">Filter</button>
+    {% if q or status != 'success' or date_range != 'this_month' %}
+    <a href="{{ url_for('admin.dhoti_kurta_contributions') }}" class="btn btn-link btn-sm">Clear filters</a>
+    {% endif %}
+  </div>
+</form>
+
+<div class="table-responsive">
+<table class="table table-sm bg-white shadow-sm">
+  <thead><tr>
+    <th>Name</th><th>Mobile Number</th><th class="text-end">Amount</th><th>Date &amp; Time</th>
+    <th>Transaction Status</th><th>Transaction ID / Payment Reference</th>
+  </tr></thead>
+  <tbody>
+    {% for d in donations %}
+    <tr>
+      <td><a href="{{ url_for('admin.donor_detail', donor_id=d.donor.id) }}">{{ d.donor.full_name }}</a></td>
+      <td>{{ d.donor.phone or '-' }}</td>
+      <td class="text-end">Rs. {{ d.amount | inr }}</td>
+      <td>{{ (d.donation_date | to_ist).strftime('%d-%b-%Y %H:%M') if d.payment_mode == 'online' else d.donation_date.strftime('%d-%b-%Y') }}</td>
+      <td>
+        {% if d.status == 'success' %}<span class="badge bg-success">Success</span>
+        {% elif d.status == 'pending' %}<span class="badge bg-warning">Pending</span>
+        {% elif d.status == 'cancelled' %}<span class="badge bg-secondary">Cancelled</span>
+        {% else %}<span class="badge bg-danger">Failed</span>{% endif %}
+      </td>
+      <td class="small text-muted">{{ d.reference_display or '-' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="text-muted">No contributions found for this filter.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% include "admin/_pagination.html" %}
+
+{% endif %}
+{% endblock %}

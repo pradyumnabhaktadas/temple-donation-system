@@ -8,29 +8,38 @@ from extensions import db
 from models import Campaign, AdminUser, BaceProperty, Festival, SevaType, LiveToGivePurpose, AssociatedWith
 
 CAMPAIGNS = [
-    # (name, is_80g, min_amount) -- min_amount is None unless noted; only
-    # Live To Give currently has a floor (Rs. 101, admin-editable from
-    # Admin -> Campaigns -> Edit). This only affects fresh installs/resets
-    # (seeding skips anything that already exists by name) -- keeping this
-    # in sync with whatever's actually configured live means a
-    # reset_data.py + seed.py cycle restores the real settings instead of
-    # silently dropping back to "no minimum".
-    ("Temple Construction", True, None),
-    ("Deity Worship", True, None),
-    ("Youth Preaching", True, None),
-    ("Festivals", False, None),
-    ("Annadan", True, None),
-    ("General Donations", True, None),
-    ("Other Charitable Activities", True, None),
-    ("BACE Contribution", False, None),
-    ("Youth Camp Registration Fees", False, None),
-    ("Retreats and Event Registrations", False, None),
-    ("Course Fees", False, None),
-    ("Other Internal Collections", False, None),
+    # (name, is_80g, min_amount, suppress_receipt) -- min_amount is None
+    # unless noted; only Live To Give currently has a floor (Rs. 101,
+    # admin-editable from Admin -> Campaigns -> Edit). suppress_receipt is
+    # False for everything except Dhoti Kurta Contribution, whose whole
+    # point is no receipt (see Campaign.suppress_receipt's docstring).
+    # This only affects fresh installs/resets (seeding skips anything
+    # that already exists by name) -- keeping this in sync with whatever's
+    # actually configured live means a reset_data.py + seed.py cycle
+    # restores the real settings instead of silently dropping back to
+    # defaults.
+    ("Temple Construction", True, None, False),
+    ("Deity Worship", True, None, False),
+    ("Youth Preaching", True, None, False),
+    ("Festivals", False, None, False),
+    ("Annadan", True, None, False),
+    ("General Donations", True, None, False),
+    ("Other Charitable Activities", True, None, False),
+    ("BACE Contribution", False, None, False),
+    ("Youth Camp Registration Fees", False, None, False),
+    ("Retreats and Event Registrations", False, None, False),
+    ("Course Fees", False, None, False),
+    ("Other Internal Collections", False, None, False),
     # is_80g here is just the campaign's default -- the Live To Give form
     # lets each donor pick 80G/Non-80G per donation, which overrides this
     # (see Donation.effective_is_80g).
-    ("Live To Give", True, 101),
+    ("Live To Give", True, 101, False),
+    # Deliberately not linked from anywhere in the main site -- only
+    # reachable via the small footer link (see base.html). No receipt is
+    # ever issued for these (suppress_receipt=True); see the dedicated
+    # /dhoti-kurta-contribution form for the (intentionally minimal)
+    # Name/Mobile/Amount collection flow.
+    ("Dhoti Kurta Contribution", False, None, True),
 ]
 
 # Starting list for the BACE Contribution form's property dropdown -- editable
@@ -113,9 +122,11 @@ ASSOCIATED_WITH_OPTIONS = [
 app = create_app()
 
 with app.app_context():
-    for name, is_80g, min_amount in CAMPAIGNS:
+    for name, is_80g, min_amount, suppress_receipt in CAMPAIGNS:
         if not Campaign.query.filter_by(name=name).first():
-            db.session.add(Campaign(name=name, is_80g=is_80g, min_amount=min_amount))
+            db.session.add(Campaign(
+                name=name, is_80g=is_80g, min_amount=min_amount, suppress_receipt=suppress_receipt,
+            ))
 
     for name in BACE_PROPERTIES:
         if not BaceProperty.query.filter_by(name=name).first():

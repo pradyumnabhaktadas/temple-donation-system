@@ -260,6 +260,8 @@
               <span class="badge bg-info text-dark">Would import</span>
               Rs. {{ '{:,.2f}'.format(r.amount) }} &middot; {{ r.campaign }} &middot;
               {{ r.donation_date.strftime('%d %b %Y') }} &middot; {{ r.payment_mode | replace('_', ' ') | title }}
+            {% elif r.ok and not r.receipt_number %}
+              <span class="badge bg-success">Imported</span> No receipt issued for this contribution type.
             {% elif r.ok %}
               <span class="badge bg-success">Imported</span> Receipt {{ r.receipt_number }}
               {% if r.pdf_ok is defined and not r.pdf_ok %}

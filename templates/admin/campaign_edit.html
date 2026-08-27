@@ -13,6 +13,10 @@
     <input class="form-check-input" type="checkbox" name="is_80g" id="is80g" {% if campaign.is_80g %}checked{% endif %}>
     <label class="form-check-label" for="is80g">80G Eligible</label>
   </div>
+  <div class="form-check mb-2">
+    <input class="form-check-input" type="checkbox" name="suppress_receipt" id="suppress_receipt" {% if campaign.suppress_receipt %}checked{% endif %}>
+    <label class="form-check-label" for="suppress_receipt">No receipt (never issue a receipt number, PDF, or email/WhatsApp for this campaign)</label>
+  </div>
   <div class="mb-2">
     <label class="form-label" for="target_amount">Target Amount (optional)</label>
     <input type="number" class="form-control" name="target_amount" id="target_amount" value="{{ campaign.target_amount or '' }}">

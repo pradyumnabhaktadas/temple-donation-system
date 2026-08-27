@@ -51,7 +51,10 @@ from models import (
 from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email
 from whatsapp_utils import send_receipt_whatsapp
-from utils import HIGH_VALUE_PAN_THRESHOLD, is_valid_pan, is_valid_phone, normalize_phone, receipt_access_token
+from utils import (
+    HIGH_VALUE_PAN_THRESHOLD, get_financial_year, is_valid_pan, is_valid_phone, normalize_phone,
+    receipt_access_token, to_ist,
+)
 
 bp = Blueprint("public", __name__)
 
@@ -376,6 +379,38 @@ def festival_seva_form():
         festivals=festivals,
         seva_types=seva_types,
         associated_withs=associated_withs,
+        razorpay_enabled=current_app.config["RAZORPAY_ENABLED"],
+        razorpay_key_id=current_app.config["RAZORPAY_KEY_ID"],
+        org_name=current_app.config["ORG_NAME"],
+    )
+
+
+@bp.route("/dhoti-kurta-contribution")
+def dhoti_kurta_form():
+    """Deliberately not linked from the main nav, homepage, or any of the
+    other donation sections -- only reachable via the small link in the
+    site footer (see base.html). A minimal Name/Mobile/Amount form,
+    intentionally lighter than every other donation form here: no PAN/
+    address/consent fields, no purpose picker, no email.
+
+    Fixed to the "Dhoti Kurta Contribution" campaign, which is seeded
+    with suppress_receipt=True -- no receipt number, PDF, or email/
+    WhatsApp is ever generated for a donation against it (see
+    _finalize_success). The amount is capped at HIGH_VALUE_PAN_THRESHOLD
+    (Rs. 49,000): above that, Income Tax rules require PAN and address
+    regardless of campaign (see high_value_pan_address_error), which
+    this form has nowhere to collect -- someone wanting to give more than
+    that should use the main Give to Krishna form instead.
+    """
+    campaign = Campaign.query.filter_by(name="Dhoti Kurta Contribution").first()
+    if campaign is None or not campaign.is_active:
+        flash("The Dhoti Kurta Contribution campaign isn't set up yet -- please contact the office.")
+        return redirect(url_for("public.donate_form"))
+
+    return render_template(
+        "dhoti_kurta.html",
+        campaign=campaign,
+        high_value_threshold=HIGH_VALUE_PAN_THRESHOLD,
         razorpay_enabled=current_app.config["RAZORPAY_ENABLED"],
         razorpay_key_id=current_app.config["RAZORPAY_KEY_ID"],
         org_name=current_app.config["ORG_NAME"],
@@ -834,6 +869,22 @@ def _finalize_success(donation):
 
     try:
         campaign = donation.campaign
+        if campaign.suppress_receipt:
+            # Dhoti Kurta Contribution (and anything else marked this way):
+            # the whole point is no receipt -- no number, no PDF, no email/
+            # WhatsApp. Still a real "success" donation that counts in every
+            # total; it just has nothing to issue. Mirrors the legacy-import
+            # precedent (a row with no receipt_number in the source data is
+            # left without one rather than minting a fresh number that would
+            # misrepresent it -- see import_legacy_donations).
+            donation.status = "success"
+            # +5:30 first -- donation_date here is a genuine UTC "now"
+            # timestamp, same as ReceiptCounter.next_receipt_number's own
+            # conversion, so a payment made just after midnight IST isn't
+            # misattributed to the previous financial year.
+            donation.financial_year = get_financial_year(to_ist(donation.donation_date).date())
+            db.session.commit()
+            return True
         receipt_number, fy = ReceiptCounter.next_receipt_number(donation.effective_is_80g, donation.donation_date)
         donation.receipt_number = receipt_number
         donation.financial_year = fy

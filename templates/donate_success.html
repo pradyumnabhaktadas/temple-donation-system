@@ -10,8 +10,15 @@
         <h3 class="mt-2">Thank you for your seva.</h3>
         <p>Your donation of <strong>Rs. {{ donation.amount | inr(2) }}</strong> for
           <strong>{{ donation.campaign.name }}{% if donation.bace_property %} -- {{ donation.bace_property.name }}{% endif %}{% if donation.festival %} -- {{ donation.festival.name }}{% endif %}{% if donation.seva_type %} ({{ donation.seva_type.name }}){% endif %}{% if donation.live_to_give_purpose %} -- {{ donation.live_to_give_purpose.name }}{% endif %}</strong> was received successfully.</p>
+        {% if donation.receipt_number %}
         <p class="receipt-reference">Receipt No: <strong>{{ donation.receipt_number }}</strong></p>
         <a class="btn btn-gold success-action mb-2" href="{{ url_for('public.download_receipt', donation_id=donation.id, t=receipt_token(donation.id)) }}">Download receipt <span>↓</span></a>
+        {% else %}
+        {# Campaign.suppress_receipt (e.g. Dhoti Kurta Contribution) --
+           no receipt number was ever issued for this donation, so there's
+           nothing to download. See public._finalize_success. #}
+        <p class="receipt-reference">No receipt is issued for this contribution.</p>
+        {% endif %}
         {% if donation.bace_property %}
         <a class="btn btn-link" href="{{ url_for('public.bace_rent_form') }}">Make another payment</a>
         {% elif donation.festival %}
@@ -32,7 +39,11 @@
         <span class="success-symbol"><img src="{{ url_for('static', filename='branding/iskcon_dwarka_logo.png') }}" alt="ISKCON Dwarka Delhi"></span>
         <span class="section-kicker">Offering received</span>
         <h3 class="mt-2">Thank you for your seva.</h3>
+        {% if donation.receipt_number %}
         <p>Your donation has been recorded. A confirmation and receipt have been sent to the email/WhatsApp number on file, or you can view it any time in <a href="{{ url_for('donor_portal.login') }}">My Donations</a>.</p>
+        {% else %}
+        <p>Your contribution has been recorded. No receipt is issued for this contribution.</p>
+        {% endif %}
         <a class="btn btn-link" href="{{ url_for('public.donate_form') }}">Make another offering</a>
       {% elif donation.status == 'cancelled' %}
         <span style="font-size:2.5rem;">ⓘ</span>

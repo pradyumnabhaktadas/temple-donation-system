@@ -1924,6 +1924,16 @@ def _create_offline_donation(
         db.session.add(donation)
         db.session.flush()
 
+        if campaign.suppress_receipt:
+            # Dhoti Kurta Contribution (and anything else marked this way)
+            # -- no receipt number, no PDF, no notification. See the same
+            # guard in public._finalize_success for the full reasoning.
+            donation.financial_year = get_financial_year(donation_date)
+            db.session.commit()
+            return {
+                "ok": True, "donor": donor, "donation": donation, "receipt_number": None, "pdf_ok": True,
+            }
+
         receipt_number, fy = ReceiptCounter.next_receipt_number(donation.effective_is_80g, donation_date)
         donation.receipt_number = receipt_number
         donation.financial_year = fy
@@ -2094,7 +2104,9 @@ def manual_donation():
             flash(result["error"], "danger")
             return redirect(url_for("admin.manual_donation"))
 
-        if result["pdf_ok"]:
+        if result["receipt_number"] is None:
+            flash("Contribution recorded. No receipt is issued for this contribution type.")
+        elif result["pdf_ok"]:
             flash(f"Donation recorded. Receipt {result['receipt_number']} generated.")
         else:
             flash(
@@ -3242,6 +3254,7 @@ def campaign_edit(campaign_id):
 
         campaign.name = new_name
         campaign.is_80g = form.get("is_80g") == "on"
+        campaign.suppress_receipt = form.get("suppress_receipt") == "on"
         campaign.description = form.get("description", "").strip() or None
         campaign.target_amount = float(form["target_amount"]) if form.get("target_amount") else None
         campaign.min_amount = float(form["min_amount"]) if form.get("min_amount") else None
@@ -3490,6 +3503,150 @@ def export_bace_contributions():
         output.getvalue(),
         mimetype="text/csv",
         headers={"Content-Disposition": "attachment;filename=BACE_Contributions.csv"},
+    )
+
+
+def _dhoti_kurta_campaign_or_none():
+    """The single "Dhoti Kurta Contribution" campaign that
+    public.dhoti_kurta_form() fixes every contribution to -- see that
+    route for the same lookup. None if the campaign hasn't been set up
+    yet (a fresh install that skipped seed.py/migrations), in which case
+    the log page below just shows "no campaign configured" instead of
+    erroring."""
+    return Campaign.query.filter_by(name="Dhoti Kurta Contribution").first()
+
+
+def _apply_dhoti_kurta_filters(query):
+    """Same status/date-range-preset shape as _apply_donations_filters,
+    scoped to the Dhoti Kurta Contribution campaign, plus a free-text
+    search box over the donor's name/phone -- this log's whole reason to
+    exist is a *quick* answer to "did so-and-so's contribution come
+    through", so search matters more here than on the general Donations
+    Log. Shared by the log page and its CSV export so the two can never
+    show different rows for the same filters."""
+    status = request.args.get("status", "success")
+    if status != "all":
+        query = query.filter_by(status=status)
+
+    search = (request.args.get("q") or "").strip()
+    if search:
+        query = query.join(Donor, Donation.donor_id == Donor.id).filter(
+            db.or_(Donor.full_name.ilike(f"%{search}%"), Donor.phone.ilike(f"%{search}%"))
+        )
+
+    date_from_raw = request.args.get("date_from") or ""
+    date_to_raw = request.args.get("date_to") or ""
+    date_range = request.args.get("range") or ""
+    if date_from_raw or date_to_raw:
+        date_range = "custom"
+    elif not date_range:
+        date_range = "this_month"
+
+    if date_range not in ("custom", "all"):
+        today = datetime.date.today()
+        start = end = None
+        if date_range == "this_month":
+            start, end = today.replace(day=1), today
+        elif date_range == "last_month":
+            end = today.replace(day=1) - datetime.timedelta(days=1)
+            start = end.replace(day=1)
+        elif date_range == "last_3_months":
+            month, year = today.month - 2, today.year
+            if month <= 0:
+                month, year = month + 12, year - 1
+            start, end = datetime.date(year, month, 1), today
+        elif date_range == "this_fy":
+            fy_start_year = today.year if today.month >= 4 else today.year - 1
+            start, end = datetime.date(fy_start_year, 4, 1), today
+        else:
+            date_range = "all"
+
+        if start:
+            date_from_raw, date_to_raw = start.isoformat(), end.isoformat()
+
+    try:
+        if date_from_raw:
+            date_from = datetime.datetime.strptime(date_from_raw, "%Y-%m-%d")
+            query = query.filter(Donation.donation_date >= date_from)
+        if date_to_raw:
+            date_to = datetime.datetime.strptime(date_to_raw, "%Y-%m-%d")
+            query = query.filter(Donation.donation_date < date_to + datetime.timedelta(days=1))
+    except ValueError:
+        date_from_raw = date_to_raw = ""
+
+    return query, {
+        "status": status, "q": search,
+        "date_from": date_from_raw, "date_to": date_to_raw, "date_range": date_range,
+    }
+
+
+@bp.route("/dhoti-kurta-contributions")
+@login_required
+def dhoti_kurta_contributions():
+    """Dedicated section for Dhoti Kurta Contributions -- deliberately its
+    own view rather than a filter on the general Donations Log, per the
+    request that these "not be mixed with regular donations in this
+    dedicated view". A row here never has a receipt number (see
+    Campaign.suppress_receipt) -- the Transaction Status/Reference columns
+    (Donation.status / Donation.reference_display) are what stand in for
+    it, since Razorpay's payment id is still captured exactly like any
+    other online donation."""
+    campaign = _dhoti_kurta_campaign_or_none()
+    if campaign is None:
+        return render_template(
+            "admin/dhoti_kurta_contributions.html", campaign=None,
+            donations=[], pagination=None, status="success", q="",
+            date_from="", date_to="", date_range="this_month",
+        )
+
+    query, filters = _apply_dhoti_kurta_filters(Donation.query.filter_by(campaign_id=campaign.id))
+    query = query.order_by(Donation.donation_date.desc())
+    page = request.args.get("page", 1, type=int)
+    pagination = db.paginate(query, page=page, per_page=DONATIONS_PER_PAGE, error_out=False)
+
+    return render_template(
+        "admin/dhoti_kurta_contributions.html", campaign=campaign,
+        donations=pagination.items, pagination=pagination, **filters,
+    )
+
+
+@bp.route("/dhoti-kurta-contributions/export")
+@login_required
+def export_dhoti_kurta_contributions():
+    """CSV export of the Dhoti Kurta Contributions log, honoring whatever
+    search/status/date filters are currently applied -- same convention
+    as export_donations()/export_bace_contributions()."""
+    campaign = _dhoti_kurta_campaign_or_none()
+    if campaign is None:
+        flash("The Dhoti Kurta Contribution campaign isn't set up yet.")
+        return redirect(url_for("admin.dhoti_kurta_contributions"))
+
+    query, _filters = _apply_dhoti_kurta_filters(Donation.query.filter_by(campaign_id=campaign.id))
+    rows = query.order_by(Donation.donation_date.desc()).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Name", "Mobile Number", "Amount", "Date & Time", "Transaction Status", "Transaction ID / Payment Reference"])
+    for d in rows:
+        donor = d.donor
+        date_str = (
+            to_ist(d.donation_date).strftime("%d-%m-%Y %H:%M")
+            if d.payment_mode == "online"
+            else d.donation_date.strftime("%d-%m-%Y")
+        )
+        writer.writerow(csv_safe_row([
+            donor.full_name,
+            donor.phone or "",
+            float(d.amount),
+            date_str,
+            d.status,
+            d.reference_display or "",
+        ]))
+
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment;filename=Dhoti_Kurta_Contributions.csv"},
     )
 
 

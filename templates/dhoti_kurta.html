@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Dhoti Kurta Contribution - {{ org_name }}{% endblock %}
+{% block content %}
+<section class="donation-hero">
+  <div class="donation-hero-copy">
+    <p class="hero-eyebrow">Dhoti Kurta Contribution</p>
+    <h1>Dhoti Kurta <em>Contribution</em></h1>
+    <p class="hero-lede">A quick contribution -- just your name, mobile number, and amount. No receipt is issued for this contribution.</p>
+  </div>
+  <div class="hero-lotus" aria-hidden="true"><div class="lotus-glow"><img src="{{ url_for('static', filename='branding/iskcon_dwarka_logo.png') }}" alt="" class="lotus-glow-logo"></div><i></i><i></i><i></i><i></i></div>
+</section>
+
+<div class="row justify-content-center donation-layout">
+  <div class="col-xl-6 col-lg-7">
+    {% if not razorpay_enabled %}
+      <div class="alert alert-warning py-2 text-center">Demo mode: live Razorpay keys are not configured, so payment will be simulated. See README to go live.</div>
+    {% endif %}
+
+    <form id="dhoti-kurta-form" class="donation-card">
+      <div class="donation-card-head">
+        <div><span class="section-kicker">Dhoti Kurta Contribution</span><h2>Contribution details</h2></div>
+        <span class="secure-pill">⌁ Secure payment</span>
+      </div>
+
+      <input type="hidden" name="campaign_id" value="{{ campaign.id }}">
+      {# No visible consent checkbox on this form by design -- kept to
+         exactly Name/Mobile/Amount. consent still needs to be present in
+         the payload create_order() reads (the same field every other
+         donation form sends), so it's supplied here rather than shown. #}
+      <input type="hidden" name="consent" value="on">
+
+      <div class="form-section">
+        <label class="form-label" for="full_name">Name</label>
+        <input type="text" class="form-control" name="full_name" id="full_name" required>
+      </div>
+
+      <div class="form-section">
+        <label class="form-label" for="phone">Mobile Number</label>
+        <input type="tel" class="form-control" name="phone" id="phone" required
+               maxlength="10" pattern="[6-9][0-9]{9}" inputmode="numeric" title="10-digit Indian mobile number starting with 6-9">
+      </div>
+
+      <div class="form-section mb-0">
+        <label class="form-label" for="amount">Amount</label>
+        <div class="currency-input"><span>₹</span><input type="number" min="1" max="{{ high_value_threshold }}" step="1" class="form-control" name="amount" id="amount" placeholder="Enter an amount" required></div>
+        <p class="field-note text-muted mb-0 mt-1">Up to Rs. {{ '{:,.0f}'.format(high_value_threshold) }}. For a larger amount, please use the main <a href="{{ url_for('public.donate_form') }}">Give to Krishna</a> form.</p>
+      </div>
+
+      <button type="submit" class="btn btn-gold donation-submit w-100" id="pay-btn">
+        {% if razorpay_enabled %}<span>Continue to secure payment</span><span>→</span>{% else %}<span>Simulate payment success</span><span>→</span>{% endif %}
+      </button>
+      <p class="donation-reassurance">Your payment is handled securely. No receipt is generated or sent for this contribution.</p>
+      <p class="donation-reassurance" id="status-note" style="display:none;"></p>
+    </form>
+  </div>
+</div>
+
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script src="{{ url_for('static', filename='js/donation-payment.js') }}"></script>
+<script>
+(function () {
+  // Page-specific UI only -- the payment flow itself (create order, launch
+  // Razorpay checkout, verify, poll) lives in static/js/donation-payment.js,
+  // shared by every public donation form so it only needs to be correct in
+  // one place.
+  TempleDonationPayment.init({
+    formId: 'dhoti-kurta-form',
+    description: 'Dhoti Kurta Contribution',
+    orgName: {{ org_name | tojson }},
+    razorpayEnabled: {{ razorpay_enabled | tojson }},
+    // Absolute URL: Razorpay renders the checkout modal from their own
+    // origin, so a relative /static/... path would not resolve there.
+    logoUrl: {{ url_for('static', filename='branding/iskcon_dwarka_logo.png', _external=True) | tojson }},
+  });
+})();
+</script>
+{% endblock %}

@@ -171,6 +171,20 @@ class Campaign(db.Model):
     # public.py's create_order(). Currently only "Live To Give" has one set
     # (Rs. 101, migrated in from the old hardcoded check).
     min_amount = db.Column(db.Numeric(12, 2))
+    # When True, a donation against this campaign never gets a receipt
+    # number, PDF, or email/WhatsApp send -- see public._finalize_success
+    # and admin._create_offline_donation, both of which check this before
+    # doing any of that work. Added for the Dhoti Kurta Contribution
+    # campaign, whose whole point is a lightweight internal contribution
+    # with explicitly no receipt. Donation.status still becomes "success"
+    # and the donation counts in every total exactly like any other --
+    # this only ever affects whether a receipt gets issued, mirroring the
+    # legacy-import precedent (see import_legacy_donations, where a row
+    # with no receipt_number in the source data is deliberately left
+    # without one rather than minting a fresh number that would
+    # misrepresent it). Defaults to False so every existing/new campaign
+    # keeps issuing receipts unless explicitly turned off.
+    suppress_receipt = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
     donations = db.relationship("Donation", backref="campaign", lazy="dynamic")
