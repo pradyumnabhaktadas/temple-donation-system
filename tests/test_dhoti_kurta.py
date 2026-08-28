@@ -41,7 +41,9 @@ def _mk_campaign(db):
 class TestFooterLink:
     def test_link_appears_in_footer_and_points_to_the_form(self, app, client):
         html = client.get("/").data.decode()
-        assert "footer-admin-link" in html
+        # Lives in the footer's "Links" column now (footer-links-list),
+        # not the old bottom-strip "footer-admin-link" note.
+        assert "footer-links-list" in html
         assert '/dhoti-kurta-contribution">Dhoti Kurta Contribution</a>' in html
 
     def test_link_is_not_in_main_nav_or_prominent_areas(self, app, client):
@@ -63,7 +65,7 @@ class TestFooterLink:
         spot-check one more page to make sure it's not only on the
         homepage."""
         html = client.get("/about").data.decode()
-        assert "footer-admin-link" in html
+        assert "footer-links-list" in html
 
 
 class TestContributionForm:

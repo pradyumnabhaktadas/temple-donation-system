@@ -544,7 +544,7 @@ body {
     linear-gradient(180deg, rgba(15,36,68,.94) 0%, rgba(15,36,68,.97) 55%, rgba(15,36,68,.99) 100%),
     url('images/deities/krishna-flute-closeup.jpg') center 30%/cover no-repeat;
 }
-.footer-grid { display:grid; grid-template-columns:1.4fr 1fr 1fr; gap:2.2rem; padding:2.8rem 1rem 2.2rem; }
+.footer-grid { display:grid; grid-template-columns:1.3fr .8fr .9fr 1fr; gap:1.8rem; padding:2.8rem 1rem 2.2rem; }
 .footer-brand { display:flex; align-items:center; gap:.7rem; margin-bottom:.85rem; }
 .footer-brand-logo { height:40px; width:auto; flex:0 0 auto; }
 .footer-brand-name { font-family:'Playfair Display',serif; font-weight:700; color:#fff; font-size:1.05rem; line-height:1.25; }
@@ -555,13 +555,21 @@ body {
 .footer-text a { color:#fff; text-decoration:underline; text-decoration-color:rgba(255,255,255,.4); }
 .footer-text a:hover { color:var(--saffron-light); }
 .footer-text-note { font-size:.74rem; line-height:1.55; color:rgba(255,255,255,.58); margin:0; }
-.footer-whatsapp-link { display:inline-block; margin-left:.6rem; padding:.15rem .55rem; border-radius:999px; background:#25D366; color:#fff !important; text-decoration:none !important; font-size:.74rem; font-weight:600; }
+.footer-links-list li { margin-bottom:.5rem; }
+.footer-links-list a { font-size:.82rem; line-height:1.6; color:rgba(255,255,255,.78); text-decoration:underline; text-decoration-color:rgba(255,255,255,.4); }
+.footer-links-list a:hover { color:var(--saffron-light); }
+.footer-whatsapp-link { display:inline-flex; align-items:center; gap:.3rem; margin-left:.6rem; padding:.15rem .55rem; border-radius:999px; background:#25D366; color:#fff !important; text-decoration:none !important; font-size:.74rem; font-weight:600; }
 .footer-whatsapp-link:hover { background:#1ebe57; }
+.footer-whatsapp-icon { flex:0 0 auto; }
 .site-footer .site-footer-note { border-top:1px solid rgba(255,255,255,.12); padding:1.2rem 1rem; margin:0; color:rgba(255,255,255,.6); }
 .site-footer .site-footer-note span { color:rgba(255,255,255,.6); }
 .site-footer .site-footer-note .footer-admin-link,
 .site-footer .site-footer-note .footer-admin-link a { color:rgba(255,255,255,.55); }
 .site-footer .site-footer-note .footer-admin-link a:hover { color:var(--saffron-light); }
+
+@media (max-width: 991.98px) and (min-width: 768px) {
+  .footer-grid { grid-template-columns:1fr 1fr; gap:1.8rem 2.2rem; }
+}
 
 @media (max-width: 767.98px) {
   .site-nav { min-height:67px; }.brand-caption { font-size:.62rem; }.brand-logo-main{height:34px}.brand-logo-iyf{width:27px;height:27px}.site-account-link{font-size:.72rem;padding:.46rem .55rem}
