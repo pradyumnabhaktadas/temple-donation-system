@@ -171,19 +171,30 @@ class Campaign(db.Model):
     # public.py's create_order(). Currently only "Live To Give" has one set
     # (Rs. 101, migrated in from the old hardcoded check).
     min_amount = db.Column(db.Numeric(12, 2))
-    # When True, a donation against this campaign never gets a receipt
-    # number, PDF, or email/WhatsApp send -- see public._finalize_success
-    # and admin._create_offline_donation, both of which check this before
-    # doing any of that work. Added for the Dhoti Kurta Contribution
-    # campaign, whose whole point is a lightweight internal contribution
-    # with explicitly no receipt. Donation.status still becomes "success"
-    # and the donation counts in every total exactly like any other --
-    # this only ever affects whether a receipt gets issued, mirroring the
-    # legacy-import precedent (see import_legacy_donations, where a row
-    # with no receipt_number in the source data is deliberately left
-    # without one rather than minting a fresh number that would
-    # misrepresent it). Defaults to False so every existing/new campaign
-    # keeps issuing receipts unless explicitly turned off.
+    # When True, a donation against this campaign still gets a real
+    # receipt number and PDF exactly like any other -- nothing about
+    # issuing it changes, and Donation.status still becomes "success" and
+    # counts in every total the same as any other donation. What's
+    # suppressed is only the *proactive* send: public._finalize_success
+    # and admin._create_offline_donation both skip the background email/
+    # WhatsApp notification for these. The donor can still see/download
+    # their own receipt the normal way -- the success page right after
+    # paying, or the donor portal later -- nothing about
+    # public._may_download_receipt changes; only the automatic push is
+    # gated.
+    #
+    # Added for the Dhoti Kurta Contribution campaign: the temple wants a
+    # full internal accounting record (a real receipt number to
+    # reconcile against, same as everything else) for these quick
+    # footer-link contributions, but doesn't want to proactively email or
+    # WhatsApp one for them the way every other donation gets.
+    #
+    # Column name is a holdover from an earlier version of this feature
+    # where the whole receipt was skipped, not just its delivery -- kept
+    # rather than renamed to avoid a second production migration for a
+    # cosmetic rename, but this docstring is the one that's current.
+    # Defaults to False so every existing/new campaign keeps sending
+    # receipts normally unless explicitly turned off.
     suppress_receipt = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 

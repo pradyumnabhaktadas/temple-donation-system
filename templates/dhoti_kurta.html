@@ -5,7 +5,7 @@
   <div class="donation-hero-copy">
     <p class="hero-eyebrow">Dhoti Kurta Contribution</p>
     <h1>Dhoti Kurta <em>Contribution</em></h1>
-    <p class="hero-lede">A quick contribution -- just your name, mobile number, and amount. No receipt is issued for this contribution.</p>
+    <p class="hero-lede">A quick contribution -- just your name, mobile number, and amount. No receipt is emailed or sent on WhatsApp for this contribution.</p>
   </div>
   <div class="hero-lotus" aria-hidden="true"><div class="lotus-glow"><img src="{{ url_for('static', filename='branding/iskcon_dwarka_logo.png') }}" alt="" class="lotus-glow-logo"></div><i></i><i></i><i></i><i></i></div>
 </section>
@@ -49,7 +49,7 @@
       <button type="submit" class="btn btn-gold donation-submit w-100" id="pay-btn">
         {% if razorpay_enabled %}<span>Continue to secure payment</span><span>→</span>{% else %}<span>Simulate payment success</span><span>→</span>{% endif %}
       </button>
-      <p class="donation-reassurance">Your payment is handled securely. No receipt is generated or sent for this contribution.</p>
+      <p class="donation-reassurance">Your payment is handled securely. No receipt is emailed or sent on WhatsApp for this contribution.</p>
       <p class="donation-reassurance" id="status-note" style="display:none;"></p>
     </form>
   </div>

@@ -15,7 +15,7 @@
   </div>
   <div class="form-check mb-2">
     <input class="form-check-input" type="checkbox" name="suppress_receipt" id="suppress_receipt" {% if campaign.suppress_receipt %}checked{% endif %}>
-    <label class="form-check-label" for="suppress_receipt">No receipt (never issue a receipt number, PDF, or email/WhatsApp for this campaign)</label>
+    <label class="form-check-label" for="suppress_receipt">Don't send receipt to donor (a receipt is still generated for internal records -- just never emailed or sent on WhatsApp)</label>
   </div>
   <div class="mb-2">
     <label class="form-label" for="target_amount">Target Amount (optional)</label>

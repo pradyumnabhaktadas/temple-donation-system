@@ -1,20 +1,26 @@
 """Integration tests for the Dhoti Kurta Contribution feature.
 
 Requested as a small, discreet footer-only contribution link: Name/Mobile/
-Amount only, no receipt ever issued, tracked separately from the regular
-Donations Log in its own admin section. These drive the real routes
-through Flask's test client end to end -- the footer link's placement, the
-minimal public form, the online (create_order + simulate-payment) and
-offline (manual entry + bulk import) donation paths, the dedicated admin
-list/search/filter/export, the success-page rendering, and the
-suppress_receipt checkbox on Campaign edit -- rather than checking the
-code reads correctly. See Campaign.suppress_receipt (models.py),
-public._finalize_success, and admin._create_offline_donation for the
-shared mechanism every one of these paths goes through.
+Amount only, tracked separately from the regular Donations Log in its own
+admin section. A real receipt number and PDF are generated for every
+contribution exactly like any other donation (for internal accounting) --
+what's suppressed is only the *proactive* email/WhatsApp send. The donor
+can still see/download their own receipt the normal way (the success
+page, the donor portal). See Campaign.suppress_receipt's docstring in
+models.py, public._finalize_success, and admin._create_offline_donation
+for the shared mechanism every donation path goes through.
+
+These drive the real routes through Flask's test client end to end -- the
+footer link's placement, the minimal public form, the online
+(create_order + simulate-payment) and offline (manual entry + bulk
+import) donation paths, the dedicated admin list/search/filter/export,
+the success-page rendering, and the suppress_receipt checkbox on Campaign
+edit -- rather than checking the code reads correctly.
 """
 import io
 import os
 import sys
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -95,31 +101,63 @@ class TestContributionForm:
 
 
 class TestOnlineDonationFlow:
-    def test_successful_contribution_gets_no_receipt(self, app, client):
+    def test_successful_contribution_gets_a_receipt_with_no_notification_sent(self, app, client):
+        """The core of the current design: a real receipt number and PDF
+        are issued exactly like any other donation (for internal
+        accounting), but the email/WhatsApp send that every other
+        donation triggers must never fire for this campaign."""
         from extensions import db
         from models import Donation
         campaign = _mk_campaign(db)
 
-        resp = client.post("/api/create-order", json={
-            "amount": 501, "full_name": "Dhoti Donor", "phone": "9876500201",
-            "consent": "on", "campaign_id": campaign.id,
-        })
-        assert resp.status_code == 200
-        donation_id = resp.get_json()["donation_id"]
+        with patch("public.send_receipt_email") as mock_email, \
+             patch("public.send_receipt_whatsapp") as mock_whatsapp:
+            resp = client.post("/api/create-order", json={
+                "amount": 501, "full_name": "Dhoti Donor", "phone": "9876500201",
+                "consent": "on", "campaign_id": campaign.id,
+            })
+            assert resp.status_code == 200
+            donation_id = resp.get_json()["donation_id"]
 
-        sim = client.post("/api/simulate-payment", json={"donation_id": donation_id})
-        assert sim.status_code == 200
-        assert sim.get_json()["receipt_number"] is None
+            sim = client.post("/api/simulate-payment", json={"donation_id": donation_id})
+            assert sim.status_code == 200
+            assert sim.get_json()["receipt_number"] is not None
+
+            mock_email.assert_not_called()
+            mock_whatsapp.assert_not_called()
 
         donation = Donation.query.get(donation_id)
         assert donation.status == "success"
-        assert donation.receipt_number is None
-        assert donation.receipt_pdf is None
+        assert donation.receipt_number is not None
+        assert donation.receipt_pdf is not None
         assert donation.campaign_id == campaign.id
         # Donation Purpose = "General Donation": no purpose sub-picker
         # applies to this campaign, so specific_purpose is blank -- the
         # codebase's own definition of a plain General Donation.
         assert donation.specific_purpose == ""
+
+    def test_a_normal_campaigns_donation_does_attempt_notifications(self, app, client):
+        """Contrast case: proves the mocks above would actually have
+        caught a regression -- a normal (non-suppress_receipt) campaign's
+        successful donation does try to send, even though it's a no-op in
+        this test environment (no SMTP/WhatsApp configured). Uses BACE
+        Contribution (is_80g=False in conftest) rather than Annadan, to
+        avoid the separate PAN-required-for-80G validation getting in the
+        way of what this test is actually checking."""
+        from models import Campaign
+        campaign = Campaign.query.filter_by(name="BACE Contribution").first()
+
+        with patch("public.send_receipt_email") as mock_email, \
+             patch("public.send_receipt_whatsapp") as mock_whatsapp:
+            resp = client.post("/api/create-order", json={
+                "amount": 501, "full_name": "Normal Donor", "phone": "9876500299",
+                "consent": "on", "campaign_id": campaign.id,
+            })
+            donation_id = resp.get_json()["donation_id"]
+            client.post("/api/simulate-payment", json={"donation_id": donation_id})
+
+            mock_email.assert_called_once()
+            mock_whatsapp.assert_called_once()
 
     def test_amount_above_high_value_threshold_is_rejected(self, app, client):
         """The form has no PAN/address fields, so the existing
@@ -162,25 +200,38 @@ class TestOnlineDonationFlow:
 
 
 class TestOfflineSingleEntry:
-    def test_manual_entry_gets_no_receipt(self, app, client):
+    def test_manual_entry_gets_a_receipt_with_no_notification_sent(self, app, client):
         from extensions import db
         from models import Donation
         login(client)
         campaign = _mk_campaign(db)
 
-        resp = client.post("/admin/donations/manual", data={
-            "campaign_id": campaign.id, "amount": "501", "full_name": "Offline Dhoti Donor",
-            "phone": "9876500301", "payment_mode": "cash",
-        }, follow_redirects=True)
+        # _create_offline_donation (admin.py) reuses public.py's
+        # _send_receipt_notifications_background, which calls
+        # send_receipt_email/send_receipt_whatsapp by their names as
+        # resolved in public.py's own module namespace regardless of who
+        # imported the background-sender function -- so that's what has
+        # to be patched here, not admin.send_receipt_email (which doesn't
+        # exist; admin.py never imports those two directly).
+        with patch("public.send_receipt_email") as mock_email, \
+             patch("public.send_receipt_whatsapp") as mock_whatsapp:
+            resp = client.post("/admin/donations/manual", data={
+                "campaign_id": campaign.id, "amount": "501", "full_name": "Offline Dhoti Donor",
+                "phone": "9876500301", "payment_mode": "cash",
+            }, follow_redirects=True)
+            mock_email.assert_not_called()
+            mock_whatsapp.assert_not_called()
 
         donation = Donation.query.one()
-        assert donation.receipt_number is None
+        assert donation.receipt_number is not None
+        assert donation.receipt_pdf is not None
         assert donation.status == "success"
-        assert b"No receipt is issued for this contribution type." in resp.data
+        assert b"generated for internal" in resp.data
+        assert b"not sent to the contributor" in resp.data
 
 
 class TestOfflineBulkImport:
-    def test_bulk_import_row_gets_no_receipt(self, app, client):
+    def test_bulk_import_row_gets_a_receipt_with_no_notification_sent(self, app, client):
         from extensions import db
         from models import Donation
         login(client)
@@ -190,13 +241,17 @@ class TestOfflineBulkImport:
             "full_name,campaign_name,amount,payment_mode,donation_date\n"
             "Bulk Dhoti Donor,Dhoti Kurta Contribution,501,cash,2026-04-01\n"
         )
-        client.post("/admin/donations/bulk-import", data={
-            "csv_file": (io.BytesIO(csv_text.encode()), "import.csv"),
-            "action": "import",
-        }, content_type="multipart/form-data", follow_redirects=True)
+        with patch("public.send_receipt_email") as mock_email, \
+             patch("public.send_receipt_whatsapp") as mock_whatsapp:
+            client.post("/admin/donations/bulk-import", data={
+                "csv_file": (io.BytesIO(csv_text.encode()), "import.csv"),
+                "action": "import",
+            }, content_type="multipart/form-data", follow_redirects=True)
+            mock_email.assert_not_called()
+            mock_whatsapp.assert_not_called()
 
         donation = Donation.query.one()
-        assert donation.receipt_number is None
+        assert donation.receipt_number is not None
         assert donation.status == "success"
 
     def test_bulk_import_preview_does_not_create_anything(self, app, client):
@@ -292,7 +347,7 @@ class TestAdminSection:
         assert resp.status_code == 200
         assert b"isn&#39;t set up yet" in resp.data or b"isn't set up yet" in resp.data
 
-    def test_csv_export_has_the_six_required_columns_and_only_dk_rows(self, app, client):
+    def test_csv_export_has_the_required_columns_and_only_dk_rows(self, app, client):
         from extensions import db
         login(client)
         campaign = _mk_campaign(db)
@@ -301,12 +356,37 @@ class TestAdminSection:
         resp = client.get("/admin/dhoti-kurta-contributions/export?range=all")
         body = resp.data.decode()
         header = body.splitlines()[0]
+        # The 6 columns spec Section 4 asked for, plus Receipt No. -- added
+        # once receipts started being generated for internal accounting,
+        # which is the whole point of issuing one at all here.
         for col in ["Name", "Mobile Number", "Amount", "Date & Time", "Transaction Status",
-                    "Transaction ID / Payment Reference"]:
+                    "Transaction ID / Payment Reference", "Receipt No."]:
             assert col in header
         assert "Dhoti Alpha" in body
         assert "Dhoti Beta" in body
         assert "999" not in body
+
+    def test_csv_export_includes_the_receipt_number(self, app, client):
+        """Uses the real online create_order + simulate-payment flow
+        (unlike _seed(), which inserts Donation rows directly and so
+        never exercises receipt issuance) -- this is the path that
+        actually generates a receipt_number, which is exactly what this
+        test needs to be checking is present in the export."""
+        from extensions import db
+        from models import Donation
+        campaign = _mk_campaign(db)
+        resp = client.post("/api/create-order", json={
+            "amount": 501, "full_name": "Receipt Column Donor", "phone": "9876500405",
+            "consent": "on", "campaign_id": campaign.id,
+        })
+        donation_id = resp.get_json()["donation_id"]
+        client.post("/api/simulate-payment", json={"donation_id": donation_id})
+        receipt_number = Donation.query.get(donation_id).receipt_number
+        assert receipt_number is not None
+
+        login(client)
+        body = client.get("/admin/dhoti-kurta-contributions/export?range=all").data.decode()
+        assert receipt_number in body
 
     def test_csv_export_reference_column_shows_online_payment_id(self, app, client):
         from extensions import db
@@ -325,8 +405,13 @@ class TestAdminSection:
 
 
 class TestDonateSuccessPage:
-    def test_renders_without_a_broken_receipt_link(self, app, client):
+    def test_owner_view_shows_the_receipt_and_a_working_download_link(self, app, client):
+        """The donor themselves, on their own success page right after
+        paying, can see and download their receipt exactly like any other
+        donation -- suppress_receipt only gates the proactive email/
+        WhatsApp send, not this."""
         from extensions import db
+        from models import Donation
         campaign = _mk_campaign(db)
         resp = client.post("/api/create-order", json={
             "amount": 501, "full_name": "Success Page Donor", "phone": "9876500501",
@@ -334,14 +419,19 @@ class TestDonateSuccessPage:
         })
         donation_id = resp.get_json()["donation_id"]
         client.post("/api/simulate-payment", json={"donation_id": donation_id})
+        receipt_number = Donation.query.get(donation_id).receipt_number
+        assert receipt_number is not None
 
         login(client)
         page = client.get(f"/donate/success/{donation_id}")
         assert page.status_code == 200
         html = page.data.decode()
-        assert "No receipt is issued for this contribution." in html
-        assert "Download receipt" not in html
-        assert "Receipt No:" not in html
+        assert f"Receipt No: <strong>{receipt_number}</strong>" in html
+        assert "Download receipt" in html
+
+        download = client.get(f"/receipt/{donation_id}")
+        assert download.status_code == 200
+        assert download.mimetype == "application/pdf"
 
 
 class TestCampaignEditSuppressReceipt:
@@ -373,12 +463,12 @@ class TestCampaignEditSuppressReceipt:
 
 
 class TestCampaignsListBadge:
-    def test_no_receipt_badge_shown_only_for_suppressed_campaigns(self, app, client):
+    def test_receipt_not_sent_badge_shown_only_for_suppressed_campaigns(self, app, client):
         """Admin-clarity gap found on recheck: nothing on the Campaigns
         list previously distinguished a suppress_receipt campaign from a
         normal one, even though the dedicated Edit page already has the
         checkbox -- an admin scanning the list had no way to tell why a
-        campaign's donations come out with no receipt."""
+        campaign's receipts never reach the donor."""
         from extensions import db
         login(client)
         _mk_campaign(db)
@@ -391,7 +481,7 @@ class TestCampaignsListBadge:
         list_start = html.index("Campaigns / Collection Categories")
 
         dk_start = html.index("Dhoti Kurta Contribution", list_start)
-        assert "No Receipt" in html[dk_start:dk_start + 600]
+        assert "Receipt Not Sent" in html[dk_start:dk_start + 600]
 
         annadan_start = html.index("Annadan", list_start)
-        assert "No Receipt" not in html[annadan_start:annadan_start + 600]
+        assert "Receipt Not Sent" not in html[annadan_start:annadan_start + 600]

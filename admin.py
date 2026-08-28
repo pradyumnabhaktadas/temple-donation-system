@@ -1924,16 +1924,6 @@ def _create_offline_donation(
         db.session.add(donation)
         db.session.flush()
 
-        if campaign.suppress_receipt:
-            # Dhoti Kurta Contribution (and anything else marked this way)
-            # -- no receipt number, no PDF, no notification. See the same
-            # guard in public._finalize_success for the full reasoning.
-            donation.financial_year = get_financial_year(donation_date)
-            db.session.commit()
-            return {
-                "ok": True, "donor": donor, "donation": donation, "receipt_number": None, "pdf_ok": True,
-            }
-
         receipt_number, fy = ReceiptCounter.next_receipt_number(donation.effective_is_80g, donation_date)
         donation.receipt_number = receipt_number
         donation.financial_year = fy
@@ -1960,6 +1950,19 @@ def _create_offline_donation(
         )
         result["pdf_ok"] = False
         return result
+
+    if campaign.suppress_receipt:
+        # Dhoti Kurta Contribution (and anything else marked this way): the
+        # receipt number and PDF above were issued exactly like any other
+        # donation -- that's what makes this usable for internal
+        # accounting. What's suppressed is the *proactive* send: no email,
+        # no WhatsApp goes out on its own. The donor can still view/
+        # download it themselves the normal way (donate_success.html,
+        # donor portal, admin) -- see public._may_download_receipt's
+        # docstring. Overriding the parameter here, rather than requiring
+        # every caller to remember to pass send_notifications=False for
+        # this campaign, keeps the rule in one place.
+        send_notifications = False
 
     if send_notifications:
         # Backgrounded, not sent inline -- same reasoning as public.py's
@@ -2105,7 +2108,17 @@ def manual_donation():
             return redirect(url_for("admin.manual_donation"))
 
         if result["receipt_number"] is None:
+            # Defensive fallback only -- _create_offline_donation always
+            # issues a real receipt_number on success now (suppress_receipt
+            # campaigns included; see its docstring), so this shouldn't be
+            # reachable in practice.
             flash("Contribution recorded. No receipt is issued for this contribution type.")
+        elif result["pdf_ok"] and campaign.suppress_receipt:
+            flash(
+                f"Contribution recorded. Receipt {result['receipt_number']} generated for internal "
+                f"records -- not sent to the contributor (this campaign is configured not to deliver "
+                f"receipts)."
+            )
         elif result["pdf_ok"]:
             flash(f"Donation recorded. Receipt {result['receipt_number']} generated.")
         else:
@@ -3586,11 +3599,10 @@ def dhoti_kurta_contributions():
     """Dedicated section for Dhoti Kurta Contributions -- deliberately its
     own view rather than a filter on the general Donations Log, per the
     request that these "not be mixed with regular donations in this
-    dedicated view". A row here never has a receipt number (see
-    Campaign.suppress_receipt) -- the Transaction Status/Reference columns
-    (Donation.status / Donation.reference_display) are what stand in for
-    it, since Razorpay's payment id is still captured exactly like any
-    other online donation."""
+    dedicated view". Each row gets a real receipt number same as any other
+    donation (see Campaign.suppress_receipt's docstring) -- it just isn't
+    emailed or sent on WhatsApp to the contributor, which is exactly why
+    this dedicated internal view exists."""
     campaign = _dhoti_kurta_campaign_or_none()
     if campaign is None:
         return render_template(
@@ -3626,7 +3638,10 @@ def export_dhoti_kurta_contributions():
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Name", "Mobile Number", "Amount", "Date & Time", "Transaction Status", "Transaction ID / Payment Reference"])
+    writer.writerow([
+        "Name", "Mobile Number", "Amount", "Date & Time", "Transaction Status",
+        "Transaction ID / Payment Reference", "Receipt No.",
+    ])
     for d in rows:
         donor = d.donor
         date_str = (
@@ -3641,6 +3656,7 @@ def export_dhoti_kurta_contributions():
             date_str,
             d.status,
             d.reference_display or "",
+            d.receipt_number or "",
         ]))
 
     return Response(

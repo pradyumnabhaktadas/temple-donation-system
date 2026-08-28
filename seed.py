@@ -11,13 +11,14 @@ CAMPAIGNS = [
     # (name, is_80g, min_amount, suppress_receipt) -- min_amount is None
     # unless noted; only Live To Give currently has a floor (Rs. 101,
     # admin-editable from Admin -> Campaigns -> Edit). suppress_receipt is
-    # False for everything except Dhoti Kurta Contribution, whose whole
-    # point is no receipt (see Campaign.suppress_receipt's docstring).
-    # This only affects fresh installs/resets (seeding skips anything
-    # that already exists by name) -- keeping this in sync with whatever's
-    # actually configured live means a reset_data.py + seed.py cycle
-    # restores the real settings instead of silently dropping back to
-    # defaults.
+    # False for everything except Dhoti Kurta Contribution: a receipt
+    # number/PDF is still generated for those donations same as any
+    # other, it's just never emailed or sent on WhatsApp to the
+    # contributor (see Campaign.suppress_receipt's docstring). This only
+    # affects fresh installs/resets (seeding skips anything that already
+    # exists by name) -- keeping this in sync with whatever's actually
+    # configured live means a reset_data.py + seed.py cycle restores the
+    # real settings instead of silently dropping back to defaults.
     ("Temple Construction", True, None, False),
     ("Deity Worship", True, None, False),
     ("Youth Preaching", True, None, False),
@@ -35,8 +36,9 @@ CAMPAIGNS = [
     # (see Donation.effective_is_80g).
     ("Live To Give", True, 101, False),
     # Deliberately not linked from anywhere in the main site -- only
-    # reachable via the small footer link (see base.html). No receipt is
-    # ever issued for these (suppress_receipt=True); see the dedicated
+    # reachable via the small footer link (see base.html). A receipt is
+    # generated for these same as any other donation, just never emailed
+    # or WhatsApp'd (suppress_receipt=True); see the dedicated
     # /dhoti-kurta-contribution form for the (intentionally minimal)
     # Name/Mobile/Amount collection flow.
     ("Dhoti Kurta Contribution", False, None, True),

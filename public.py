@@ -52,8 +52,7 @@ from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email
 from whatsapp_utils import send_receipt_whatsapp
 from utils import (
-    HIGH_VALUE_PAN_THRESHOLD, get_financial_year, is_valid_pan, is_valid_phone, normalize_phone,
-    receipt_access_token, to_ist,
+    HIGH_VALUE_PAN_THRESHOLD, is_valid_pan, is_valid_phone, normalize_phone, receipt_access_token,
 )
 
 bp = Blueprint("public", __name__)
@@ -869,22 +868,6 @@ def _finalize_success(donation):
 
     try:
         campaign = donation.campaign
-        if campaign.suppress_receipt:
-            # Dhoti Kurta Contribution (and anything else marked this way):
-            # the whole point is no receipt -- no number, no PDF, no email/
-            # WhatsApp. Still a real "success" donation that counts in every
-            # total; it just has nothing to issue. Mirrors the legacy-import
-            # precedent (a row with no receipt_number in the source data is
-            # left without one rather than minting a fresh number that would
-            # misrepresent it -- see import_legacy_donations).
-            donation.status = "success"
-            # +5:30 first -- donation_date here is a genuine UTC "now"
-            # timestamp, same as ReceiptCounter.next_receipt_number's own
-            # conversion, so a payment made just after midnight IST isn't
-            # misattributed to the previous financial year.
-            donation.financial_year = get_financial_year(to_ist(donation.donation_date).date())
-            db.session.commit()
-            return True
         receipt_number, fy = ReceiptCounter.next_receipt_number(donation.effective_is_80g, donation.donation_date)
         donation.receipt_number = receipt_number
         donation.financial_year = fy
@@ -902,6 +885,18 @@ def _finalize_success(donation):
     except Exception:
         db.session.rollback()
         current_app.logger.exception("Receipt PDF generation failed for donation %s", donation.id)
+        return True
+
+    if campaign.suppress_receipt:
+        # Dhoti Kurta Contribution (and anything else marked this way): a
+        # real receipt number and PDF were just issued above, same as any
+        # other donation -- that part is unchanged, and it's what lets the
+        # temple reconcile these internally. What's suppressed is only the
+        # *proactive* send: no email, no WhatsApp goes out on its own. The
+        # donor can still see/download it the normal way (this success
+        # page, the donor portal) -- see _may_download_receipt's
+        # docstring. Skipping straight to `return True` here means the
+        # background email/WhatsApp thread below never starts.
         return True
 
     # Email + WhatsApp in a background thread rather than blocking the
@@ -1524,6 +1519,14 @@ def _may_download_receipt(donation):
     2. A logged-in admin, who can already see every donation in the admin
        area anyway.
     3. A donor logged into the donor portal, for their own donations only.
+
+    Campaign.suppress_receipt (Dhoti Kurta Contribution and anything else
+    marked this way) does NOT change any of this -- a receipt number and
+    PDF are issued for these donations exactly like any other, and the
+    donor can still view/download their own here or on the success page
+    the same way. What suppress_receipt actually suppresses is the
+    *proactive* send: no email, no WhatsApp message goes out on its own
+    (see public._finalize_success and admin._create_offline_donation).
     """
     token = request.args.get("t") or ""
     expected = receipt_access_token(donation.id, current_app.config["SECRET_KEY"])

@@ -14,9 +14,14 @@
         <p class="receipt-reference">Receipt No: <strong>{{ donation.receipt_number }}</strong></p>
         <a class="btn btn-gold success-action mb-2" href="{{ url_for('public.download_receipt', donation_id=donation.id, t=receipt_token(donation.id)) }}">Download receipt <span>↓</span></a>
         {% else %}
-        {# Campaign.suppress_receipt (e.g. Dhoti Kurta Contribution) --
-           no receipt number was ever issued for this donation, so there's
-           nothing to download. See public._finalize_success. #}
+        {# Defensive fallback, not the normal case for any current
+           campaign -- every online donation gets a real receipt number
+           once it succeeds (Campaign.suppress_receipt campaigns like
+           Dhoti Kurta Contribution included; see
+           public._finalize_success). This only shows if that somehow
+           didn't happen (e.g. a legacy-imported record with no source
+           receipt number, or the rare failure this function itself
+           already tolerates). #}
         <p class="receipt-reference">No receipt is issued for this contribution.</p>
         {% endif %}
         {% if donation.bace_property %}
@@ -39,7 +44,13 @@
         <span class="success-symbol"><img src="{{ url_for('static', filename='branding/iskcon_dwarka_logo.png') }}" alt="ISKCON Dwarka Delhi"></span>
         <span class="section-kicker">Offering received</span>
         <h3 class="mt-2">Thank you for your seva.</h3>
-        {% if donation.receipt_number %}
+        {% if donation.receipt_number and donation.campaign.suppress_receipt %}
+        {# A real receipt exists (for internal records), but this campaign
+           never emails/WhatsApps it -- saying otherwise here would be a
+           false claim to whoever's reading this generic, non-owner-
+           visible view. See Campaign.suppress_receipt's docstring. #}
+        <p>Your contribution has been recorded. You can view it any time in <a href="{{ url_for('donor_portal.login') }}">My Donations</a>.</p>
+        {% elif donation.receipt_number %}
         <p>Your donation has been recorded. A confirmation and receipt have been sent to the email/WhatsApp number on file, or you can view it any time in <a href="{{ url_for('donor_portal.login') }}">My Donations</a>.</p>
         {% else %}
         <p>Your contribution has been recorded. No receipt is issued for this contribution.</p>

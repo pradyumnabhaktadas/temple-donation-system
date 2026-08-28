@@ -43,7 +43,7 @@
           <div class="fw-bold">{{ c.name }}</div>
           <div class="text-muted small">{{ '80G Eligible' if c.is_80g else 'Non-80G' }}
             {% if c.is_active %}<span class="badge bg-success ms-1">Active</span>{% else %}<span class="badge bg-secondary ms-1">Inactive</span>{% endif %}
-            {% if c.suppress_receipt %}<span class="badge bg-warning text-dark ms-1" title="Donations against this campaign never get a receipt number, PDF, or email/WhatsApp send.">No Receipt</span>{% endif %}
+            {% if c.suppress_receipt %}<span class="badge bg-warning text-dark ms-1" title="A receipt is still generated for donations against this campaign, but it's never emailed or sent on WhatsApp to the donor.">Receipt Not Sent</span>{% endif %}
           </div>
           {% if c.min_amount %}<div class="text-muted small">Minimum: Rs. {{ c.min_amount | inr }}</div>{% endif %}
         </div>
