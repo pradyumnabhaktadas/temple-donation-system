@@ -1493,6 +1493,44 @@ def finalize_pending_donation(donation_id):
     return redirect(url_for("admin.donations"))
 
 
+@bp.route("/donations/<int:donation_id>/generate-receipt", methods=["POST"])
+@login_required
+@admin_role_required
+def generate_missing_receipt(donation_id):
+    """One-off backfill for a successful donation that has no receipt
+    number yet -- the case this exists for is a Dhoti Kurta Contribution
+    (or anything else marked Campaign.suppress_receipt) made before this
+    behavior existed, back when suppress_receipt meant no receipt was
+    issued at all rather than just not delivered. Reuses
+    public._finalize_success, which is idempotent (a no-op if the
+    donation already has a receipt_number) and already does exactly what
+    a backfill needs: issue a real number, generate the PDF, and -- for a
+    suppress_receipt campaign -- skip the email/WhatsApp send. That last
+    part matters here specifically: a payment from days or weeks ago
+    suddenly emailing a receipt out of the blue would be more surprising
+    than helpful, so the same rule that applies to a fresh contribution
+    applies to a backfilled one.
+    """
+    donation = Donation.query.get_or_404(donation_id)
+    if donation.status != "success":
+        flash("Only a successful donation can have a receipt generated.")
+        return redirect(url_for("admin.donor_detail", donor_id=donation.donor_id))
+    if donation.receipt_number:
+        flash(f"This donation already has receipt {donation.receipt_number}.")
+        return redirect(url_for("admin.donor_detail", donor_id=donation.donor_id))
+
+    if not _finalize_success(donation):
+        flash("Couldn't generate a receipt for this donation -- please try again.", "danger")
+        return redirect(url_for("admin.donor_detail", donor_id=donation.donor_id))
+
+    log_activity(
+        "donation_generate_receipt", target_type="donation", target_id=donation.id,
+        details=f"Generated receipt {donation.receipt_number} for a donation that had none (Rs. {donation.amount})",
+    )
+    flash(f"Receipt {donation.receipt_number} generated.")
+    return redirect(url_for("admin.donor_detail", donor_id=donation.donor_id))
+
+
 def _validated_id_from_form(form, key, model, label):
     """Same idea as public.py's _validated_fk_id, but for the admin
     manual-donation form (werkzeug form data, and flash+redirect instead of

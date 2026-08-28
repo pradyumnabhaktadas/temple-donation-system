@@ -88,6 +88,18 @@
       <td>
         {% if d.status == 'success' and d.receipt_number %}
           <a href="{{ url_for('public.download_receipt', donation_id=d.id, t=receipt_token(d.id)) }}">{{ d.receipt_number }}</a>
+        {% elif d.status == 'success' and current_user.role == 'admin' %}
+          {# Backfill for a donation that succeeded with no receipt number
+             -- the case this is for is a suppress_receipt-campaign
+             donation made before that setting started issuing receipts
+             at all (see Campaign.suppress_receipt's docstring). No
+             confirmation dialog needed: this only ever adds a receipt,
+             it's idempotent, and it never emails/WhatsApps anything, so
+             there's nothing destructive to guard against, unlike Cancel. #}
+          <form method="post" action="{{ url_for('admin.generate_missing_receipt', donation_id=d.id) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-link btn-sm p-0 small">Generate receipt</button>
+          </form>
         {% elif d.status == 'success' %}
           <span class="text-muted small">no receipt</span>
         {% else %}-{% endif %}

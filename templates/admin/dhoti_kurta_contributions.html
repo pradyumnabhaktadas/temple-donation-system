@@ -82,6 +82,15 @@
       <td class="small text-muted">{{ d.reference_display or '-' }}</td>
       <td class="small text-muted">
         {% if d.receipt_number %}<a href="{{ url_for('public.download_receipt', donation_id=d.id, t=receipt_token(d.id)) }}">{{ d.receipt_number }}</a>
+        {% elif d.status == 'success' and current_user.role == 'admin' %}
+          {# Backfill for a contribution made before suppress_receipt
+             started issuing receipts at all -- see the model docstring
+             and admin.generate_missing_receipt(). Idempotent and never
+             emails/WhatsApps anything, so no confirmation dialog needed. #}
+          <form method="post" action="{{ url_for('admin.generate_missing_receipt', donation_id=d.id) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-link btn-sm p-0 small">Generate receipt</button>
+          </form>
         {% else %}-{% endif %}
       </td>
     </tr>

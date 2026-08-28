@@ -485,3 +485,105 @@ class TestCampaignsListBadge:
 
         annadan_start = html.index("Annadan", list_start)
         assert "Receipt Not Sent" not in html[annadan_start:annadan_start + 600]
+
+
+class TestGenerateMissingReceipt:
+    """Backfill for the two real Dhoti Kurta contributions already
+    recorded in production under the old "no receipt at all" behavior --
+    admin.generate_missing_receipt() lets an admin issue a receipt for a
+    successful donation that predates this change, without triggering the
+    email/WhatsApp send a fresh contribution would (still) never get
+    either."""
+
+    def _mk_receiptless_donation(self, db, campaign, full_name="Backfill Donor", phone="9876500601"):
+        from models import Donor, Donation
+        donor = Donor(full_name=full_name, phone=phone)
+        db.session.add(donor)
+        db.session.flush()
+        donation = Donation(donor_id=donor.id, campaign_id=campaign.id, amount=1500,
+                             payment_mode="online", status="success", razorpay_payment_id="pay_TUpxAGHbCtHxop")
+        db.session.add(donation)
+        db.session.commit()
+        return donation
+
+    def test_generates_a_receipt_with_no_notification_sent(self, app, client):
+        from extensions import db
+        from models import Donation
+        login(client)
+        campaign = _mk_campaign(db)
+        donation = self._mk_receiptless_donation(db, campaign)
+        assert donation.receipt_number is None
+
+        with patch("public.send_receipt_email") as mock_email, \
+             patch("public.send_receipt_whatsapp") as mock_whatsapp:
+            resp = client.post(
+                f"/admin/donations/{donation.id}/generate-receipt", follow_redirects=True
+            )
+            mock_email.assert_not_called()
+            mock_whatsapp.assert_not_called()
+
+        refreshed = Donation.query.get(donation.id)
+        assert refreshed.receipt_number is not None
+        assert refreshed.receipt_pdf is not None
+        assert refreshed.receipt_number.encode() in resp.data
+
+    def test_is_idempotent_on_a_second_call(self, app, client):
+        from extensions import db
+        from models import Donation
+        login(client)
+        campaign = _mk_campaign(db)
+        donation = self._mk_receiptless_donation(db, campaign)
+
+        client.post(f"/admin/donations/{donation.id}/generate-receipt")
+        first_number = Donation.query.get(donation.id).receipt_number
+
+        resp = client.post(f"/admin/donations/{donation.id}/generate-receipt", follow_redirects=True)
+        second_number = Donation.query.get(donation.id).receipt_number
+
+        assert first_number == second_number
+        assert f"already has receipt {first_number}".encode() in resp.data
+
+    def test_requires_admin_role(self, app, client):
+        from extensions import db
+        from models import Donation
+        login(client, username="teststaff")
+        campaign = _mk_campaign(db)
+        donation = self._mk_receiptless_donation(db, campaign)
+
+        client.post(f"/admin/donations/{donation.id}/generate-receipt")
+        assert Donation.query.get(donation.id).receipt_number is None
+
+    def test_rejects_a_non_success_donation(self, app, client):
+        from extensions import db
+        from models import Donor, Donation
+        login(client)
+        campaign = _mk_campaign(db)
+        donor = Donor(full_name="Pending Backfill Donor", phone="9876500602")
+        db.session.add(donor)
+        db.session.flush()
+        donation = Donation(donor_id=donor.id, campaign_id=campaign.id, amount=500,
+                             payment_mode="online", status="pending")
+        db.session.add(donation)
+        db.session.commit()
+
+        client.post(f"/admin/donations/{donation.id}/generate-receipt")
+        assert Donation.query.get(donation.id).receipt_number is None
+
+    def test_button_appears_on_dhoti_kurta_list_for_receiptless_rows(self, app, client):
+        from extensions import db
+        login(client)
+        campaign = _mk_campaign(db)
+        donation = self._mk_receiptless_donation(db, campaign)
+
+        html = client.get("/admin/dhoti-kurta-contributions?range=all").data.decode()
+        assert f'/admin/donations/{donation.id}/generate-receipt' in html
+        assert "Generate receipt" in html
+
+    def test_button_appears_on_donor_detail_for_receiptless_rows(self, app, client):
+        from extensions import db
+        login(client)
+        campaign = _mk_campaign(db)
+        donation = self._mk_receiptless_donation(db, campaign)
+
+        html = client.get(f"/admin/donors/{donation.donor_id}").data.decode()
+        assert f'/admin/donations/{donation.id}/generate-receipt' in html
