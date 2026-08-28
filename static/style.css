@@ -539,30 +539,22 @@ body {
   /* Same Krishna darshan photo as the Donate page hero, as a subtle
      textured backdrop -- heavily darkened (unlike the hero) since footer
      text runs across the full width here with no "safe" empty zone to
-     sit in, so legibility matters more than showing the photo clearly. */
+     sit in, so legibility matters more than showing the photo clearly.
+     (An earlier pass also bled a second, brighter copy of this photo in
+     behind the Links column, plus a line-art skyline and a 4-item
+     mission strip -- all cut after feedback that the footer had gotten
+     too tall and the extra art was hurting text legibility rather than
+     helping it. This single low-opacity backdrop is what's left.) */
   background:
     linear-gradient(180deg, rgba(15,36,68,.94) 0%, rgba(15,36,68,.97) 55%, rgba(15,36,68,.99) 100%),
     url('images/deities/krishna-flute-closeup.jpg') center 30%/cover no-repeat;
-}
-/* Second, more visible pass of the same photo, bled in from the right
-   behind the Links column and masked so it dissolves into the dark
-   background rather than showing a hard edge. Decorative only -- hidden
-   below desktop widths where there isn't room for it not to collide with
-   the Links text. */
-.footer-krishna-art {
-  position:absolute; top:0; right:0; height:100%; width:34%; object-fit:cover; object-position:top center;
-  opacity:.5; z-index:0; pointer-events:none;
-  -webkit-mask-image:linear-gradient(90deg, transparent 0%, rgba(0,0,0,.5) 35%, rgba(0,0,0,.9) 100%);
-  mask-image:linear-gradient(90deg, transparent 0%, rgba(0,0,0,.5) 35%, rgba(0,0,0,.9) 100%);
 }
 .footer-grid { position:relative; z-index:1; display:grid; grid-template-columns:1.3fr 1fr 1fr; gap:2.2rem; padding:2.8rem 1rem 2.2rem; }
 .footer-brand { display:flex; align-items:center; gap:.7rem; margin-bottom:.7rem; }
 .footer-brand-logo { height:40px; width:auto; flex:0 0 auto; }
 .footer-brand-name { font-family:'Playfair Display',serif; font-weight:700; color:#fff; font-size:1.05rem; line-height:1.25; }
 .footer-brand-sub { color:var(--saffron-light); font-size:.72rem; font-weight:600; letter-spacing:.02em; margin-top:.15rem; }
-.footer-heading-flourish { color:var(--saffron); opacity:.65; font-size:.85rem; margin:.15rem 0 .7rem; }
 .footer-about-text { font-size:.82rem; line-height:1.6; color:rgba(255,255,255,.72); margin:0; }
-.footer-skyline { display:block; width:100%; max-width:340px; height:auto; margin-top:1.4rem; color:rgba(244,217,166,.3); }
 
 .footer-col-heading { display:flex; align-items:center; gap:.65rem; margin-bottom:1rem; }
 .footer-heading-icon {
@@ -571,7 +563,6 @@ body {
 }
 .footer-heading { color:var(--saffron-light); font-size:.8rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em; margin:0; }
 .footer-heading-sm { font-size:.72rem; margin-bottom:.3rem; }
-.footer-col-heading .footer-heading-flourish { margin:.2rem 0 0; }
 
 .footer-text { font-size:.82rem; line-height:1.6; color:rgba(255,255,255,.78); margin:0 0 .5rem; }
 .footer-text a { color:#fff; text-decoration:underline; text-decoration-color:rgba(255,255,255,.4); }
@@ -606,19 +597,6 @@ body {
 .footer-whatsapp-link:hover { background:#1ebe57; }
 .footer-whatsapp-icon { flex:0 0 auto; }
 
-.footer-mission-strip {
-  position:relative; z-index:1; display:flex; flex-wrap:wrap; gap:1.4rem 1.8rem; justify-content:space-between;
-  padding:1.4rem 1.6rem; margin:0 0 2rem; border-radius:1rem;
-  background:rgba(255,255,255,.04); border:1px solid rgba(226,163,61,.25);
-}
-.footer-mission-item { display:flex; align-items:flex-start; gap:.8rem; flex:1 1 200px; min-width:190px; }
-.footer-mission-icon {
-  flex:0 0 auto; width:44px; height:44px; border-radius:50%; border:1.3px solid rgba(226,163,61,.5);
-  display:flex; align-items:center; justify-content:center; font-size:1.2rem;
-}
-.footer-mission-item strong { display:block; color:var(--saffron-light); font-size:.85rem; margin-bottom:.2rem; }
-.footer-mission-item p { margin:0; font-size:.78rem; line-height:1.5; color:rgba(255,255,255,.65); }
-
 .site-footer .site-footer-note {
   position:relative; z-index:1; display:flex; align-items:center; justify-content:center; gap:.85rem;
   border-top:1px solid rgba(255,255,255,.12); padding:1.4rem 1rem; margin:0; color:rgba(255,255,255,.6);
@@ -633,10 +611,6 @@ body {
 .site-footer .site-footer-note .footer-note-line { width:52px; height:1px; margin:0; background:linear-gradient(90deg, transparent, rgba(226,163,61,.6), transparent); }
 .site-footer .site-footer-note .footer-note-text { font-family:'Playfair Display',serif; font-style:italic; color:rgba(255,255,255,.65); font-size:.85rem; margin:0; }
 
-@media (max-width: 991.98px) {
-  .footer-krishna-art { display:none; }
-}
-
 @media (max-width: 991.98px) and (min-width: 768px) {
   .footer-grid { grid-template-columns:1fr 1fr; gap:1.8rem 2.2rem; }
   .footer-col-brand { grid-column:1 / -1; }
@@ -648,10 +622,8 @@ body {
   .donation-layout{margin-top:-1.6rem}.donation-card{padding:1.3rem;border-radius:1rem}.donation-card-head{padding-bottom:1rem}.donation-card h2{font-size:1.55rem}.secure-pill{font-size:.61rem;padding:.35rem .48rem}.form-section{padding:1.15rem 0}.amount-picker{grid-template-columns:repeat(2,1fr)}.consent-box{margin:1.1rem 0 .9rem;padding:.8rem}.success-card{margin-top:2.2rem;padding:2rem 1.25rem!important}.account-intro{margin-top:1.7rem}
   .photo-gallery-grid{grid-template-columns:repeat(2,1fr)}.photo-gallery-grid.cols-5{grid-template-columns:repeat(2,1fr)}.ways-to-give-grid{grid-template-columns:1fr}
   .footer-grid { grid-template-columns:1fr; gap:1.7rem; padding:2.2rem 1rem 1.6rem; }
-  .footer-skyline { display:none; }
-  .footer-mission-strip { padding:1.2rem; gap:1.2rem; }
   .site-footer .site-footer-note { flex-wrap:wrap; gap:.5rem; }
-  .footer-note-line { width:34px; }
+  .site-footer .site-footer-note .footer-note-line { width:34px; }
 }
 
 /* Hero on phones -- text beside the photo doesn't survive a narrow screen.

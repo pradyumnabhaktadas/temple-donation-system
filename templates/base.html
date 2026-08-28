@@ -75,13 +75,6 @@
     {% block content %}{% endblock %}
   </main>
   <footer class="site-footer">
-    {# Krishna-with-flute art bleeding in from the right behind the Links
-       column -- purely decorative (aria-hidden), masked with a gradient
-       so it fades into the dark background rather than sitting as a hard
-       rectangle. Reuses the same photo already used site-wide (Donate
-       hero, footer backdrop) rather than sourcing a new asset. #}
-    <img class="footer-krishna-art" aria-hidden="true" alt=""
-         src="{{ url_for('static', filename='images/deities/krishna-flute-closeup.jpg') }}">
     <div class="container footer-grid">
       <div class="footer-col footer-col-brand">
         <div class="footer-brand">
@@ -91,25 +84,13 @@
             <div class="footer-brand-sub">ISKCON Youth Forum (IYF), Dwarka Delhi</div>
           </div>
         </div>
-        <div class="footer-heading-flourish" aria-hidden="true">❦</div>
         <p class="footer-about-text">{{ org_about_text }}</p>
-        {# Simple line-art temple skyline, drawn inline rather than as an
-           image asset -- purely decorative, so it's aria-hidden. #}
-        <svg class="footer-skyline" viewBox="0 0 460 90" aria-hidden="true" preserveAspectRatio="xMinYMax meet">
-          <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
-            <path d="M0 88 L18 88 L18 60 L26 60 L26 46 L34 60 L34 88 L52 88 L52 66 L60 66 L60 88 L80 88 L80 40 L88 24 L96 40 L96 88 L118 88 L118 58 L126 44 L134 58 L134 88 L156 88 L156 20 L164 6 L172 20 L172 88 L196 88 L196 50 L204 36 L212 50 L212 88 L236 88 L236 62 L244 62 L244 88 L262 88 L262 42 L270 28 L278 42 L278 88 L300 88 L300 56 L308 42 L316 56 L316 88 L336 88 L336 66 L344 66 L344 88 L364 88 L364 30 L372 14 L380 30 L380 88 L402 88 L402 60 L410 46 L418 60 L418 88 L440 88 L440 88" />
-            <circle cx="88" cy="20" r="3.2" /><circle cx="164" cy="3" r="3.4" /><circle cx="372" cy="11" r="3.2" />
-          </g>
-        </svg>
       </div>
 
       <div class="footer-col">
         <div class="footer-col-heading">
           <span class="footer-heading-icon" aria-hidden="true">✆</span>
-          <div>
-            <h6 class="footer-heading">Contact Us</h6>
-            <div class="footer-heading-flourish" aria-hidden="true">❦</div>
-          </div>
+          <h6 class="footer-heading">Contact Us</h6>
         </div>
         <div class="footer-contact-row">
           <span class="footer-icon-box" aria-hidden="true">✉</span>
@@ -136,10 +117,7 @@
       <div class="footer-col footer-col-links">
         <div class="footer-col-heading">
           <span class="footer-heading-icon" aria-hidden="true">⚭</span>
-          <div>
-            <h6 class="footer-heading">Links</h6>
-            <div class="footer-heading-flourish" aria-hidden="true">❦</div>
-          </div>
+          <h6 class="footer-heading">Links</h6>
         </div>
         {# Dhoti Kurta Contribution used to sit alone in the bottom note
            strip as "footer-admin-link" (a holdover name from when the
@@ -157,26 +135,6 @@
       </div>
     </div>
 
-    <div class="container">
-      <div class="footer-mission-strip">
-        <div class="footer-mission-item">
-          <span class="footer-mission-icon" aria-hidden="true">🛕</span>
-          <div><strong>Spiritual Upliftment</strong><p>Nourishing hearts and souls through devotion.</p></div>
-        </div>
-        <div class="footer-mission-item">
-          <span class="footer-mission-icon" aria-hidden="true">🍛</span>
-          <div><strong>Community Seva</strong><p>Serving society with compassion and care.</p></div>
-        </div>
-        <div class="footer-mission-item">
-          <span class="footer-mission-icon" aria-hidden="true">📖</span>
-          <div><strong>Youth Empowerment</strong><p>Inspiring youth to lead a value-based life.</p></div>
-        </div>
-        <div class="footer-mission-item">
-          <span class="footer-mission-icon" aria-hidden="true">🙏</span>
-          <div><strong>Devotional Service</strong><p>Offering love and service to Sri Sri Radha Krishna.</p></div>
-        </div>
-      </div>
-    </div>
     <div class="site-footer-note">
       <span class="footer-note-lotus" aria-hidden="true">🪷</span>
       <span class="footer-note-line" aria-hidden="true"></span>
