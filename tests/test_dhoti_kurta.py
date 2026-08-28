@@ -42,9 +42,13 @@ class TestFooterLink:
     def test_link_appears_in_footer_and_points_to_the_form(self, app, client):
         html = client.get("/").data.decode()
         # Lives in the footer's "Links" column now (footer-links-list),
-        # not the old bottom-strip "footer-admin-link" note.
+        # not the old bottom-strip "footer-admin-link" note. The link's
+        # inner markup wraps the label in a <span> (plus a decorative
+        # chevron span) for the redesigned layout, so check the href and
+        # label text separately rather than one exact HTML substring.
         assert "footer-links-list" in html
-        assert '/dhoti-kurta-contribution">Dhoti Kurta Contribution</a>' in html
+        assert 'href="/dhoti-kurta-contribution"' in html
+        assert "<span>Dhoti Kurta Contribution</span>" in html
 
     def test_link_is_not_in_main_nav_or_prominent_areas(self, app, client):
         """Section 1's whole point: reachable only via the small footer

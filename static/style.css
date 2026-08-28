@@ -533,7 +533,7 @@ body {
 .site-footer-note .footer-logo { height:18px; width:auto; vertical-align:-4px; margin-right:.35rem; }
 .site-footer-note .footer-admin-link { color:#b4a897; font-size:.75rem; margin:0 0 0 .35rem; }.site-footer-note .footer-admin-link a { color:#b4a897; text-decoration:underline; text-decoration-color:rgba(180,168,151,.5); }.site-footer-note .footer-admin-link a:hover { color:var(--maroon); }
 
-/* ---------- Public site footer: About Us / Located On / Contact Us ---------- */
+/* ---------- Public site footer: About Us / Contact Us / Links ---------- */
 .site-footer {
   position:relative; isolation:isolate; overflow:hidden; margin-top:3rem;
   /* Same Krishna darshan photo as the Donate page hero, as a subtle
@@ -544,31 +544,102 @@ body {
     linear-gradient(180deg, rgba(15,36,68,.94) 0%, rgba(15,36,68,.97) 55%, rgba(15,36,68,.99) 100%),
     url('images/deities/krishna-flute-closeup.jpg') center 30%/cover no-repeat;
 }
-.footer-grid { display:grid; grid-template-columns:1.3fr .8fr .9fr 1fr; gap:1.8rem; padding:2.8rem 1rem 2.2rem; }
-.footer-brand { display:flex; align-items:center; gap:.7rem; margin-bottom:.85rem; }
+/* Second, more visible pass of the same photo, bled in from the right
+   behind the Links column and masked so it dissolves into the dark
+   background rather than showing a hard edge. Decorative only -- hidden
+   below desktop widths where there isn't room for it not to collide with
+   the Links text. */
+.footer-krishna-art {
+  position:absolute; top:0; right:0; height:100%; width:34%; object-fit:cover; object-position:top center;
+  opacity:.5; z-index:0; pointer-events:none;
+  -webkit-mask-image:linear-gradient(90deg, transparent 0%, rgba(0,0,0,.5) 35%, rgba(0,0,0,.9) 100%);
+  mask-image:linear-gradient(90deg, transparent 0%, rgba(0,0,0,.5) 35%, rgba(0,0,0,.9) 100%);
+}
+.footer-grid { position:relative; z-index:1; display:grid; grid-template-columns:1.3fr 1fr 1fr; gap:2.2rem; padding:2.8rem 1rem 2.2rem; }
+.footer-brand { display:flex; align-items:center; gap:.7rem; margin-bottom:.7rem; }
 .footer-brand-logo { height:40px; width:auto; flex:0 0 auto; }
 .footer-brand-name { font-family:'Playfair Display',serif; font-weight:700; color:#fff; font-size:1.05rem; line-height:1.25; }
 .footer-brand-sub { color:var(--saffron-light); font-size:.72rem; font-weight:600; letter-spacing:.02em; margin-top:.15rem; }
+.footer-heading-flourish { color:var(--saffron); opacity:.65; font-size:.85rem; margin:.15rem 0 .7rem; }
 .footer-about-text { font-size:.82rem; line-height:1.6; color:rgba(255,255,255,.72); margin:0; }
-.footer-heading { color:var(--saffron-light); font-size:.76rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em; margin:0 0 .7rem; }
+.footer-skyline { display:block; width:100%; max-width:340px; height:auto; margin-top:1.4rem; color:rgba(244,217,166,.3); }
+
+.footer-col-heading { display:flex; align-items:center; gap:.65rem; margin-bottom:1rem; }
+.footer-heading-icon {
+  flex:0 0 auto; width:38px; height:38px; border-radius:50%; border:1.5px solid rgba(226,163,61,.55);
+  display:flex; align-items:center; justify-content:center; color:var(--saffron-light); font-size:1rem;
+}
+.footer-heading { color:var(--saffron-light); font-size:.8rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em; margin:0; }
+.footer-heading-sm { font-size:.72rem; margin-bottom:.3rem; }
+.footer-col-heading .footer-heading-flourish { margin:.2rem 0 0; }
+
 .footer-text { font-size:.82rem; line-height:1.6; color:rgba(255,255,255,.78); margin:0 0 .5rem; }
 .footer-text a { color:#fff; text-decoration:underline; text-decoration-color:rgba(255,255,255,.4); }
 .footer-text a:hover { color:var(--saffron-light); }
-.footer-text-note { font-size:.74rem; line-height:1.55; color:rgba(255,255,255,.58); margin:0; }
-.footer-links-list li { margin-bottom:.5rem; }
-.footer-links-list a { font-size:.82rem; line-height:1.6; color:rgba(255,255,255,.78); text-decoration:underline; text-decoration-color:rgba(255,255,255,.4); }
+.footer-text-note { font-size:.74rem; line-height:1.55; color:rgba(255,255,255,.58); margin:0 0 1rem; }
+
+.footer-contact-row { display:flex; align-items:center; gap:.65rem; margin-bottom:.7rem; font-size:.85rem; }
+.footer-contact-row a { color:rgba(255,255,255,.85); text-decoration:none; }
+.footer-contact-row a:hover { color:var(--saffron-light); }
+.footer-icon-box {
+  flex:0 0 auto; width:30px; height:30px; border-radius:50%; border:1.3px solid rgba(226,163,61,.5);
+  display:flex; align-items:center; justify-content:center; color:var(--saffron); font-size:.85rem;
+}
+.footer-located-box {
+  display:flex; align-items:flex-start; gap:.75rem; padding:.9rem 1rem; border-radius:.8rem;
+  background:rgba(255,255,255,.04); border:1px solid rgba(226,163,61,.22);
+}
+.footer-located-box .footer-icon-box { margin-top:.1rem; }
+
+.footer-links-list { display:flex; flex-direction:column; }
+.footer-links-list li { border-bottom:1px dashed rgba(255,255,255,.14); padding-bottom:.55rem; margin-bottom:.55rem; }
+.footer-links-list li:last-child { border-bottom:none; margin-bottom:0; padding-bottom:0; }
+.footer-links-list a {
+  display:flex; align-items:center; justify-content:space-between; gap:.5rem;
+  font-size:.85rem; color:rgba(255,255,255,.85); text-decoration:none; font-weight:500;
+}
 .footer-links-list a:hover { color:var(--saffron-light); }
-.footer-whatsapp-link { display:inline-flex; align-items:center; gap:.3rem; margin-left:.6rem; padding:.15rem .55rem; border-radius:999px; background:#25D366; color:#fff !important; text-decoration:none !important; font-size:.74rem; font-weight:600; }
+.footer-link-chevron { color:var(--saffron); transition:transform .15s ease; }
+.footer-links-list a:hover .footer-link-chevron { transform:translateX(3px); }
+
+.footer-whatsapp-link { display:inline-flex; align-items:center; gap:.3rem; margin-left:.4rem; padding:.15rem .55rem; border-radius:999px; background:#25D366; color:#fff !important; text-decoration:none !important; font-size:.74rem; font-weight:600; }
 .footer-whatsapp-link:hover { background:#1ebe57; }
 .footer-whatsapp-icon { flex:0 0 auto; }
-.site-footer .site-footer-note { border-top:1px solid rgba(255,255,255,.12); padding:1.2rem 1rem; margin:0; color:rgba(255,255,255,.6); }
-.site-footer .site-footer-note span { color:rgba(255,255,255,.6); }
-.site-footer .site-footer-note .footer-admin-link,
-.site-footer .site-footer-note .footer-admin-link a { color:rgba(255,255,255,.55); }
-.site-footer .site-footer-note .footer-admin-link a:hover { color:var(--saffron-light); }
+
+.footer-mission-strip {
+  position:relative; z-index:1; display:flex; flex-wrap:wrap; gap:1.4rem 1.8rem; justify-content:space-between;
+  padding:1.4rem 1.6rem; margin:0 0 2rem; border-radius:1rem;
+  background:rgba(255,255,255,.04); border:1px solid rgba(226,163,61,.25);
+}
+.footer-mission-item { display:flex; align-items:flex-start; gap:.8rem; flex:1 1 200px; min-width:190px; }
+.footer-mission-icon {
+  flex:0 0 auto; width:44px; height:44px; border-radius:50%; border:1.3px solid rgba(226,163,61,.5);
+  display:flex; align-items:center; justify-content:center; font-size:1.2rem;
+}
+.footer-mission-item strong { display:block; color:var(--saffron-light); font-size:.85rem; margin-bottom:.2rem; }
+.footer-mission-item p { margin:0; font-size:.78rem; line-height:1.5; color:rgba(255,255,255,.65); }
+
+.site-footer .site-footer-note {
+  position:relative; z-index:1; display:flex; align-items:center; justify-content:center; gap:.85rem;
+  border-top:1px solid rgba(255,255,255,.12); padding:1.4rem 1rem; margin:0; color:rgba(255,255,255,.6);
+}
+/* Scoped under .site-footer .site-footer-note (two classes) rather than
+   left as bare .footer-note-* classes -- the legacy, unscoped
+   ".site-footer-note span" rule above (used by the plain undecorated
+   footer note style that predates this dark themed footer) has a class
+   + element selector, which otherwise beats a single class selector and
+   would silently overwrite this span's color/size/margin. */
+.site-footer .site-footer-note .footer-note-lotus { font-size:1.05rem; margin:0; }
+.site-footer .site-footer-note .footer-note-line { width:52px; height:1px; margin:0; background:linear-gradient(90deg, transparent, rgba(226,163,61,.6), transparent); }
+.site-footer .site-footer-note .footer-note-text { font-family:'Playfair Display',serif; font-style:italic; color:rgba(255,255,255,.65); font-size:.85rem; margin:0; }
+
+@media (max-width: 991.98px) {
+  .footer-krishna-art { display:none; }
+}
 
 @media (max-width: 991.98px) and (min-width: 768px) {
   .footer-grid { grid-template-columns:1fr 1fr; gap:1.8rem 2.2rem; }
+  .footer-col-brand { grid-column:1 / -1; }
 }
 
 @media (max-width: 767.98px) {
@@ -577,6 +648,10 @@ body {
   .donation-layout{margin-top:-1.6rem}.donation-card{padding:1.3rem;border-radius:1rem}.donation-card-head{padding-bottom:1rem}.donation-card h2{font-size:1.55rem}.secure-pill{font-size:.61rem;padding:.35rem .48rem}.form-section{padding:1.15rem 0}.amount-picker{grid-template-columns:repeat(2,1fr)}.consent-box{margin:1.1rem 0 .9rem;padding:.8rem}.success-card{margin-top:2.2rem;padding:2rem 1.25rem!important}.account-intro{margin-top:1.7rem}
   .photo-gallery-grid{grid-template-columns:repeat(2,1fr)}.photo-gallery-grid.cols-5{grid-template-columns:repeat(2,1fr)}.ways-to-give-grid{grid-template-columns:1fr}
   .footer-grid { grid-template-columns:1fr; gap:1.7rem; padding:2.2rem 1rem 1.6rem; }
+  .footer-skyline { display:none; }
+  .footer-mission-strip { padding:1.2rem; gap:1.2rem; }
+  .site-footer .site-footer-note { flex-wrap:wrap; gap:.5rem; }
+  .footer-note-line { width:34px; }
 }
 
 /* Hero on phones -- text beside the photo doesn't survive a narrow screen.

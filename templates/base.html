@@ -75,8 +75,15 @@
     {% block content %}{% endblock %}
   </main>
   <footer class="site-footer">
+    {# Krishna-with-flute art bleeding in from the right behind the Links
+       column -- purely decorative (aria-hidden), masked with a gradient
+       so it fades into the dark background rather than sitting as a hard
+       rectangle. Reuses the same photo already used site-wide (Donate
+       hero, footer backdrop) rather than sourcing a new asset. #}
+    <img class="footer-krishna-art" aria-hidden="true" alt=""
+         src="{{ url_for('static', filename='images/deities/krishna-flute-closeup.jpg') }}">
     <div class="container footer-grid">
-      <div class="footer-col">
+      <div class="footer-col footer-col-brand">
         <div class="footer-brand">
           <img src="{{ url_for('static', filename='branding/iskcon_dwarka_logo.png') }}" alt="ISKCON Dwarka Delhi" class="footer-brand-logo">
           <div>
@@ -84,14 +91,56 @@
             <div class="footer-brand-sub">ISKCON Youth Forum (IYF), Dwarka Delhi</div>
           </div>
         </div>
+        <div class="footer-heading-flourish" aria-hidden="true">❦</div>
         <p class="footer-about-text">{{ org_about_text }}</p>
+        {# Simple line-art temple skyline, drawn inline rather than as an
+           image asset -- purely decorative, so it's aria-hidden. #}
+        <svg class="footer-skyline" viewBox="0 0 460 90" aria-hidden="true" preserveAspectRatio="xMinYMax meet">
+          <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
+            <path d="M0 88 L18 88 L18 60 L26 60 L26 46 L34 60 L34 88 L52 88 L52 66 L60 66 L60 88 L80 88 L80 40 L88 24 L96 40 L96 88 L118 88 L118 58 L126 44 L134 58 L134 88 L156 88 L156 20 L164 6 L172 20 L172 88 L196 88 L196 50 L204 36 L212 50 L212 88 L236 88 L236 62 L244 62 L244 88 L262 88 L262 42 L270 28 L278 42 L278 88 L300 88 L300 56 L308 42 L316 56 L316 88 L336 88 L336 66 L344 66 L344 88 L364 88 L364 30 L372 14 L380 30 L380 88 L402 88 L402 60 L410 46 L418 60 L418 88 L440 88 L440 88" />
+            <circle cx="88" cy="20" r="3.2" /><circle cx="164" cy="3" r="3.4" /><circle cx="372" cy="11" r="3.2" />
+          </g>
+        </svg>
       </div>
+
       <div class="footer-col">
-        <h6 class="footer-heading">Located On</h6>
-        <p class="footer-text">{{ org_contact_address }}</p>
+        <div class="footer-col-heading">
+          <span class="footer-heading-icon" aria-hidden="true">✆</span>
+          <div>
+            <h6 class="footer-heading">Contact Us</h6>
+            <div class="footer-heading-flourish" aria-hidden="true">❦</div>
+          </div>
+        </div>
+        <div class="footer-contact-row">
+          <span class="footer-icon-box" aria-hidden="true">✉</span>
+          <a href="mailto:{{ org_contact_email }}">{{ org_contact_email }}</a>
+        </div>
+        <div class="footer-contact-row">
+          <span class="footer-icon-box" aria-hidden="true">☎</span>
+          <a href="tel:+{{ org_contact_whatsapp_number }}">{{ org_contact_phone }}</a>
+          <a href="https://wa.me/{{ org_contact_whatsapp_number }}" target="_blank" rel="noopener" class="footer-whatsapp-link" title="Chat on WhatsApp">
+            <svg class="footer-whatsapp-icon" viewBox="0 0 32 32" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M16.004 3C9.383 3 4 8.383 4 15.003c0 2.386.65 4.62 1.883 6.55L4 29l7.65-1.847a11.94 11.94 0 0 0 4.354.82h.005c6.62 0 12.003-5.383 12.003-12.003C28.012 8.383 22.629 3 16.004 3zm7.03 16.94c-.297.835-1.48 1.53-2.42 1.73-.643.137-1.483.246-4.31-.926-3.617-1.498-5.947-5.166-6.13-5.407-.176-.24-1.475-1.963-1.475-3.746 0-1.782.936-2.658 1.267-3.024.33-.365.723-.457.964-.457.24 0 .482.003.692.013.222.01.52-.084.813.62.297.72 1.008 2.487 1.096 2.668.09.18.15.39.03.63-.12.24-.18.39-.36.6-.18.21-.378.468-.54.63-.18.18-.367.375-.157.735.21.36.933 1.54 2.003 2.494 1.375 1.226 2.534 1.606 2.895 1.786.36.18.57.15.78-.09.21-.24.9-1.05 1.14-1.41.24-.36.48-.3.81-.18.33.12 2.1.99 2.46 1.17.36.18.6.27.69.42.09.15.09.87-.207 1.705z"/></svg>
+            WhatsApp
+          </a>
+        </div>
+        <p class="footer-text-note">Please email us for any query or suggestion. We request you to mention your name and mobile no for better response.</p>
+        <div class="footer-located-box">
+          <span class="footer-icon-box" aria-hidden="true">⚲</span>
+          <div>
+            <h6 class="footer-heading footer-heading-sm">Located On</h6>
+            <p class="footer-text mb-0">{{ org_contact_address }}</p>
+          </div>
+        </div>
       </div>
-      <div class="footer-col">
-        <h6 class="footer-heading">Links</h6>
+
+      <div class="footer-col footer-col-links">
+        <div class="footer-col-heading">
+          <span class="footer-heading-icon" aria-hidden="true">⚭</span>
+          <div>
+            <h6 class="footer-heading">Links</h6>
+            <div class="footer-heading-flourish" aria-hidden="true">❦</div>
+          </div>
+        </div>
         {# Dhoti Kurta Contribution used to sit alone in the bottom note
            strip as "footer-admin-link" (a holdover name from when the
            admin login link lived there too -- see the REG-019 comment
@@ -99,28 +148,40 @@
            request, alongside the other public pages, so it reads as a
            normal nav link rather than a stray footnote. #}
         <ul class="footer-links-list list-unstyled mb-0">
-          <li><a href="{{ url_for('public.donate_form') }}">Home</a></li>
-          <li><a href="{{ url_for('public.about_us') }}">About Us</a></li>
-          <li><a href="{{ url_for('public.festival_seva_form') }}">Festival Seva</a></li>
-          <li><a href="{{ url_for('public.bace_rent_form') }}">BACE Contribution</a></li>
-          <li><a href="{{ url_for('public.dhoti_kurta_form') }}">Dhoti Kurta Contribution</a></li>
+          <li><a href="{{ url_for('public.donate_form') }}"><span>Home</span><span class="footer-link-chevron" aria-hidden="true">&rsaquo;</span></a></li>
+          <li><a href="{{ url_for('public.about_us') }}"><span>About Us</span><span class="footer-link-chevron" aria-hidden="true">&rsaquo;</span></a></li>
+          <li><a href="{{ url_for('public.festival_seva_form') }}"><span>Festival Seva</span><span class="footer-link-chevron" aria-hidden="true">&rsaquo;</span></a></li>
+          <li><a href="{{ url_for('public.bace_rent_form') }}"><span>BACE Contribution</span><span class="footer-link-chevron" aria-hidden="true">&rsaquo;</span></a></li>
+          <li><a href="{{ url_for('public.dhoti_kurta_form') }}"><span>Dhoti Kurta Contribution</span><span class="footer-link-chevron" aria-hidden="true">&rsaquo;</span></a></li>
         </ul>
       </div>
-      <div class="footer-col">
-        <h6 class="footer-heading">Contact Us</h6>
-        <p class="footer-text"><a href="mailto:{{ org_contact_email }}">{{ org_contact_email }}</a></p>
-        <p class="footer-text">
-          <a href="tel:+{{ org_contact_whatsapp_number }}">{{ org_contact_phone }}</a>
-          <a href="https://wa.me/{{ org_contact_whatsapp_number }}" target="_blank" rel="noopener" class="footer-whatsapp-link" title="Chat on WhatsApp">
-            <svg class="footer-whatsapp-icon" viewBox="0 0 32 32" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M16.004 3C9.383 3 4 8.383 4 15.003c0 2.386.65 4.62 1.883 6.55L4 29l7.65-1.847a11.94 11.94 0 0 0 4.354.82h.005c6.62 0 12.003-5.383 12.003-12.003C28.012 8.383 22.629 3 16.004 3zm7.03 16.94c-.297.835-1.48 1.53-2.42 1.73-.643.137-1.483.246-4.31-.926-3.617-1.498-5.947-5.166-6.13-5.407-.176-.24-1.475-1.963-1.475-3.746 0-1.782.936-2.658 1.267-3.024.33-.365.723-.457.964-.457.24 0 .482.003.692.013.222.01.52-.084.813.62.297.72 1.008 2.487 1.096 2.668.09.18.15.39.03.63-.12.24-.18.39-.36.6-.18.21-.378.468-.54.63-.18.18-.367.375-.157.735.21.36.933 1.54 2.003 2.494 1.375 1.226 2.534 1.606 2.895 1.786.36.18.57.15.78-.09.21-.24.9-1.05 1.14-1.41.24-.36.48-.3.81-.18.33.12 2.1.99 2.46 1.17.36.18.6.27.69.42.09.15.09.87-.207 1.705z"/></svg>
-            WhatsApp
-          </a>
-        </p>
-        <p class="footer-text-note">Please email us for any query or suggestion. We request you to mention your name and mobile no for better response.</p>
+    </div>
+
+    <div class="container">
+      <div class="footer-mission-strip">
+        <div class="footer-mission-item">
+          <span class="footer-mission-icon" aria-hidden="true">🛕</span>
+          <div><strong>Spiritual Upliftment</strong><p>Nourishing hearts and souls through devotion.</p></div>
+        </div>
+        <div class="footer-mission-item">
+          <span class="footer-mission-icon" aria-hidden="true">🍛</span>
+          <div><strong>Community Seva</strong><p>Serving society with compassion and care.</p></div>
+        </div>
+        <div class="footer-mission-item">
+          <span class="footer-mission-icon" aria-hidden="true">📖</span>
+          <div><strong>Youth Empowerment</strong><p>Inspiring youth to lead a value-based life.</p></div>
+        </div>
+        <div class="footer-mission-item">
+          <span class="footer-mission-icon" aria-hidden="true">🙏</span>
+          <div><strong>Devotional Service</strong><p>Offering love and service to Sri Sri Radha Krishna.</p></div>
+        </div>
       </div>
     </div>
     <div class="site-footer-note">
-      <img src="{{ url_for('static', filename='branding/iskcon_dwarka_logo.png') }}" alt="ISKCON Dwarka Delhi" class="footer-logo"> Thank you for supporting {{ org_name or 'the temple' }}.
+      <span class="footer-note-lotus" aria-hidden="true">🪷</span>
+      <span class="footer-note-line" aria-hidden="true"></span>
+      <span class="footer-note-text">Thank you for supporting {{ org_name or 'the temple' }}.</span>
+      <span class="footer-note-line" aria-hidden="true"></span>
     </div>
   </footer>
   {% endblock %}
