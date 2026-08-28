@@ -73,7 +73,13 @@ class TestFooterLink:
 
 
 class TestContributionForm:
-    def test_form_has_exactly_the_three_fields_plus_submit(self, app, client):
+    def test_form_has_name_phone_amount_remarks_plus_submit(self, app, client):
+        """Originally exactly three fields (Name/Mobile/Amount) plus
+        submit -- an optional Remarks field was added afterward, matching
+        the field every other public donation form already has
+        (bace_rent.html, festival_seva.html), and create_order() already
+        reads/stores it generically regardless of campaign, so no backend
+        change was needed to support it here."""
         from extensions import db
         _mk_campaign(db)
         html = client.get("/dhoti-kurta-contribution").data.decode()
@@ -84,14 +90,16 @@ class TestContributionForm:
         assert 'name="full_name"' in form_html
         assert 'name="phone"' in form_html
         assert 'name="amount"' in form_html
+        assert 'name="remarks"' in form_html
         assert 'type="submit"' in form_html
 
-        # No PAN, address, email, remarks, or visible consent checkbox --
-        # the user explicitly chose "skip it entirely" for consent.
+        # Still no PAN, address, email, or visible consent checkbox -- the
+        # user explicitly chose "skip it entirely" for consent, and this
+        # campaign isn't 80G-eligible so PAN/address/email stay off unless
+        # the high-value threshold forces them (covered elsewhere).
         assert 'name="pan"' not in form_html
         assert 'name="address"' not in form_html
         assert 'name="email"' not in form_html
-        assert 'name="remarks"' not in form_html
         assert 'type="checkbox"' not in form_html
         # consent is still sent (create_order requires it) but as a hidden
         # field, never shown to the contributor.
@@ -362,11 +370,11 @@ class TestAdminSection:
         resp = client.get("/admin/dhoti-kurta-contributions/export?range=all")
         body = resp.data.decode()
         header = body.splitlines()[0]
-        # The 6 columns spec Section 4 asked for, plus Receipt No. -- added
-        # once receipts started being generated for internal accounting,
-        # which is the whole point of issuing one at all here.
+        # The 6 columns spec Section 4 asked for, plus Receipt No. (added
+        # once receipts started being generated for internal accounting)
+        # and Remarks (added alongside the optional Remarks form field).
         for col in ["Name", "Mobile Number", "Amount", "Date & Time", "Transaction Status",
-                    "Transaction ID / Payment Reference", "Receipt No."]:
+                    "Transaction ID / Payment Reference", "Receipt No.", "Remarks"]:
             assert col in header
         assert "Dhoti Alpha" in body
         assert "Dhoti Beta" in body
@@ -393,6 +401,27 @@ class TestAdminSection:
         login(client)
         body = client.get("/admin/dhoti-kurta-contributions/export?range=all").data.decode()
         assert receipt_number in body
+
+    def test_remarks_flows_through_to_the_list_and_export(self, app, client):
+        """The Remarks field is optional and generic -- create_order()
+        already reads/stores it for every campaign, so this is really a
+        test that the dedicated Dhoti Kurta admin view and its CSV export
+        actually surface it, not that the plumbing exists at all."""
+        from extensions import db
+        campaign = _mk_campaign(db)
+        resp = client.post("/api/create-order", json={
+            "amount": 501, "full_name": "Remarks Donor", "phone": "9876500406",
+            "consent": "on", "campaign_id": campaign.id, "remarks": "For Janmashtami",
+        })
+        donation_id = resp.get_json()["donation_id"]
+        client.post("/api/simulate-payment", json={"donation_id": donation_id})
+
+        login(client)
+        html = client.get("/admin/dhoti-kurta-contributions?range=all").data.decode()
+        assert "For Janmashtami" in html
+
+        body = client.get("/admin/dhoti-kurta-contributions/export?range=all").data.decode()
+        assert "For Janmashtami" in body
 
     def test_csv_export_reference_column_shows_online_payment_id(self, app, client):
         from extensions import db

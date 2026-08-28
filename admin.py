@@ -3678,7 +3678,7 @@ def export_dhoti_kurta_contributions():
     writer = csv.writer(output)
     writer.writerow([
         "Name", "Mobile Number", "Amount", "Date & Time", "Transaction Status",
-        "Transaction ID / Payment Reference", "Receipt No.",
+        "Transaction ID / Payment Reference", "Receipt No.", "Remarks",
     ])
     for d in rows:
         donor = d.donor
@@ -3695,6 +3695,7 @@ def export_dhoti_kurta_contributions():
             d.status,
             d.reference_display or "",
             d.receipt_number or "",
+            d.remarks or "",
         ]))
 
     return Response(

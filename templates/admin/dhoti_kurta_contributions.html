@@ -64,7 +64,7 @@
 <table class="table table-sm bg-white shadow-sm">
   <thead><tr>
     <th>Name</th><th>Mobile Number</th><th class="text-end">Amount</th><th>Date &amp; Time</th>
-    <th>Transaction Status</th><th>Transaction ID / Payment Reference</th><th>Receipt No.</th>
+    <th>Transaction Status</th><th>Transaction ID / Payment Reference</th><th>Receipt No.</th><th>Remarks</th>
   </tr></thead>
   <tbody>
     {% for d in donations %}
@@ -93,9 +93,10 @@
           </form>
         {% else %}-{% endif %}
       </td>
+      <td class="small text-muted">{{ d.remarks or '-' }}</td>
     </tr>
     {% else %}
-    <tr><td colspan="7" class="text-muted">No contributions found for this filter.</td></tr>
+    <tr><td colspan="8" class="text-muted">No contributions found for this filter.</td></tr>
     {% endfor %}
   </tbody>
 </table>
