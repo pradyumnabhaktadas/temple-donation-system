@@ -233,16 +233,15 @@ class Config:
     WHATSAPP_FROM_NUMBER = os.environ.get("WHATSAPP_FROM_NUMBER", "918178798462")
     WHATSAPP_TEMPLATE_ID = os.environ.get("WHATSAPP_TEMPLATE_ID", "01kzdy128ke65be98yhg9fjazx")
     # Separate template for the 4 AM daily collection report (see
-    # daily_report_utils.py) -- left blank until a report-specific template
-    # is submitted to and approved by Airtel/Meta. Deliberately NOT reusing
-    # WHATSAPP_TEMPLATE_ID above: that one is the receipt template, approved
-    # for exactly 3 donor-facing variables (name/amount/org) plus a PDF
-    # attachment, which doesn't fit a 5-number internal report. Until this
-    # is set, send_daily_report_whatsapp() runs in DEMO MODE (no-op) --
-    # email delivery of the report is unaffected either way. See the
-    # module docstring in whatsapp_utils.py for the exact variable order
-    # the new template needs to be approved with.
-    WHATSAPP_REPORT_TEMPLATE_ID = os.environ.get("WHATSAPP_REPORT_TEMPLATE_ID", "")
+    # daily_report_utils.py) -- approved by Airtel with the 5-variable
+    # order documented in whatsapp_utils.py's module docstring (org name,
+    # report date, today/week/month collection). Not secret, same
+    # reasoning as WHATSAPP_TEMPLATE_ID above -- defaulted here so a fresh
+    # checkout Just Works once WHATSAPP_AIRTEL_USERNAME/PASSWORD are filled
+    # in. Deliberately a separate template/ID from WHATSAPP_TEMPLATE_ID:
+    # that one is the receipt template (3 donor-facing variables + a PDF
+    # attachment), which doesn't fit a 5-number internal report.
+    WHATSAPP_REPORT_TEMPLATE_ID = os.environ.get("WHATSAPP_REPORT_TEMPLATE_ID", "01m16jfj9pg8zs0rxwk2p54g8j")
     WHATSAPP_AIRTEL_BASE_URL = os.environ.get("WHATSAPP_AIRTEL_BASE_URL", "")  # has a working default in whatsapp_utils.py
     # See the ⚠️ note in whatsapp_utils.py before setting this -- likely a
     # session-scoped value, not a stable API credential. Leave blank unless
