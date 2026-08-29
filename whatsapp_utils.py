@@ -38,6 +38,20 @@ Optional:
     WHATSAPP_AIRTEL_COOKIE       -- see the note in _headers() below before
                                     relying on this in production
 
+DAILY REPORT TEMPLATE (send_daily_report_whatsapp, below): a *separate*
+template from the receipt one above, since WhatsApp Business templates are
+approved for one fixed set of variables and this isn't donor-facing. Not
+live yet -- WHATSAPP_REPORT_TEMPLATE_ID (config.py) is blank until a
+template matching this exact 5-variable order is submitted to and approved
+by Airtel/Meta:
+    {{1}} = org name
+    {{2}} = report date, e.g. "29 Aug 2026"
+    {{3}} = today's collection, e.g. "Rs. 12,500 (4 donations)"
+    {{4}} = this week's collection, same format
+    {{5}} = this month's collection, same format
+No document attachment (plain text/template only) -- the campaign-wise
+breakdown is in the accompanying email, not the WhatsApp message.
+
 ⚠️ Two things about the original curl example this was built from that are
 worth flagging back to whoever manages the Airtel account, since neither
 could be verified against Airtel's own docs from here:
@@ -140,6 +154,61 @@ def send_receipt_whatsapp(donation, donor, org_cfg, pdf_bytes):
         current_app.logger.exception(
             "Failed to send WhatsApp receipt %s to %s", donation.receipt_number, phone
         )
+        return False
+
+
+def send_daily_report_whatsapp(cfg, phone, report_data, org_name):
+    """Sends the 4 AM daily collection report (see daily_report_utils.py)
+    to `phone` via Airtel, using WHATSAPP_REPORT_TEMPLATE_ID -- a distinct
+    template from the receipt one (see module docstring for the required
+    variable order). Returns True if sent, False if skipped (demo mode: no
+    report template configured yet). Never raises, same contract as
+    send_receipt_whatsapp."""
+    if not phone:
+        return False
+
+    username = cfg.get("WHATSAPP_AIRTEL_USERNAME")
+    password = cfg.get("WHATSAPP_AIRTEL_PASSWORD")
+    from_number = cfg.get("WHATSAPP_FROM_NUMBER")
+    template_id = cfg.get("WHATSAPP_REPORT_TEMPLATE_ID")
+    if not (username and password and from_number and template_id):
+        return False  # DEMO MODE: no report template approved/configured yet
+
+    try:
+        base_url = cfg.get("WHATSAPP_AIRTEL_BASE_URL") or DEFAULT_AIRTEL_BASE_URL
+        report_date = report_data["report_date"]
+
+        def fmt(period):
+            return f"Rs. {period['amount']:,.2f} ({period['count']} donations)"
+
+        payload = {
+            "templateId": template_id,
+            "to": _to_e164(phone),
+            "from": _to_e164(from_number),
+            "message": {
+                # Positional, must match the approved report template's
+                # {{1}}..{{5}} order exactly -- see this module's docstring.
+                "variables": [
+                    org_name[:60],
+                    report_date.strftime("%d %b %Y"),
+                    fmt(report_data["today"])[:100],
+                    fmt(report_data["week"])[:100],
+                    fmt(report_data["month"])[:100],
+                ]
+            },
+        }
+        resp = requests.post(
+            base_url, headers=_headers(cfg), auth=(username, password), json=payload, timeout=15
+        )
+        if not resp.ok:
+            current_app.logger.error(
+                "WhatsApp (Airtel) daily report send failed for %s: %s %s",
+                phone, resp.status_code, resp.text[:500],
+            )
+            return False
+        return True
+    except Exception:
+        current_app.logger.exception("Failed to send WhatsApp daily report to %s", phone)
         return False
 
 

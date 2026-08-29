@@ -125,6 +125,61 @@ def send_backup_email(cfg, to_email, filename, zip_bytes):
         return False
 
 
+def send_daily_report_email(cfg, to_addresses, report_data, org_name):
+    """Emails the 4 AM daily collection report (see daily_report_utils.py)
+    to every address in `to_addresses`. Same demo-mode/never-raises
+    contract as the other senders in this file. Recipients are BCC'd on a
+    single message rather than one email per recipient -- keeps this a
+    single SMTP round trip and doesn't expose the recipient list to
+    everyone on it."""
+    if not to_addresses:
+        return False
+
+    smtp_host = cfg.get("SMTP_HOST")
+    if not smtp_host:
+        return False  # DEMO MODE: nothing was actually sent
+
+    from daily_report_utils import _render_email_html
+
+    try:
+        msg = EmailMessage()
+        report_date = report_data["report_date"]
+        msg["Subject"] = f"Daily Collection Report - {report_date.strftime('%d %b %Y')}"
+        msg["From"] = _from_header(cfg)
+        # A real address in To: (the from address itself) rather than
+        # leaving To: blank, since some receiving servers flag/ reject a
+        # message with no To: header at all; the actual recipients are Bcc.
+        msg["To"] = _from_header(cfg) or to_addresses[0]
+        msg["Bcc"] = ", ".join(to_addresses)
+
+        html = _render_email_html(report_data, org_name)
+        msg.set_content(
+            f"Daily Collection Report for {report_date.strftime('%d %b %Y')}\n\n"
+            f"Today: Rs. {report_data['today']['amount']:,.2f}\n"
+            f"This week: Rs. {report_data['week']['amount']:,.2f}\n"
+            f"This month: Rs. {report_data['month']['amount']:,.2f}\n\n"
+            "View this email in an HTML-capable client for the full campaign-wise breakdown."
+        )
+        msg.add_alternative(html, subtype="html")
+
+        smtp_port = int(cfg.get("SMTP_PORT", 587))
+        use_tls = cfg.get("SMTP_USE_TLS", True)
+        username = cfg.get("SMTP_USERNAME")
+        password = cfg.get("SMTP_PASSWORD")
+
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
+            if use_tls:
+                server.starttls(context=ssl.create_default_context())
+            if username:
+                server.login(username, password)
+            server.send_message(msg)
+
+        return True
+    except Exception:
+        current_app.logger.exception("Failed to email daily report to %s", to_addresses)
+        return False
+
+
 def _from_header(cfg):
     from_addr = cfg.get("MAIL_FROM_ADDRESS") or cfg.get("SMTP_USERNAME") or ""
     from_name = cfg.get("MAIL_FROM_NAME")

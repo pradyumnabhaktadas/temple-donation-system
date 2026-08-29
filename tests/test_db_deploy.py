@@ -147,6 +147,12 @@ class TestExistingDatabase:
             "    with db.engine.begin() as conn:\n"
             "        conn.execute(sa.text('DROP TABLE camps'))\n"
             "        conn.execute(sa.text('DROP TABLE associated_withs'))\n"
+            "        # daily_report_recipients (f3a8c1d5e720) is newer than the\n"
+            "        # b2e91a7c4d05 baseline too -- same reasoning as camps/\n"
+            "        # associated_withs above, drop it so the forward migration's\n"
+            "        # own create_table doesn't collide with one create_all()\n"
+            "        # already built.\n"
+            "        conn.execute(sa.text('DROP TABLE daily_report_recipients'))\n"
             f"    stamp(revision='{revision}')\n"
         )
         env = dict(os.environ)

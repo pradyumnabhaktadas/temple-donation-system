@@ -174,6 +174,7 @@ Receiver in System Settings.
 | `WHATSAPP_AIRTEL_BASE_URL` | Airtel's send endpoint. Has a working default in `whatsapp_utils.py` -- only set this if Airtel ever changes it. |
 | `WHATSAPP_AIRTEL_COOKIE` | Optional. See the ⚠️ note in `whatsapp_utils.py` before setting this -- looked like a session-scoped value in the example this was built from, not a stable credential; confirm with Airtel/your team whether it's actually required before relying on it. |
 | `PUBLIC_BASE_URL` | The site's own public URL (`https://givetokrishna.com`). Used to build the receipt link Airtel's servers fetch the PDF from -- see "Sending receipts via WhatsApp" below. |
+| `WHATSAPP_REPORT_TEMPLATE_ID` | Leave blank to keep the 4 AM daily collection report's WhatsApp delivery in demo mode (default) -- see "Daily collection report" below. A separate template from `WHATSAPP_TEMPLATE_ID` above (different variables), so it needs its own approval with Airtel before this is set. |
 
 ## Going live with Razorpay
 
@@ -527,6 +528,31 @@ are deliberately excluded from every backup (see `backup_utils.py`'s
 module docstring) and are therefore untouched by a restore — recreate
 admin accounts via Admin -> Manage Users, and receipt PDFs regenerate
 automatically the next time they're downloaded or emailed.
+
+## Daily collection report
+
+`daily_report_utils.py` computes yesterday's / this week's (calendar week
+to date) / this month's (calendar month to date) collection totals, plus a
+campaign-wise breakdown of each, and delivers it to whoever is listed under
+**Admin -> Settings -> Daily Report Recipients** — no code change or
+redeploy needed to add/remove a recipient.
+
+- **`python daily_report.py`** — runs the report for yesterday (IST) and
+  sends it. Meant to run automatically at 4:00 AM IST every day — see the
+  `temple-daily-report` Cron Job in `render.yaml` (schedule `30 22 * * *`,
+  which is UTC — 10:30 PM UTC is 4:00 AM IST the *next* calendar day).
+  `--date YYYY-MM-DD` re-runs it for a specific date; `--force` re-sends
+  even if that date's report already went out.
+- **Email** works automatically once `SMTP_HOST` etc. are configured (see
+  above) — no extra setup.
+- **WhatsApp** needs its own approved template, separate from the receipt
+  one: WhatsApp Business templates are approved for one fixed set of
+  variables, and the receipt template's 3 donor-facing variables don't fit
+  a 5-number internal report. See the "DAILY REPORT TEMPLATE" section of
+  `whatsapp_utils.py`'s module docstring for the exact variable order to
+  submit to Airtel for approval, then set `WHATSAPP_REPORT_TEMPLATE_ID`.
+  Until that's set, WhatsApp delivery silently no-ops (same demo-mode
+  pattern as everywhere else) — email delivery is unaffected.
 
 ## Running the tests
 

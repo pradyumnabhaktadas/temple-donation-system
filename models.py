@@ -230,6 +230,33 @@ class BaceProperty(db.Model):
         return f"<BaceProperty {self.name}>"
 
 
+class DailyReportRecipient(db.Model):
+    """Who the 4 AM daily collection report (today/week/month/campaign-wise
+    totals -- see daily_report_utils.py) gets sent to. Editable from Admin ->
+    Settings -> Daily Report Recipients so adding/removing a recipient is a
+    list edit, not a code change or redeploy.
+
+    `contact_type` is "email" or "whatsapp"; `value` is the address or
+    10-digit phone number accordingly (WhatsApp send is demo-mode/no-op
+    until a report-specific Airtel template is approved and
+    WHATSAPP_REPORT_TEMPLATE_ID is set -- see whatsapp_utils.py)."""
+
+    __tablename__ = "daily_report_recipients"
+
+    id = db.Column(db.Integer, primary_key=True)
+    contact_type = db.Column(db.String(20), nullable=False)  # "email" or "whatsapp"
+    value = db.Column(db.String(150), nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("contact_type", "value", name="uq_daily_report_recipient_type_value"),
+    )
+
+    def __repr__(self):
+        return f"<DailyReportRecipient {self.contact_type}:{self.value}>"
+
+
 class Festival(db.Model):
     """A specific festival/occasion -- e.g. "Janmashtami 2026",
     "Radhashtami". Donations against the "Festivals" campaign record which

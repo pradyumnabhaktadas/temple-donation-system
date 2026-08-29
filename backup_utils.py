@@ -28,7 +28,7 @@ import zipfile
 
 from models import (
     Donor, Donation, Campaign, BaceProperty, Festival, SevaType,
-    LiveToGivePurpose, Preacher, AssociatedWith, ReceiptCounter,
+    LiveToGivePurpose, Preacher, AssociatedWith, ReceiptCounter, DailyReportRecipient,
 )
 
 # (CSV filename, model, columns-to-exclude) -- one entry per table included
@@ -42,6 +42,7 @@ _BACKUP_TABLES = [
     ("seva_types.csv", SevaType, []),
     ("live_to_give_purposes.csv", LiveToGivePurpose, []),
     ("associated_withs.csv", AssociatedWith, []),
+    ("daily_report_recipients.csv", DailyReportRecipient, []),
     ("donors.csv", Donor, []),
     ("donations.csv", Donation, ["receipt_pdf", "razorpay_raw_payload"]),
     ("receipt_counters.csv", ReceiptCounter, []),

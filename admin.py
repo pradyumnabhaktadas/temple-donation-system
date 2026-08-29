@@ -20,8 +20,8 @@ from extensions import db, limiter
 from models import (
     Camp,
     Donor, Campaign, Donation, AdminUser, ReceiptCounter, BaceProperty, Festival, SevaType,
-    LiveToGivePurpose, Preacher, AssociatedWith, AdminActivityLog, DONOR_TYPES, DONOR_TYPE_LABELS,
-    DONATION_FREQUENCIES, DONATION_FREQUENCY_LABELS,
+    LiveToGivePurpose, Preacher, AssociatedWith, AdminActivityLog, DailyReportRecipient,
+    DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES, DONATION_FREQUENCY_LABELS,
 )
 from utils import csv_safe_row, get_financial_year, is_valid_pan, is_valid_phone, normalize_phone, now_ist, to_ist
 from pdf_utils import generate_receipt_pdf
@@ -3497,6 +3497,69 @@ def bace_property_delete(property_id):
     db.session.commit()
     flash(f"BACE property '{prop.name}' deleted.")
     return redirect(url_for("admin.bace_properties"))
+
+
+@bp.route("/daily-report-recipients", methods=["GET", "POST"])
+@login_required
+@admin_role_required
+def daily_report_recipients():
+    """Who the 4 AM daily collection report (today/week/month/campaign-wise
+    -- see daily_report_utils.py) is emailed and WhatsApp'd to. Admin-only,
+    same reasoning as Manage Users/Data Backup: this list controls where
+    collection figures get sent, not day-to-day donation entry."""
+    if request.method == "POST":
+        contact_type = request.form.get("contact_type", "").strip()
+        value = request.form.get("value", "").strip()
+        if contact_type not in ("email", "whatsapp"):
+            flash("Choose a valid contact type.")
+            return redirect(url_for("admin.daily_report_recipients"))
+
+        if contact_type == "email":
+            if "@" not in value or "." not in value.split("@")[-1]:
+                flash(f"'{value}' doesn't look like a valid email address.")
+                return redirect(url_for("admin.daily_report_recipients"))
+        else:
+            if not is_valid_phone(value):
+                flash(f"'{value}' doesn't look like a valid 10-digit phone number.")
+                return redirect(url_for("admin.daily_report_recipients"))
+            value = normalize_phone(value)
+
+        if DailyReportRecipient.query.filter_by(contact_type=contact_type, value=value).first():
+            flash(f"'{value}' is already on the {contact_type} list.")
+            return redirect(url_for("admin.daily_report_recipients"))
+
+        db.session.add(DailyReportRecipient(contact_type=contact_type, value=value))
+        log_activity("daily_report_recipient_add", target_type="daily_report_recipient", details=f"{contact_type}:{value}")
+        db.session.commit()
+        flash(f"Added {value} to the daily report {contact_type} list.")
+        return redirect(url_for("admin.daily_report_recipients"))
+
+    recipients = DailyReportRecipient.query.order_by(
+        DailyReportRecipient.contact_type, DailyReportRecipient.value
+    ).all()
+    return render_template("admin/daily_report_recipients.html", recipients=recipients)
+
+
+@bp.route("/daily-report-recipients/<int:recipient_id>/toggle", methods=["POST"])
+@login_required
+@admin_role_required
+def toggle_daily_report_recipient(recipient_id):
+    recipient = DailyReportRecipient.query.get_or_404(recipient_id)
+    recipient.is_active = not recipient.is_active
+    db.session.commit()
+    return redirect(url_for("admin.daily_report_recipients"))
+
+
+@bp.route("/daily-report-recipients/<int:recipient_id>/delete", methods=["POST"])
+@login_required
+@admin_role_required
+def daily_report_recipient_delete(recipient_id):
+    recipient = DailyReportRecipient.query.get_or_404(recipient_id)
+    log_activity("daily_report_recipient_delete", target_type="daily_report_recipient", details=f"{recipient.contact_type}:{recipient.value}")
+    db.session.delete(recipient)
+    db.session.commit()
+    flash(f"Removed {recipient.value} from the daily report {recipient.contact_type} list.")
+    return redirect(url_for("admin.daily_report_recipients"))
 
 
 def _bace_campaign_or_none():

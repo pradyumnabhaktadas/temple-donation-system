@@ -121,6 +121,49 @@ services:
       - key: SMTP_PASSWORD
         sync: false
 
+  # Runs daily_report.py at 4:00 AM IST -- emails (and, once a report
+  # template is approved with Airtel, WhatsApps) the collection totals for
+  # yesterday/this week/this month to whoever is listed under
+  # Admin -> Settings -> Daily Report Recipients. Render Cron schedules are
+  # in UTC: 30 22 * * * is 10:30 PM UTC, which is 4:00 AM IST the *next*
+  # calendar day -- don't "fix" this to 0 4 * * * expecting 4 AM IST, that
+  # would actually run at 4 AM UTC (9:30 AM IST).
+  # NOTE: Cron Job services require a Render plan that supports them -- see
+  # the same note on temple-weekly-backup above if yours doesn't.
+  - type: cron
+    name: temple-daily-report
+    runtime: python
+    schedule: "30 22 * * *"   # 10:30 PM UTC = 4:00 AM IST (next day)
+    buildCommand: pip install -r requirements.txt
+    startCommand: python daily_report.py
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: temple-donation-db
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false   # same value as the web service's SECRET_KEY
+      - key: ORG_NAME
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: MAIL_FROM_ADDRESS
+        sync: false
+      - key: MAIL_FROM_NAME
+        sync: false
+      - key: WHATSAPP_AIRTEL_USERNAME
+        sync: false
+      - key: WHATSAPP_AIRTEL_PASSWORD
+        sync: false
+      - key: WHATSAPP_FROM_NUMBER
+        sync: false
+      - key: WHATSAPP_REPORT_TEMPLATE_ID
+        sync: false
+
 databases:
   - name: temple-donation-db
     plan: basic-256mb   # Render's current entry-level Postgres tier (the old "starter" name was retired)

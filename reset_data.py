@@ -34,7 +34,7 @@ from extensions import db
 from models import (
     Camp, Donation, Donor, Campaign, BaceProperty, Festival, SevaType,
     LiveToGivePurpose, Preacher, AssociatedWith, ReceiptCounter, DonorLoginOTP,
-    AdminActivityLog, AdminUser,
+    AdminActivityLog, AdminUser, DailyReportRecipient,
 )
 
 CONFIRMATION_PHRASE = "DELETE ALL DATA"
@@ -64,6 +64,7 @@ MODELS_IN_DELETE_ORDER = [
     Preacher,
     AssociatedWith,
     Camp,
+    DailyReportRecipient,
     AdminUser,
 ]
 

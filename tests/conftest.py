@@ -44,6 +44,7 @@ def app(tmp_path):
             "WHATSAPP_AIRTEL_PASSWORD": "",
             "WHATSAPP_FROM_NUMBER": "",
             "WHATSAPP_TEMPLATE_ID": "",
+            "WHATSAPP_REPORT_TEMPLATE_ID": "",
             "PUBLIC_BASE_URL": "",
             "SMTP_HOST": "",
 
