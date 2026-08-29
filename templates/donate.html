@@ -56,7 +56,7 @@
         <div class="col-md-6 mb-3">
           <label class="form-label" for="phone">Phone</label>
           <input type="tel" class="form-control" name="phone" id="phone" required
-                 maxlength="10" pattern="[6-9][0-9]{9}" inputmode="numeric" title="10-digit Indian mobile number starting with 6-9">
+                 maxlength="20" pattern="[6-9][0-9]{9}|\+[1-9][0-9]{7,14}" inputmode="tel" title="10-digit Indian mobile number, or + and country code for numbers outside India">
         </div>
         <div class="col-md-6 mb-3">
           <label class="form-label" for="email">Email address</label>

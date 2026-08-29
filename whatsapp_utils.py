@@ -243,10 +243,12 @@ def _headers(cfg):
 
 def _to_e164(phone):
     """Normalizes a stored phone number into the digits-only international
-    format the API expects (e.g. "919876543210"). Mirrors the same "assume
-    India, prefix 91" convention already used for OTP SMS in sms_utils.py --
-    donor phone numbers are collected as plain 10-digit Indian numbers with
-    no country code stored."""
+    format the API expects (e.g. "919876543210"). Two shapes come out of
+    utils.normalize_phone(): a plain 10-digit Indian mobile number (no
+    country code stored -- prefixed with "91" here), or a foreign number
+    already stored as "+<country code><number>" (e.g. "+14155552671") --
+    for that shape, stripping the digits out is already exactly the E.164
+    format Airtel wants, no prefixing needed."""
     digits = "".join(c for c in phone if c.isdigit())
     if len(digits) == 10:
         return f"91{digits}"

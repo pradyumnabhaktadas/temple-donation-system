@@ -513,9 +513,9 @@ def create_order():
     # validity check. Phone is required on the form; whatsapp_number is
     # optional and only checked if the donor actually filled it in.
     if not is_valid_phone(data.get("phone")):
-        return jsonify({"error": "That phone number doesn't look right. Please enter a 10-digit mobile number."}), 400
+        return jsonify({"error": "That phone number doesn't look right. Please enter a 10-digit mobile number, or a foreign number starting with + and country code."}), 400
     if data.get("whatsapp_number") and not is_valid_phone(data.get("whatsapp_number")):
-        return jsonify({"error": "That WhatsApp number doesn't look right. Please enter a 10-digit mobile number."}), 400
+        return jsonify({"error": "That WhatsApp number doesn't look right. Please enter a 10-digit mobile number, or a foreign number starting with + and country code."}), 400
 
     high_value_error = high_value_pan_address_error(amount, pan, data.get("address"))
     if high_value_error:

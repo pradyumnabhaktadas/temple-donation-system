@@ -108,6 +108,22 @@ class TestPhoneNormalization:
         # *recognised* formats, it doesn't guess at garbage.
         assert normalize_phone("12345") == "12345"
 
+    def test_foreign_number_with_plus_is_recognised(self):
+        assert normalize_phone("+1 415 555 2671") == "+14155552671"
+        assert normalize_phone("+44 20 7946 0958") == "+442079460958"
+
+    def test_foreign_number_without_plus_is_left_unchanged(self):
+        # A bare digit string that isn't 10 digits is ambiguous (typo,
+        # landline, garbage) -- only an explicit "+" marks a number as
+        # deliberately foreign, so this is left alone rather than guessed.
+        assert normalize_phone("14155552671") == "14155552671"
+
+    def test_mistyped_indian_number_with_plus_91_not_treated_as_foreign(self):
+        # 91 is India's own ITU calling code -- a "+91..." that isn't
+        # exactly 12 digits total is a typo, never a legitimate foreign
+        # number, so it must NOT be swept into the "+" foreign-number path.
+        assert normalize_phone("+91 88020 812655") == "+91 88020 812655"
+
 
 class TestPhoneValidation:
     def test_blank_is_valid_since_optional(self):
@@ -138,3 +154,19 @@ class TestPhoneValidation:
 
     def test_garbage_rejected(self):
         assert is_valid_phone("abcdefghij") is False
+
+    def test_foreign_number_with_plus_accepted(self):
+        assert is_valid_phone("+1 415 555 2671") is True
+        assert is_valid_phone("+44 20 7946 0958") is True
+
+    def test_foreign_number_without_plus_rejected(self):
+        # Same reasoning as normalize_phone -- a bare digit string that
+        # isn't a 10-digit Indian mobile is ambiguous without an explicit
+        # "+" marking it as foreign, so it's rejected rather than guessed.
+        assert is_valid_phone("14155552671") is False
+
+    def test_too_short_after_plus_rejected(self):
+        assert is_valid_phone("+123") is False
+
+    def test_mistyped_indian_number_with_plus_91_still_rejected(self):
+        assert is_valid_phone("+91 88020 812655") is False

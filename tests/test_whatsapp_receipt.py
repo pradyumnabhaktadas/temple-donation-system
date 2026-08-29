@@ -168,3 +168,9 @@ class TestToE164:
 
     def test_strips_non_digit_formatting(self):
         assert _to_e164("+91 98765-43210") == "919876543210"
+
+    def test_foreign_number_already_carries_its_own_country_code(self):
+        # utils.normalize_phone stores a foreign number as "+<digits>"
+        # (e.g. "+14155552671") -- stripping the "+" is already the
+        # correct E.164 shape Airtel wants, no "91" prefix should be added.
+        assert _to_e164("+14155552671") == "14155552671"

@@ -166,11 +166,23 @@ def normalize_phone(raw):
     donor login (exact phone match) if they log in with a different
     format than the one their donation was originally recorded with.
 
+    FOREIGN NUMBERS: some donations come from donors outside India, whose
+    numbers don't fit the 10-digit-mobile shape at all. Those are
+    recognised too, but only when typed with an explicit "+" country code
+    (e.g. "+1 415 555 2671") -- normalized down to "+<digits>" with
+    spaces/dashes stripped. A bare digit string that isn't 10 digits is
+    left alone rather than guessed at (could be a typo, a landline, or
+    garbage) -- the "+" is what disambiguates "this is deliberately a
+    foreign number" from "this is a malformed Indian one". WhatsApp
+    delivery understands this "+<digits>" shape (see
+    whatsapp_utils._to_e164) and sends to it as-is; OTP login/SMS remain
+    India-only for now (sms_utils.py has no real provider wired up yet
+    regardless of number shape, so there's nothing to special-case there).
+
     Returns the input stripped-but-otherwise-unchanged if it doesn't look
-    like a recognisable Indian mobile number (e.g. a landline, a foreign
-    number, or garbage input) -- this only ever narrows a *recognised*
-    format down to the canonical one, it never guesses at something
-    genuinely ambiguous.
+    like a recognisable Indian mobile number or a "+"-prefixed foreign
+    one -- this only ever narrows a *recognised* format down to the
+    canonical one, it never guesses at something genuinely ambiguous.
     """
     raw = (raw or "").strip()
     digits = "".join(c for c in raw if c.isdigit())
@@ -178,21 +190,37 @@ def normalize_phone(raw):
         digits = digits[2:]
     elif len(digits) == 11 and digits.startswith("0"):
         digits = digits[1:]
-    return digits if len(digits) == 10 else raw
+    if len(digits) == 10:
+        return digits
+
+    # "+91..." that isn't exactly 12 digits total (handled above) is a
+    # mistyped Indian number, not a foreign one -- 91 is India's own ITU
+    # calling code, no other country uses it, so it's deliberately
+    # excluded from being treated as "foreign" here.
+    if raw.startswith("+") and len(digits) >= 8 and not digits.startswith("91"):
+        return "+" + digits
+    return raw
 
 
 PHONE_RE = re.compile(r"^[6-9]\d{9}$")
+# "+" plus 8-15 digits, first digit non-zero -- a loose approximation of
+# ITU E.164 (max 15 digits total including country code). Not a full
+# per-country validator (no library does this well without a maintained
+# metadata table); good enough to catch obvious typos/garbage while still
+# accepting real foreign numbers.
+INTL_PHONE_RE = re.compile(r"^\+[1-9]\d{7,14}$")
 
 
 def is_valid_phone(raw):
     """True if `raw` normalizes (see normalize_phone above) down to a
-    plausible 10-digit Indian mobile number. Catches the two mistakes
-    normalize_phone can't fix on its own because it can't tell a typo from
-    a genuinely unusual number: wrong digit count (a stray extra digit, a
-    digit dropped, a landline/foreign number that isn't 10 digits after
-    stripping) and a non-mobile leading digit (Indian mobile numbers are
-    only ever allotted starting 6/7/8/9 -- TRAI hasn't issued 0/1-5
-    prefixes for mobiles).
+    plausible 10-digit Indian mobile number, OR a "+"-prefixed foreign
+    number. Catches the two mistakes normalize_phone can't fix on its own
+    because it can't tell a typo from a genuinely unusual number: wrong
+    digit count (a stray extra digit, a digit dropped, a landline/foreign
+    number typed without a "+" that isn't 10 digits after stripping) and
+    a non-mobile leading digit (Indian mobile numbers are only ever
+    allotted starting 6/7/8/9 -- TRAI hasn't issued 0/1-5 prefixes for
+    mobiles).
 
     Blank input is treated as *valid* here, same as is_valid_pan --
     both fields are optional in most places this is called; the caller
@@ -204,7 +232,8 @@ def is_valid_phone(raw):
     """
     if not (raw or "").strip():
         return True
-    return bool(PHONE_RE.match(normalize_phone(raw)))
+    normalized = normalize_phone(raw)
+    return bool(PHONE_RE.match(normalized)) or bool(INTL_PHONE_RE.match(normalized))
 
 
 IST_OFFSET = datetime.timedelta(hours=5, minutes=30)

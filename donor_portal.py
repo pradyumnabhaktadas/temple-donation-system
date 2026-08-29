@@ -234,7 +234,7 @@ def account_update():
         return redirect(url_for("donor_portal.account"))
 
     if not is_valid_phone(form.get("whatsapp_number")):
-        flash("That WhatsApp number doesn't look right. Please enter a 10-digit mobile number.")
+        flash("That WhatsApp number doesn't look right. Please enter a 10-digit mobile number, or a foreign number starting with + and country code.")
         return redirect(url_for("donor_portal.account"))
 
     # Phone isn't editable here -- it's the login identity. A donor wanting

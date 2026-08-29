@@ -1162,10 +1162,10 @@ def donor_edit(donor_id):
             return redirect(url_for("admin.donor_edit", donor_id=donor.id))
 
         if not is_valid_phone(form.get("phone")):
-            flash("That phone number doesn't look right. Please enter a 10-digit mobile number.")
+            flash("That phone number doesn't look right. Please enter a 10-digit mobile number, or a foreign number starting with + and country code.")
             return redirect(url_for("admin.donor_edit", donor_id=donor.id))
         if not is_valid_phone(form.get("whatsapp_number")):
-            flash("That WhatsApp number doesn't look right. Please enter a 10-digit mobile number.")
+            flash("That WhatsApp number doesn't look right. Please enter a 10-digit mobile number, or a foreign number starting with + and country code.")
             return redirect(url_for("admin.donor_edit", donor_id=donor.id))
 
         donor.full_name = form.get("full_name", "").strip() or donor.full_name
@@ -2130,10 +2130,10 @@ def manual_donation():
             return redirect(url_for("admin.manual_donation"))
 
         if not is_valid_phone(form.get("phone")):
-            flash("That phone number doesn't look right. Please enter a 10-digit mobile number.")
+            flash("That phone number doesn't look right. Please enter a 10-digit mobile number, or a foreign number starting with + and country code.")
             return redirect(url_for("admin.manual_donation"))
         if not is_valid_phone(form.get("whatsapp_number")):
-            flash("That WhatsApp number doesn't look right. Please enter a 10-digit mobile number.")
+            flash("That WhatsApp number doesn't look right. Please enter a 10-digit mobile number, or a foreign number starting with + and country code.")
             return redirect(url_for("admin.manual_donation"))
 
         high_value_error = high_value_pan_address_error(amount, pan, form.get("address"))
@@ -2560,9 +2560,9 @@ def bulk_import_donations():
         row["pan"] = pan
 
         if not is_valid_phone(row.get("phone")):
-            row_errors.append(f"invalid phone '{row.get('phone')}' (expected a 10-digit mobile number)")
+            row_errors.append(f"invalid phone '{row.get('phone')}' (expected a 10-digit mobile number, or + and country code for a foreign number)")
         if not is_valid_phone(row.get("whatsapp_number")):
-            row_errors.append(f"invalid whatsapp_number '{row.get('whatsapp_number')}' (expected a 10-digit mobile number)")
+            row_errors.append(f"invalid whatsapp_number '{row.get('whatsapp_number')}' (expected a 10-digit mobile number, or + and country code for a foreign number)")
 
         high_value_error = high_value_pan_address_error(amount, pan, row.get("address"))
         if high_value_error:
@@ -2839,9 +2839,9 @@ def import_legacy_donations():
         row["pan"] = pan
 
         if not is_valid_phone(row.get("phone")):
-            row_errors.append(f"invalid phone '{row.get('phone')}' (expected a 10-digit mobile number)")
+            row_errors.append(f"invalid phone '{row.get('phone')}' (expected a 10-digit mobile number, or + and country code for a foreign number)")
         if not is_valid_phone(row.get("whatsapp_number")):
-            row_errors.append(f"invalid whatsapp_number '{row.get('whatsapp_number')}' (expected a 10-digit mobile number)")
+            row_errors.append(f"invalid whatsapp_number '{row.get('whatsapp_number')}' (expected a 10-digit mobile number, or + and country code for a foreign number)")
 
         # Deliberately NOT enforcing high_value_pan_address_error() here --
         # unlike bulk_import_donations/manual_donation (which issue a real
@@ -3215,9 +3215,9 @@ def import_donors():
         row["pan"] = pan
 
         if not is_valid_phone(row.get("phone")):
-            row_errors.append(f"invalid phone '{row.get('phone')}' (expected a 10-digit mobile number)")
+            row_errors.append(f"invalid phone '{row.get('phone')}' (expected a 10-digit mobile number, or + and country code for a foreign number)")
         if not is_valid_phone(row.get("whatsapp_number")):
-            row_errors.append(f"invalid whatsapp_number '{row.get('whatsapp_number')}' (expected a 10-digit mobile number)")
+            row_errors.append(f"invalid whatsapp_number '{row.get('whatsapp_number')}' (expected a 10-digit mobile number, or + and country code for a foreign number)")
 
         donor_type_raw = row.get("donor_type", "").lower()
         if donor_type_raw and donor_type_raw not in DONOR_TYPES:
@@ -3520,7 +3520,7 @@ def daily_report_recipients():
                 return redirect(url_for("admin.daily_report_recipients"))
         else:
             if not is_valid_phone(value):
-                flash(f"'{value}' doesn't look like a valid 10-digit phone number.")
+                flash(f"'{value}' doesn't look like a valid phone number. Use a 10-digit Indian mobile number, or + and country code for a foreign number.")
                 return redirect(url_for("admin.daily_report_recipients"))
             value = normalize_phone(value)
 
@@ -5065,7 +5065,7 @@ def iyf_camp_single():
     # unrelated students to each other on a mistyped phone.
     phone = (form.get("phone") or "").strip()
     if phone and not is_valid_phone(phone):
-        flash("That phone number doesn't look right. Please enter a 10-digit mobile number, or leave it blank.")
+        flash("That phone number doesn't look right. Please enter a 10-digit mobile number, a foreign number starting with + and country code, or leave it blank.")
         return redirect(url_for("admin.iyf_camps"))
 
     donation_date_str = form.get("donation_date")
