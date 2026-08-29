@@ -57,60 +57,79 @@
   </div>
 </form>
 
+{% macro trend_badge(pct) %}
+  {% if pct is not none %}
+    <div class="stat-trend {{ 'trend-up' if pct > 0 else ('trend-down' if pct < 0 else 'trend-flat') }}">
+      {{ '▲' if pct > 0 else ('▼' if pct < 0 else '—') }} {{ '%+.1f'|format(pct) if pct != 0 else '0' }}% vs last period
+    </div>
+  {% endif %}
+{% endmacro %}
+
 <!-- ================= KPI CARDS ================= -->
 <div class="row g-3 mb-4">
   <div class="col-md-3 col-6">
     <div class="stat-card text-center">
-      <div class="stat-label">🙏 Total Donors</div>
+      <div class="stat-icon">🙏</div>
+      <div class="stat-label">Total Donors</div>
       <div class="stat-value">{{ kpis.total_donors }}</div>
     </div>
   </div>
   <div class="col-md-3 col-6">
     <div class="stat-card text-center">
-      <div class="stat-label">✅ Active Donors</div>
+      <div class="stat-icon">✅</div>
+      <div class="stat-label">Active Donors</div>
       <div class="stat-value">{{ kpis.active_donors }}</div>
+      {{ trend_badge(kpis.active_donor_growth_pct) }}
     </div>
   </div>
   <div class="col-md-3 col-6">
     <div class="stat-card text-center">
-      <div class="stat-label">💰 Total Donations</div>
+      <div class="stat-icon">💰</div>
+      <div class="stat-label">Total Donations</div>
       <div class="stat-value">Rs. {{ kpis.total_donations | inr }}</div>
+      {{ trend_badge(kpis.revenue_growth_pct) }}
     </div>
   </div>
   <div class="col-md-3 col-6">
     <div class="stat-card text-center">
-      <div class="stat-label">📅 This Month</div>
+      <div class="stat-icon">📅</div>
+      <div class="stat-label">This Month</div>
       <div class="stat-value">Rs. {{ kpis.this_month | inr }}</div>
     </div>
   </div>
   <div class="col-md-3 col-6">
     <div class="stat-card text-center">
-      <div class="stat-label">🔁 Monthly Recurring Donors</div>
+      <div class="stat-icon">🔁</div>
+      <div class="stat-label">Monthly Recurring Donors</div>
       <div class="stat-value">{{ kpis.monthly_recurring_donors }}</div>
     </div>
   </div>
   <div class="col-md-3 col-6">
     <div class="stat-card text-center">
-      <div class="stat-label">🌱 New Donors</div>
+      <div class="stat-icon">🌱</div>
+      <div class="stat-label">New Donors</div>
       <div class="stat-value">{{ kpis.new_donors }}</div>
+      {{ trend_badge(donor_growth_pct) }}
     </div>
   </div>
   <div class="col-md-3 col-6">
     <div class="stat-card text-center">
-      <div class="stat-label">🎯 Average Donation</div>
+      <div class="stat-icon">🎯</div>
+      <div class="stat-label">Average Donation</div>
       <div class="stat-value">Rs. {{ kpis.avg_donation | inr }}</div>
     </div>
   </div>
   <div class="col-md-3 col-6">
     <div class="stat-card text-center">
-      <div class="stat-label">🧑‍🏫 Preachers</div>
+      <div class="stat-icon">🧑‍🏫</div>
+      <div class="stat-label">Preachers</div>
       <div class="stat-value">{{ kpis.preacher_count }}</div>
     </div>
   </div>
 </div>
 
 <!-- ================= 💰 DONATIONS ================= -->
-<h5 class="mt-4 mb-3">💰 Donations</h5>
+<h5 class="analytics-section-title">💰 Donations</h5>
 
 <div class="card card-body shadow-sm mb-4">
   <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -161,6 +180,33 @@
   </div>
 </div>
 
+<div class="row g-3 mb-4">
+  <div class="col-md-7">
+    <div class="card card-body shadow-sm h-100">
+      <h6 class="mb-3">🏕️ Campaign-wise Collections <small class="text-muted fw-normal">{{ period_label }}</small></h6>
+      {% if campaign_breakdown %}
+      <canvas id="campaignChart" height="{{ (campaign_breakdown|length * 34) + 20 }}"></canvas>
+      {% else %}
+      <p class="text-muted small mb-0">No successful donations in this population for the selected period.</p>
+      {% endif %}
+    </div>
+  </div>
+  <div class="col-md-5">
+    <div class="card card-body shadow-sm h-100">
+      <h6 class="mb-3">💳 Payment Mode <small class="text-muted fw-normal">{{ period_label }}</small></h6>
+      {% for m in payment_mode_breakdown %}
+      <div class="mini-bar-row">
+        <div class="mini-bar-label">{{ m.label }}</div>
+        <div class="mini-bar-track"><div class="mini-bar-fill" style="width: {{ m.pct }}%;"></div></div>
+        <div class="mini-bar-value">Rs. {{ m.amount | inr }}</div>
+      </div>
+      {% else %}
+      <p class="text-muted small mb-0">No successful donations in this population for the selected period.</p>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
 <div class="card card-body shadow-sm mb-4">
   <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h6 class="mb-0">🏆 Top Donors</h6>
@@ -194,7 +240,7 @@
 </div>
 
 <!-- ================= 👥 DONORS ================= -->
-<h5 class="mt-4 mb-3">👥 Donors</h5>
+<h5 class="analytics-section-title">👥 Donors</h5>
 
 <div class="row g-3 mb-4">
   <div class="col-md-4">
@@ -224,7 +270,12 @@
 </div>
 
 <div class="card card-body shadow-sm mb-4">
-  <h6 class="mb-3">Donor Retention</h6>
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h6 class="mb-0">Donor Retention</h6>
+    {% if retention_rate_pct is not none %}
+    <span class="small text-muted">Retention rate (of donors who've ever given): <strong class="text-dark">{{ retention_rate_pct }}%</strong></span>
+    {% endif %}
+  </div>
   <div class="row g-3 mb-3">
     <div class="col-md-3 col-6">
       <div class="stat-card text-center"><div class="stat-label">Active</div><div class="stat-value">{{ retention_counts.active }}</div></div>
@@ -324,22 +375,28 @@
   <div class="col-md-6">
     <div class="card card-body shadow-sm h-100">
       <h6 class="mb-3">📋 Data Completeness</h6>
-      <table class="table table-sm mb-0">
-        <tbody>
-          <tr><td>PAN on file</td><td class="text-end">{{ completeness.pan_pct }}%</td></tr>
-          <tr><td>Complete address</td><td class="text-end">{{ completeness.address_pct }}%</td></tr>
-          <tr><td>Date of birth</td><td class="text-end">{{ completeness.dob_pct }}%</td></tr>
-          <tr><td>Connected preacher</td><td class="text-end">{{ completeness.preacher_pct }}%</td></tr>
-          <tr class="fw-bold"><td>Overall profile complete</td><td class="text-end">{{ completeness.overall_pct }}%</td></tr>
-        </tbody>
-      </table>
+      {% for row_label, pct in [
+        ('PAN on file', completeness.pan_pct), ('Complete address', completeness.address_pct),
+        ('Date of birth', completeness.dob_pct), ('Connected preacher', completeness.preacher_pct),
+      ] %}
+      <div class="mini-bar-row">
+        <div class="mini-bar-label">{{ row_label }}</div>
+        <div class="mini-bar-track"><div class="mini-bar-fill" style="width: {{ pct }}%;"></div></div>
+        <div class="mini-bar-value">{{ pct }}%</div>
+      </div>
+      {% endfor %}
+      <div class="mini-bar-row">
+        <div class="mini-bar-label fw-bold">Overall complete</div>
+        <div class="mini-bar-track"><div class="mini-bar-fill" style="width: {{ completeness.overall_pct }}%; background: var(--saffron-dark);"></div></div>
+        <div class="mini-bar-value">{{ completeness.overall_pct }}%</div>
+      </div>
       <div class="small text-muted mt-2">{{ completeness.incomplete_count }} donor(s) missing 2+ key fields.</div>
     </div>
   </div>
 </div>
 
 <!-- ================= 🧑‍🏫 PREACHERS ================= -->
-<h5 class="mt-4 mb-3">🧑‍🏫 Preachers</h5>
+<h5 class="analytics-section-title">🧑‍🏫 Preachers</h5>
 
 <div class="card card-body shadow-sm mb-4">
   <h6 class="mb-3">Preacher-wise Performance</h6>
@@ -367,9 +424,10 @@
 </div>
 
 <!-- ================= ❤️ FOLLOW-UP ================= -->
-<h5 class="mt-4 mb-3">❤️ Follow-up <small class="text-muted fs-6 fw-normal">🔔 Attention Required</small></h5>
+<h5 class="analytics-section-title">❤️ Follow-up <span class="analytics-section-sub">🔔 Attention Required</span></h5>
 
-<div class="row g-3 mb-4">
+<div class="analytics-followup-panel mb-4">
+<div class="row g-3 mb-3">
   <div class="col-md-3 col-6">
     <div class="stat-card text-center"><div class="stat-label">Overdue Recurring Donors</div><div class="stat-value">{{ followup.overdue_count }}</div></div>
   </div>
@@ -393,7 +451,7 @@
   </div>
 </div>
 
-<div class="card card-body shadow-sm mb-4">
+<div class="card card-body shadow-sm mb-3">
   <h6 class="mb-3">High-Value Donors Requiring Attention</h6>
   <p class="text-muted small">Top-10-lifetime-value donors who are currently At Risk or Inactive.</p>
   <div class="table-responsive">
@@ -414,35 +472,79 @@
   </table>
   </div>
 </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script>
 const chartPalette = ['#1d3b6d', '#e2a33d', '#c8862a', '#3f6ea8', '#4c7a45', '#0f2444', '#f4d9a6', '#0a1930'];
 
+// Shared so every chart on this page shows amounts the same way as the
+// rest of the admin (Rs. with Indian digit grouping) instead of Chart.js's
+// default plain-number ticks/tooltips.
+function formatRupees(value) {
+  return 'Rs. ' + Math.round(value).toLocaleString('en-IN');
+}
+
+Chart.defaults.font.family = "'Inter', 'Segoe UI', sans-serif";
+Chart.defaults.color = '#5c5347';
+
 new Chart(document.getElementById('trendChart'), {
   type: 'bar',
   data: {
     labels: {{ donation_trend | map(attribute='label') | list | tojson }},
-    datasets: [{ label: 'Collection (Rs.)', data: {{ donation_trend | map(attribute='total') | list | tojson }}, backgroundColor: '#1d3b6d', borderRadius: 4 }]
+    datasets: [{ label: 'Collection', data: {{ donation_trend | map(attribute='total') | list | tojson }}, backgroundColor: '#1d3b6d', borderRadius: 4, maxBarThickness: 46 }]
   },
-  options: { plugins: { legend: { display: false } } }
+  options: {
+    plugins: {
+      legend: { display: false },
+      tooltip: { callbacks: { label: (ctx) => formatRupees(ctx.parsed.y) } },
+    },
+    scales: { y: { ticks: { callback: formatRupees }, grid: { color: 'rgba(29,59,109,.06)' } }, x: { grid: { display: false } } },
+  }
 });
 
 new Chart(document.getElementById('donorTypeChart'), {
   type: 'doughnut',
   data: {
     labels: {{ donor_type_breakdown | map(attribute='label') | list | tojson }},
-    datasets: [{ data: {{ donor_type_breakdown | map(attribute='donors') | list | tojson }}, backgroundColor: chartPalette }]
-  }
+    datasets: [{ data: {{ donor_type_breakdown | map(attribute='donors') | list | tojson }}, backgroundColor: chartPalette, borderWidth: 2, borderColor: '#fff' }]
+  },
+  options: { cutout: '62%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, padding: 12 } } } }
 });
 
 new Chart(document.getElementById('growthChart'), {
   type: 'line',
   data: {
     labels: {{ growth_trend | map(attribute='label') | list | tojson }},
-    datasets: [{ label: 'New Donors', data: {{ growth_trend | map(attribute='new') | list | tojson }}, borderColor: '#4c7a45', backgroundColor: 'rgba(76,122,69,.12)', fill: true, tension: .3 }]
+    datasets: [{ label: 'New Donors', data: {{ growth_trend | map(attribute='new') | list | tojson }}, borderColor: '#4c7a45', backgroundColor: 'rgba(76,122,69,.12)', fill: true, tension: .3, pointRadius: 3, pointBackgroundColor: '#4c7a45' }]
   },
-  options: { plugins: { legend: { display: false } } }
+  options: {
+    plugins: { legend: { display: false } },
+    scales: { y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: 'rgba(29,59,109,.06)' } }, x: { grid: { display: false } } },
+  }
 });
+
+{% if campaign_breakdown %}
+new Chart(document.getElementById('campaignChart'), {
+  type: 'bar',
+  data: {
+    labels: {{ campaign_breakdown | map(attribute='name') | list | tojson }},
+    datasets: [{
+      label: 'Collection',
+      data: {{ campaign_breakdown | map(attribute='amount') | list | tojson }},
+      backgroundColor: chartPalette,
+      borderRadius: 4,
+    }]
+  },
+  options: {
+    indexAxis: 'y',
+    plugins: {
+      legend: { display: false },
+      tooltip: { callbacks: { label: (ctx) => formatRupees(ctx.parsed.x) } },
+    },
+    scales: { x: { ticks: { callback: formatRupees }, grid: { color: 'rgba(29,59,109,.06)' } }, y: { grid: { display: false } } },
+  }
+});
+{% endif %}
 </script>
 {% endblock %}

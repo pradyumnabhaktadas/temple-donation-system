@@ -666,30 +666,57 @@ def analytics():
     if top_scope not in ("lifetime", "period"):
         top_scope = "lifetime"
 
-    # Every successful donation by a population-filtered donor, pulled
-    # once as (donor_id, amount, plain date) tuples -- everything below
-    # slices this same list rather than re-querying.
+    # Every successful donation by a population-filtered donor, pulled once
+    # as (donor_id, amount, plain date, campaign name, payment mode) tuples
+    # -- everything below slices this same list rather than re-querying.
+    # campaign/payment_mode ride along on this one pull (rather than a
+    # second query) purely so Campaign-wise Collections and Payment Mode
+    # further down don't need their own round trip; an outer join to
+    # Campaign so a donation somehow missing its campaign still counts
+    # toward every other total instead of silently vanishing.
     all_pop_donations = []
     if population_donor_ids:
-        for did, amt, dt in (
-            db.session.query(Donation.donor_id, Donation.amount, Donation.donation_date)
+        for did, amt, dt, campaign_name, payment_mode in (
+            db.session.query(
+                Donation.donor_id, Donation.amount, Donation.donation_date,
+                Campaign.name, Donation.payment_mode,
+            )
+            .outerjoin(Campaign, Campaign.id == Donation.campaign_id)
             .filter(Donation.status == "success", Donation.donor_id.in_(population_donor_ids))
             .all()
         ):
             d = dt.date() if hasattr(dt, "date") else dt
-            all_pop_donations.append((did, float(amt), d))
+            all_pop_donations.append((did, float(amt), d, campaign_name or "Unknown", payment_mode or "unknown"))
 
-    period_donation_rows = [(did, amt) for did, amt, d in all_pop_donations if period_start <= d < period_end]
+    period_donation_rows = [(did, amt) for did, amt, d, *_r in all_pop_donations if period_start <= d < period_end]
     total_donations_amount = sum(amt for _, amt in period_donation_rows)
     active_donor_ids = {did for did, _ in period_donation_rows}
     donation_count_in_period = len(period_donation_rows)
     avg_donation_in_period = (total_donations_amount / donation_count_in_period) if donation_count_in_period else 0
 
+    # Previous equivalent-length period, immediately before this one --
+    # shared by every "vs last period" comparison below (revenue, active
+    # donors, and further down, new donors) so there's exactly one
+    # definition of "previous period" on the page.
+    prev_period_len = (period_end - period_start).days
+    prev_period_start = period_start - datetime.timedelta(days=prev_period_len)
+    prev_period_rows = [(did, amt) for did, amt, d, *_r in all_pop_donations if prev_period_start <= d < period_start]
+    prev_period_amount = sum(amt for _, amt in prev_period_rows)
+    prev_active_donor_ids = {did for did, _ in prev_period_rows}
+
+    def _pct_change(current, previous):
+        if not previous:
+            return None
+        return round((current - previous) / previous * 100, 1)
+
+    revenue_growth_pct = _pct_change(total_donations_amount, prev_period_amount)
+    active_donor_growth_pct = _pct_change(len(active_donor_ids), len(prev_active_donor_ids))
+
     this_month_start = today.replace(day=1)
-    this_month_total = sum(amt for _, amt, d in all_pop_donations if d >= this_month_start)
+    this_month_total = sum(amt for _, amt, d, *_r in all_pop_donations if d >= this_month_start)
 
     first_donation_date, last_donation_date = {}, {}
-    for did, amt, d in all_pop_donations:
+    for did, amt, d, *_r in all_pop_donations:
         if did not in first_donation_date or d < first_donation_date[did]:
             first_donation_date[did] = d
         if did not in last_donation_date or d > last_donation_date[did]:
@@ -713,6 +740,11 @@ def analytics():
         "new_donors": new_donors_count,
         "avg_donation": avg_donation_in_period,
         "preacher_count": len({d.connected_preacher_id for d in donors_all if d.connected_preacher_id}),
+        # vs the immediately preceding period of the same length -- None
+        # (rendered as no badge at all) when there's nothing to compare
+        # against, e.g. the very first period this campaign/donor existed.
+        "revenue_growth_pct": revenue_growth_pct,
+        "active_donor_growth_pct": active_donor_growth_pct,
     }
 
     # ================= 2. DONATION TREND =================
@@ -740,7 +772,7 @@ def analytics():
 
     donation_trend = []
     for label, bstart, bend in trend_buckets:
-        bucket_rows = [amt for _, amt, d in all_pop_donations if bstart <= d < bend]
+        bucket_rows = [amt for _, amt, d, *_r in all_pop_donations if bstart <= d < bend]
         donation_trend.append({"label": label, "total": sum(bucket_rows), "count": len(bucket_rows)})
 
     # ================= 3. DONOR TYPE ANALYTICS =================
@@ -777,6 +809,50 @@ def analytics():
         for f in DONATION_FREQUENCIES
     ]
 
+    # ================= 4b. CAMPAIGN & PAYMENT MODE (period) =================
+    # Which campaigns and which payment channels the period's money actually
+    # came through -- previously the only "where did the money come from"
+    # view was one campaign at a time (Donations Log filters, or each
+    # campaign's own dedicated admin page); nothing rolled them up side by
+    # side. Deliberately period-scoped like the KPI cards/Donation Trend
+    # above (not lifetime) so campaign_grand_total below ties out exactly
+    # to the "Total Donations" KPI as a sanity check.
+    campaign_totals, payment_mode_totals = {}, {}
+    for did, amt, d, campaign_name, payment_mode in all_pop_donations:
+        if not (period_start <= d < period_end):
+            continue
+        campaign_totals.setdefault(campaign_name, {"amount": 0.0, "count": 0})
+        campaign_totals[campaign_name]["amount"] += amt
+        campaign_totals[campaign_name]["count"] += 1
+        payment_mode_totals.setdefault(payment_mode, {"amount": 0.0, "count": 0})
+        payment_mode_totals[payment_mode]["amount"] += amt
+        payment_mode_totals[payment_mode]["count"] += 1
+
+    campaign_grand_total = sum(v["amount"] for v in campaign_totals.values()) or 1.0
+    campaign_breakdown = sorted(
+        [
+            {
+                "name": name, "amount": v["amount"], "count": v["count"],
+                "pct": round(v["amount"] / campaign_grand_total * 100, 1),
+            }
+            for name, v in campaign_totals.items()
+        ],
+        key=lambda r: r["amount"], reverse=True,
+    )
+
+    payment_mode_grand_total = sum(v["amount"] for v in payment_mode_totals.values()) or 1.0
+    payment_mode_breakdown = sorted(
+        [
+            {
+                "mode": mode, "label": mode.replace("_", " ").title(),
+                "amount": v["amount"], "count": v["count"],
+                "pct": round(v["amount"] / payment_mode_grand_total * 100, 1),
+            }
+            for mode, v in payment_mode_totals.items()
+        ],
+        key=lambda r: r["amount"], reverse=True,
+    )
+
     # ================= 5. PREACHER-WISE PERFORMANCE =================
     donors_by_preacher = {}
     for d in donors_all:
@@ -788,7 +864,7 @@ def analytics():
         if not p_donors:
             continue
         p_ids = {d.id for d in p_donors}
-        lifetime_rows = [amt for did, amt, d in all_pop_donations if did in p_ids]
+        lifetime_rows = [amt for did, amt, d, *_r in all_pop_donations if did in p_ids]
         lifetime_total = sum(lifetime_rows)
         lifetime_count = len(lifetime_rows)
         preacher_performance.append({
@@ -818,12 +894,11 @@ def analytics():
         count = sum(1 for d in first_donation_date.values() if bucket_start <= d < bucket_end)
         growth_trend.append({"label": bucket_start.strftime("%b %Y"), "new": count})
 
-    prev_period_len = (period_end - period_start).days
-    prev_period_start = period_start - datetime.timedelta(days=prev_period_len)
+    # prev_period_start/prev_period_len: shared with the revenue/active-donor
+    # comparisons computed earlier, so there's exactly one definition of
+    # "previous period" on this page.
     prev_period_new = sum(1 for d in first_donation_date.values() if prev_period_start <= d < period_start)
-    donor_growth_pct = None
-    if prev_period_new > 0:
-        donor_growth_pct = round((new_donors_count - prev_period_new) / prev_period_new * 100, 1)
+    donor_growth_pct = _pct_change(new_donors_count, prev_period_new)
 
     # ================= 7. DONOR RETENTION =================
     retention_counts = {"active": 0, "at_risk": 0, "inactive": 0, "never": 0}
@@ -838,6 +913,12 @@ def analytics():
                 "days_since": (today - last_date).days if last_date else None,
             })
     at_risk_list.sort(key=lambda r: r["days_since"] or 0, reverse=True)
+    # Of donors who have given at least once (excludes "never"), what
+    # share are currently active -- a single summary number for the
+    # Retention card, since four raw counts side by side don't say on
+    # their own whether that's a healthy mix or a lot of drop-off.
+    ever_donated = retention_counts["active"] + retention_counts["at_risk"] + retention_counts["inactive"]
+    retention_rate_pct = round(retention_counts["active"] / ever_donated * 100, 1) if ever_donated else None
 
     # ================= 8. BIRTHDAYS & ANNIVERSARIES =================
     donors_with_dates = [
@@ -915,7 +996,7 @@ def analytics():
         if (today - fdate).days <= 30 and donor_by_id.get(did) and not donor_by_id[did].connected_preacher_id
     )
     lifetime_totals_by_donor = {}
-    for did, amt, d in all_pop_donations:
+    for did, amt, d, *_r in all_pop_donations:
         lifetime_totals_by_donor[did] = lifetime_totals_by_donor.get(did, 0) + amt
     sorted_totals = sorted(lifetime_totals_by_donor.values(), reverse=True)
     high_value_cutoff = sorted_totals[9] if len(sorted_totals) >= 10 else (sorted_totals[-1] if sorted_totals else 0)
@@ -936,7 +1017,7 @@ def analytics():
     }
 
     # ================= 12. TOP DONORS =================
-    totals_source = period_donation_rows if top_scope == "period" else [(did, amt) for did, amt, d in all_pop_donations]
+    totals_source = period_donation_rows if top_scope == "period" else [(did, amt) for did, amt, d, *_r in all_pop_donations]
     totals_by_donor, counts_by_donor = {}, {}
     for did, amt in totals_source:
         totals_by_donor[did] = totals_by_donor.get(did, 0) + amt
@@ -963,10 +1044,12 @@ def analytics():
         trend_granularity=trend_granularity, donation_trend=donation_trend,
         donor_type_breakdown=donor_type_breakdown,
         frequency_breakdown=frequency_breakdown,
+        campaign_breakdown=campaign_breakdown,
+        payment_mode_breakdown=payment_mode_breakdown,
         preacher_performance=preacher_performance,
         new_this_month=new_this_month, new_this_quarter=new_this_quarter, new_this_year=new_this_year,
         donor_growth_pct=donor_growth_pct, growth_trend=growth_trend,
-        retention_counts=retention_counts, at_risk_list=at_risk_list[:25],
+        retention_counts=retention_counts, retention_rate_pct=retention_rate_pct, at_risk_list=at_risk_list[:25],
         upcoming_7=upcoming_7, upcoming_30=upcoming_30[:25], birthday_month_counts=birthday_month_counts,
         geography=geography,
         completeness=completeness,
