@@ -21,6 +21,7 @@ from models import (
     Camp,
     Donor, Campaign, Donation, AdminUser, ReceiptCounter, BaceProperty, Festival, SevaType,
     LiveToGivePurpose, Preacher, AssociatedWith, AdminActivityLog, DailyReportRecipient,
+    REPORT_FREQUENCIES,
     DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES, DONATION_FREQUENCY_LABELS,
 )
 from utils import csv_safe_row, get_financial_year, is_valid_pan, is_valid_phone, normalize_phone, now_ist, to_ist
@@ -3510,8 +3511,12 @@ def daily_report_recipients():
     if request.method == "POST":
         contact_type = request.form.get("contact_type", "").strip()
         value = request.form.get("value", "").strip()
+        frequency = request.form.get("frequency", "daily").strip() or "daily"
         if contact_type not in ("email", "whatsapp"):
             flash("Choose a valid contact type.")
+            return redirect(url_for("admin.daily_report_recipients"))
+        if frequency not in REPORT_FREQUENCIES:
+            flash("Choose a valid frequency.")
             return redirect(url_for("admin.daily_report_recipients"))
 
         if contact_type == "email":
@@ -3528,8 +3533,8 @@ def daily_report_recipients():
             flash(f"'{value}' is already on the {contact_type} list.")
             return redirect(url_for("admin.daily_report_recipients"))
 
-        db.session.add(DailyReportRecipient(contact_type=contact_type, value=value))
-        log_activity("daily_report_recipient_add", target_type="daily_report_recipient", details=f"{contact_type}:{value}")
+        db.session.add(DailyReportRecipient(contact_type=contact_type, value=value, frequency=frequency))
+        log_activity("daily_report_recipient_add", target_type="daily_report_recipient", details=f"{contact_type}:{value}:{frequency}")
         db.session.commit()
         flash(f"Added {value} to the daily report {contact_type} list.")
         return redirect(url_for("admin.daily_report_recipients"))
@@ -3537,7 +3542,11 @@ def daily_report_recipients():
     recipients = DailyReportRecipient.query.order_by(
         DailyReportRecipient.contact_type, DailyReportRecipient.value
     ).all()
-    return render_template("admin/daily_report_recipients.html", recipients=recipients)
+    return render_template(
+        "admin/daily_report_recipients.html",
+        recipients=recipients,
+        frequencies=REPORT_FREQUENCIES,
+    )
 
 
 @bp.route("/daily-report-recipients/<int:recipient_id>/toggle", methods=["POST"])
@@ -3547,6 +3556,26 @@ def toggle_daily_report_recipient(recipient_id):
     recipient = DailyReportRecipient.query.get_or_404(recipient_id)
     recipient.is_active = not recipient.is_active
     db.session.commit()
+    return redirect(url_for("admin.daily_report_recipients"))
+
+
+@bp.route("/daily-report-recipients/<int:recipient_id>/frequency", methods=["POST"])
+@login_required
+@admin_role_required
+def update_daily_report_recipient_frequency(recipient_id):
+    recipient = DailyReportRecipient.query.get_or_404(recipient_id)
+    frequency = request.form.get("frequency", "").strip()
+    if frequency not in REPORT_FREQUENCIES:
+        flash("Choose a valid frequency.")
+        return redirect(url_for("admin.daily_report_recipients"))
+    recipient.frequency = frequency
+    log_activity(
+        "daily_report_recipient_frequency_update",
+        target_type="daily_report_recipient",
+        details=f"{recipient.contact_type}:{recipient.value} -> {frequency}",
+    )
+    db.session.commit()
+    flash(f"Updated {recipient.value} to {frequency}.")
     return redirect(url_for("admin.daily_report_recipients"))
 
 

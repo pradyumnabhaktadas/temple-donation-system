@@ -230,6 +230,18 @@ class BaceProperty(db.Model):
         return f"<BaceProperty {self.name}>"
 
 
+# DailyReportRecipient.frequency values -- how often this recipient gets
+# the report, independent of every other recipient. The report itself
+# always computes the same today/week/month figures regardless of
+# frequency; this only controls how often a given recipient is mailed/
+# WhatsApp'd it. See daily_report_utils._recipient_is_due() for the exact
+# cadence each of these maps to.
+REPORT_FREQUENCIES = ["daily", "weekly", "fortnightly", "monthly"]
+REPORT_FREQUENCY_LABELS = {
+    "daily": "Daily", "weekly": "Weekly", "fortnightly": "Fortnightly", "monthly": "Monthly",
+}
+
+
 class DailyReportRecipient(db.Model):
     """Who the 4 AM daily collection report (today/week/month/campaign-wise
     totals -- see daily_report_utils.py) gets sent to. Editable from Admin ->
@@ -239,13 +251,20 @@ class DailyReportRecipient(db.Model):
     `contact_type` is "email" or "whatsapp"; `value` is the address or
     10-digit phone number accordingly (WhatsApp send is demo-mode/no-op
     until a report-specific Airtel template is approved and
-    WHATSAPP_REPORT_TEMPLATE_ID is set -- see whatsapp_utils.py)."""
+    WHATSAPP_REPORT_TEMPLATE_ID is set -- see whatsapp_utils.py).
+
+    `frequency` (see REPORT_FREQUENCIES above) is per-recipient, not
+    per-account -- one email can get it daily while another gets it only
+    monthly. The job itself still runs every day at 4 AM regardless; it's
+    daily_report_utils.send_report() that decides, per recipient, whether
+    today is their day."""
 
     __tablename__ = "daily_report_recipients"
 
     id = db.Column(db.Integer, primary_key=True)
     contact_type = db.Column(db.String(20), nullable=False)  # "email" or "whatsapp"
     value = db.Column(db.String(150), nullable=False)
+    frequency = db.Column(db.String(20), nullable=False, default="daily")
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
@@ -254,7 +273,7 @@ class DailyReportRecipient(db.Model):
     )
 
     def __repr__(self):
-        return f"<DailyReportRecipient {self.contact_type}:{self.value}>"
+        return f"<DailyReportRecipient {self.contact_type}:{self.value} ({self.frequency})>"
 
 
 class Festival(db.Model):

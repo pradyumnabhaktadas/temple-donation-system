@@ -136,6 +136,28 @@ def _render_email_html(data, org_name):
     """
 
 
+def _recipient_is_due(recipient, report_date):
+    """Whether this recipient should receive the report for report_date,
+    given their configured frequency. The cron job still runs every day --
+    this is what turns that daily trigger into a weekly/fortnightly/monthly
+    one per recipient.
+
+    Anchors: weekly and fortnightly fire on Mondays (weekday() == 0);
+    fortnightly further restricts to even ISO week numbers, so it's every
+    other Monday rather than "every Monday" (which would just be weekly).
+    Monthly fires on the 1st of the calendar month. daily always fires."""
+    frequency = getattr(recipient, "frequency", "daily") or "daily"
+    if frequency == "daily":
+        return True
+    if frequency == "weekly":
+        return report_date.weekday() == 0
+    if frequency == "fortnightly":
+        return report_date.weekday() == 0 and report_date.isocalendar()[1] % 2 == 0
+    if frequency == "monthly":
+        return report_date.day == 1
+    return True  # unknown frequency value -- fail open rather than silently drop
+
+
 def send_report(app, report_date=None, force=False):
     """Computes the report and delivers it to every active recipient.
     Returns a result dict (used by daily_report.py's printed summary and by
@@ -161,8 +183,9 @@ def send_report(app, report_date=None, force=False):
 
     org_name = app.config.get("ORG_NAME") or "the temple"
     recipients = DailyReportRecipient.query.filter_by(is_active=True).all()
-    email_recipients = [r.value for r in recipients if r.contact_type == "email"]
-    whatsapp_recipients = [r.value for r in recipients if r.contact_type == "whatsapp"]
+    due_recipients = [r for r in recipients if _recipient_is_due(r, data["report_date"])]
+    email_recipients = [r.value for r in due_recipients if r.contact_type == "email"]
+    whatsapp_recipients = [r.value for r in due_recipients if r.contact_type == "whatsapp"]
 
     email_sent = False
     email_error = None

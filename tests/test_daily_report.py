@@ -126,6 +126,77 @@ class TestDailyReportRecipientCRUD:
         )
         assert b"requires an administrator account" in resp.data
 
+    def test_add_recipient_defaults_to_daily_frequency(self, app, client):
+        login(client)
+        client.post(
+            "/admin/daily-report-recipients",
+            data={"contact_type": "email", "value": "nofreq@example.org"},
+            follow_redirects=True,
+        )
+        from models import DailyReportRecipient
+        with app.app_context():
+            r = DailyReportRecipient.query.filter_by(value="nofreq@example.org").first()
+            assert r.frequency == "daily"
+
+    def test_add_recipient_with_explicit_frequency(self, app, client):
+        login(client)
+        client.post(
+            "/admin/daily-report-recipients",
+            data={"contact_type": "email", "value": "weekly@example.org", "frequency": "weekly"},
+            follow_redirects=True,
+        )
+        from models import DailyReportRecipient
+        with app.app_context():
+            r = DailyReportRecipient.query.filter_by(value="weekly@example.org").first()
+            assert r.frequency == "weekly"
+
+    def test_invalid_frequency_is_rejected(self, app, client):
+        login(client)
+        client.post(
+            "/admin/daily-report-recipients",
+            data={"contact_type": "email", "value": "badfreq@example.org", "frequency": "yearly"},
+            follow_redirects=True,
+        )
+        from models import DailyReportRecipient
+        with app.app_context():
+            assert DailyReportRecipient.query.filter_by(value="badfreq@example.org").first() is None
+
+    def test_admin_can_update_frequency(self, app, client):
+        from extensions import db
+        from models import DailyReportRecipient
+        with app.app_context():
+            r = DailyReportRecipient(contact_type="email", value="change@example.org")
+            db.session.add(r)
+            db.session.commit()
+            rid = r.id
+
+        login(client)
+        client.post(
+            f"/admin/daily-report-recipients/{rid}/frequency",
+            data={"frequency": "monthly"},
+            follow_redirects=True,
+        )
+        with app.app_context():
+            assert DailyReportRecipient.query.get(rid).frequency == "monthly"
+
+    def test_invalid_frequency_update_is_rejected(self, app, client):
+        from extensions import db
+        from models import DailyReportRecipient
+        with app.app_context():
+            r = DailyReportRecipient(contact_type="email", value="keep@example.org", frequency="weekly")
+            db.session.add(r)
+            db.session.commit()
+            rid = r.id
+
+        login(client)
+        client.post(
+            f"/admin/daily-report-recipients/{rid}/frequency",
+            data={"frequency": "hourly"},
+            follow_redirects=True,
+        )
+        with app.app_context():
+            assert DailyReportRecipient.query.get(rid).frequency == "weekly"
+
 
 class TestComputeReport:
     def test_day_week_month_buckets_and_campaign_breakdown(self, app):
@@ -197,6 +268,52 @@ class TestComputeReport:
             assert data["today"]["amount"] == 0
             assert data["today"]["count"] == 0
             assert data["today"]["campaigns"] == []
+
+
+class TestRecipientIsDue:
+    """_recipient_is_due() -- the cron job runs every day at 4 AM regardless;
+    this is what turns that into weekly/fortnightly/monthly per recipient.
+    Anchors: weekly/fortnightly fire on Mondays, fortnightly further
+    restricts to even ISO week numbers, monthly fires on the 1st."""
+
+    MONDAY_ODD_WEEK = datetime.date(2026, 8, 24)     # Monday, ISO week 35 (odd)
+    MONDAY_EVEN_WEEK = datetime.date(2026, 8, 31)    # Monday, ISO week 36 (even)
+    MONDAY_NEXT_ODD_WEEK = datetime.date(2026, 9, 7)  # Monday, ISO week 37 (odd)
+    WEDNESDAY = datetime.date(2026, 8, 26)
+    FIRST_OF_MONTH_NOT_MONDAY = datetime.date(2026, 9, 1)  # Tuesday
+
+    def _recipient(self, frequency):
+        from models import DailyReportRecipient
+        return DailyReportRecipient(contact_type="email", value="x@example.org", frequency=frequency)
+
+    def test_daily_is_always_due(self):
+        from daily_report_utils import _recipient_is_due
+        r = self._recipient("daily")
+        assert _recipient_is_due(r, self.WEDNESDAY) is True
+        assert _recipient_is_due(r, self.MONDAY_ODD_WEEK) is True
+        assert _recipient_is_due(r, self.FIRST_OF_MONTH_NOT_MONDAY) is True
+
+    def test_weekly_is_due_only_on_monday(self):
+        from daily_report_utils import _recipient_is_due
+        r = self._recipient("weekly")
+        assert _recipient_is_due(r, self.MONDAY_ODD_WEEK) is True
+        assert _recipient_is_due(r, self.MONDAY_EVEN_WEEK) is True
+        assert _recipient_is_due(r, self.WEDNESDAY) is False
+
+    def test_fortnightly_is_due_only_every_other_monday(self):
+        from daily_report_utils import _recipient_is_due
+        r = self._recipient("fortnightly")
+        assert _recipient_is_due(r, self.MONDAY_EVEN_WEEK) is True
+        assert _recipient_is_due(r, self.MONDAY_ODD_WEEK) is False
+        assert _recipient_is_due(r, self.MONDAY_NEXT_ODD_WEEK) is False
+        assert _recipient_is_due(r, self.WEDNESDAY) is False
+
+    def test_monthly_is_due_only_on_the_first(self):
+        from daily_report_utils import _recipient_is_due
+        r = self._recipient("monthly")
+        assert _recipient_is_due(r, self.FIRST_OF_MONTH_NOT_MONDAY) is True
+        assert _recipient_is_due(r, self.MONDAY_ODD_WEEK) is False
+        assert _recipient_is_due(r, self.WEDNESDAY) is False
 
 
 class TestSendReport:
@@ -282,3 +399,28 @@ class TestSendReport:
             assert result["email_recipients"] == []
             assert result["whatsapp_recipients"] == []
             assert result["email_sent"] is False
+
+    def test_non_daily_recipients_are_skipped_on_off_days_and_included_on_due_days(self, app, monkeypatch):
+        """A weekly recipient shouldn't get the report on a Wednesday, but
+        should on a Monday -- the cron job runs every day regardless, so
+        this is the actual behavior the feature exists for."""
+        from extensions import db
+        from models import DailyReportRecipient
+
+        with app.app_context():
+            monkeypatch.setattr("email_utils.send_daily_report_email", lambda *a, **k: True)
+            monkeypatch.setattr("whatsapp_utils.send_daily_report_whatsapp", lambda *a, **k: True)
+
+            db.session.add(DailyReportRecipient(
+                contact_type="email", value="daily@example.org", frequency="daily"))
+            db.session.add(DailyReportRecipient(
+                contact_type="email", value="weekly@example.org", frequency="weekly"))
+            db.session.commit()
+
+            from daily_report_utils import send_report
+
+            wednesday = send_report(app, report_date=datetime.date(2026, 8, 26))
+            assert wednesday["email_recipients"] == ["daily@example.org"]
+
+            monday = send_report(app, report_date=datetime.date(2026, 8, 31), force=True)
+            assert sorted(monday["email_recipients"]) == ["daily@example.org", "weekly@example.org"]

@@ -5,8 +5,10 @@
   <h3 class="mb-0">📊 Daily Report Recipients</h3>
 </div>
 <p class="text-muted">
-  Everyone listed here gets the daily collection report (today's / this week's / this month's
+  Everyone listed here gets the collection report (today's / this week's / this month's
   collection, plus a campaign-wise breakdown) automatically at 4:00 AM, by email and WhatsApp.
+  The job runs daily, but each recipient can be set to Daily, Weekly (Mondays), Fortnightly
+  (every other Monday) or Monthly (the 1st) -- change it any time from the dropdown below.
 </p>
 
 <div class="row">
@@ -26,6 +28,15 @@
           <label class="form-label" for="value">Email address or 10-digit phone number</label>
           <input type="text" class="form-control" name="value" id="value" placeholder="e.g. treasurer@example.com or 9876543210" required>
         </div>
+        <div class="mb-2">
+          <label class="form-label" for="frequency">How often</label>
+          <select class="form-select" name="frequency" id="frequency">
+            <option value="daily" selected>Daily</option>
+            <option value="weekly">Weekly (Mondays)</option>
+            <option value="fortnightly">Fortnightly (every other Monday)</option>
+            <option value="monthly">Monthly (1st of the month)</option>
+          </select>
+        </div>
         <button class="btn btn-gold btn-sm">Add</button>
       </form>
     </div>
@@ -41,7 +52,15 @@
             {% if r.is_active %}<span class="badge bg-success">Active</span>{% else %}<span class="badge bg-secondary">Inactive</span>{% endif %}
           </div>
         </div>
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 align-items-center">
+          <form method="post" action="{{ url_for('admin.update_daily_report_recipient_frequency', recipient_id=r.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <select class="form-select form-select-sm" name="frequency" onchange="this.form.submit()">
+              {% for f in frequencies %}
+              <option value="{{ f }}" {% if r.frequency == f %}selected{% endif %}>{{ f|capitalize }}</option>
+              {% endfor %}
+            </select>
+          </form>
           <form method="post" action="{{ url_for('admin.toggle_daily_report_recipient', recipient_id=r.id) }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="btn btn-sm btn-outline-secondary">{{ 'Deactivate' if r.is_active else 'Activate' }}</button>
