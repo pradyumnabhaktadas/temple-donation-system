@@ -206,6 +206,18 @@ def send_daily_report_whatsapp(cfg, phone, report_data, org_name):
                 phone, resp.status_code, resp.text[:500],
             )
             return False
+        # Airtel returning 2xx here only means the request was *accepted*,
+        # not that WhatsApp actually delivered it (a template mismatch, an
+        # unreachable/DND number, or a template still propagating on
+        # Airtel's side after approval can all silently drop it downstream
+        # with no error back to us) -- log the response body so a "the
+        # script says sent but nothing arrived" report can be cross-checked
+        # against this message/status id in Airtel's WhatsApp Manager
+        # dashboard instead of being a dead end.
+        current_app.logger.info(
+            "WhatsApp (Airtel) daily report accepted for %s: %s %s",
+            phone, resp.status_code, resp.text[:500],
+        )
         return True
     except Exception:
         current_app.logger.exception("Failed to send WhatsApp daily report to %s", phone)
