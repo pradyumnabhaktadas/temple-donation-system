@@ -75,7 +75,7 @@ import uuid
 import requests
 from flask import current_app
 
-from utils import receipt_access_token
+from utils import format_inr, receipt_access_token
 
 
 DEFAULT_AIRTEL_BASE_URL = "https://iqwhatsapp.airtel.in/gateway/airtel-xchange/basic/whatsapp-manager/v1/template/send"
@@ -179,7 +179,13 @@ def send_daily_report_whatsapp(cfg, phone, report_data, org_name):
         report_date = report_data["report_date"]
 
         def fmt(period):
-            return f"Rs. {period['amount']:,.2f} ({period['count']} donations)"
+            # Matches the exact sample values ("Rs.12,500") the template was
+            # submitted for approval with -- Indian digit grouping via
+            # format_inr, no decimals, no space after "Rs.". Free-text
+            # template variables aren't usually validated against their
+            # approval-time sample, but there's no reason to risk it when
+            # matching costs nothing.
+            return f"Rs.{format_inr(period['amount'])}"
 
         payload = {
             "templateId": template_id,
@@ -190,7 +196,7 @@ def send_daily_report_whatsapp(cfg, phone, report_data, org_name):
                 # {{1}}..{{5}} order exactly -- see this module's docstring.
                 "variables": [
                     org_name[:60],
-                    report_date.strftime("%d %b %Y"),
+                    report_date.strftime("%d-%b-%Y"),
                     fmt(report_data["today"])[:100],
                     fmt(report_data["week"])[:100],
                     fmt(report_data["month"])[:100],

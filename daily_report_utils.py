@@ -136,23 +136,6 @@ def _render_email_html(data, org_name):
     """
 
 
-def _render_whatsapp_text(data, org_name):
-    lines = [
-        f"*{org_name} -- Daily Collection Report*",
-        f"For {data['report_date'].strftime('%d %b %Y')}",
-        "",
-        f"Today: Rs. {format_inr(data['today']['amount'])} ({data['today']['count']} donations)",
-        f"This week: Rs. {format_inr(data['week']['amount'])} ({data['week']['count']} donations)",
-        f"This month: Rs. {format_inr(data['month']['amount'])} ({data['month']['count']} donations)",
-    ]
-    if data["today"]["campaigns"]:
-        lines.append("")
-        lines.append("Today by campaign:")
-        for c in data["today"]["campaigns"]:
-            lines.append(f"- {c['name']}: Rs. {format_inr(c['amount'])} ({c['pct']}%)")
-    return "\n".join(lines)
-
-
 def send_report(app, report_date=None, force=False):
     """Computes the report and delivers it to every active recipient.
     Returns a result dict (used by daily_report.py's printed summary and by
