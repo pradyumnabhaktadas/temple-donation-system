@@ -75,7 +75,7 @@ import uuid
 import requests
 from flask import current_app
 
-from utils import format_inr, receipt_access_token
+from utils import format_inr, receipt_access_token, retry
 
 
 DEFAULT_AIRTEL_BASE_URL = "https://iqwhatsapp.airtel.in/gateway/airtel-xchange/basic/whatsapp-manager/v1/template/send"
@@ -203,15 +203,28 @@ def send_daily_report_whatsapp(cfg, phone, report_data, org_name):
                 ]
             },
         }
-        resp = requests.post(
-            base_url, headers=_headers(cfg), auth=(username, password), json=payload, timeout=15
-        )
-        if not resp.ok:
-            current_app.logger.error(
-                "WhatsApp (Airtel) daily report send failed for %s: %s %s",
-                phone, resp.status_code, resp.text[:500],
+
+        def _send():
+            resp = requests.post(
+                base_url, headers=_headers(cfg), auth=(username, password), json=payload, timeout=15
             )
-            return False
+            if not resp.ok:
+                # Raised (not returned) so retry() below treats a non-2xx
+                # response the same as a connection/timeout failure -- both
+                # are worth retrying for this unattended send.
+                raise RuntimeError(f"{resp.status_code} {resp.text[:500]}")
+            return resp
+
+        # This is the one send in this file that runs unattended (the 4 AM
+        # cron job, not a donor waiting on a page) -- see retry()'s
+        # docstring for why a couple of retries is worth it here but not for
+        # send_receipt_whatsapp above.
+        resp = retry(
+            _send,
+            on_retry=lambda attempt, exc: current_app.logger.warning(
+                "Daily report WhatsApp attempt %d to %s failed, retrying: %s", attempt, phone, exc
+            ),
+        )
         # Airtel returning 2xx here only means the request was *accepted*,
         # not that WhatsApp actually delivered it (a template mismatch, an
         # unreachable/DND number, or a template still propagating on

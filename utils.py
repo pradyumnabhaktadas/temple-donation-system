@@ -2,6 +2,43 @@ import datetime
 import hashlib
 import hmac
 import re
+import time
+
+
+def retry(func, attempts=3, delay_seconds=5, on_retry=None):
+    """Calls func() up to `attempts` times, sleeping `delay_seconds` between
+    attempts whenever a call raises. Re-raises the last exception if every
+    attempt fails; returns func()'s result on the first success.
+
+    Built for the daily report's unattended sends (email/WhatsApp,
+    daily_report_utils.py) -- the automatic 4 AM run has intermittently
+    failed both channels at once (e.g. AdminActivityLog target_id 20260829
+    and 20260830: email_sent=False, whatsapp_sent=0/2), while a manual
+    re-run minutes later from an interactive shell succeeds every time.
+    Nothing in the surrounding code changed between those failures, so the
+    likely explanation is a transient cold-start hiccup in whatever
+    container Render spins up to run the cron job -- outbound DNS/network
+    not fully ready for the very first connection. A few seconds' delay and
+    a couple of retries costs nothing for a job that only needs to succeed
+    once a day, and papers over exactly this kind of one-off blip without
+    needing to know its exact cause.
+
+    Deliberately not used for donor-facing sends (send_receipt_email/
+    send_receipt_whatsapp) -- those run inline during a donor's own
+    request, where adding up to `attempts * delay_seconds` seconds of
+    retrying would make a payment confirmation hang rather than just
+    quietly retry in the background the way an unattended cron job can."""
+    last_exc = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return func()
+        except Exception as exc:
+            last_exc = exc
+            if on_retry:
+                on_retry(attempt, exc)
+            if attempt < attempts:
+                time.sleep(delay_seconds)
+    raise last_exc
 
 # Income Tax Rule 114B requires PAN to be quoted for various high-value
 # transactions once they reach Rs 50,000 -- this app requires PAN (and a

@@ -18,6 +18,8 @@ from email.message import EmailMessage
 
 from flask import current_app
 
+from utils import retry
+
 
 def send_receipt_email(donation, donor, org_cfg, pdf_bytes):
     """Emails the receipt PDF (raw bytes, as returned by
@@ -167,12 +169,24 @@ def send_daily_report_email(cfg, to_addresses, report_data, org_name):
         username = cfg.get("SMTP_USERNAME")
         password = cfg.get("SMTP_PASSWORD")
 
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
-            if use_tls:
-                server.starttls(context=ssl.create_default_context())
-            if username:
-                server.login(username, password)
-            server.send_message(msg)
+        def _send():
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
+                if use_tls:
+                    server.starttls(context=ssl.create_default_context())
+                if username:
+                    server.login(username, password)
+                server.send_message(msg)
+
+        # This is the one send in this file that runs unattended (the 4 AM
+        # cron job, not a donor waiting on a page) -- see retry()'s
+        # docstring for why a couple of retries is worth it here but not for
+        # send_receipt_email above.
+        retry(
+            _send,
+            on_retry=lambda attempt, exc: current_app.logger.warning(
+                "Daily report email attempt %d failed, retrying: %s", attempt, exc
+            ),
+        )
 
         return True
     except Exception:
