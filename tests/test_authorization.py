@@ -36,6 +36,7 @@ ADMIN_ONLY_POST = [
     ("/admin/settings/backup/run", {}),
     ("/admin/settings/backup/restore", {"mode": "preview"}),
     ("/admin/settings/users/add", {"username": "x", "role": "staff"}),
+    ("/admin/donations/import-legacy/single", {"full_name": "x", "campaign_id": "1", "amount": "100", "donation_date": "2024-01-01"}),
 ]
 
 # Routes staff legitimately need to do their job.

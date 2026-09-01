@@ -2752,6 +2752,83 @@ def import_legacy_demo_xlsx():
         LEGACY_IMPORT_COLUMNS, LEGACY_IMPORT_DEMO_ROWS, "legacy_donations_demo.xlsx")
 
 
+def _create_legacy_donation(
+    row, campaign, amount, payment_mode, donation_date, is_80g_requested,
+    existing_receipt, generate_pdfs, org_cfg, recorded_by,
+):
+    """Core of the historical-data import -- shared by the bulk CSV/Excel
+    uploader (import_legacy_donations) and the single-entry form
+    (import_legacy_donation_single) so the rules that make a legacy row
+    different from a normal donation entry can't drift between the two
+    entry points, the same reasoning _parse_import_date/_create_offline_donation
+    already document elsewhere in this file:
+      - `existing_receipt` is kept as the receipt number as-is when given;
+        left blank (None) otherwise -- never auto-generated from this
+        site's own numbering sequence, which would misrepresent an
+        already-issued paper/legacy receipt as one this site issued.
+      - No PAN/address enforcement (high_value_pan_address_error) --
+        retroactively requiring it on an old external receipt wouldn't
+        fix anything real.
+      - No donor email/WhatsApp notification is ever sent.
+      - PDF generation is opt-in via `generate_pdfs`, and only happens at
+        all when there's a receipt_number to print on it.
+
+    Caller has already validated/parsed campaign, amount, payment_mode,
+    donation_date, is_80g_requested, and built `row` (a plain dict with
+    the donor fields find_or_create_donor() expects, plus
+    cheque_number/cheque_bank_name/bank_transaction_id/remarks) --
+    _sanitize_donor_data() plus those four extra keys covers it for a
+    single-entry form; the bulk loop below builds the equivalent dict
+    from a parsed CSV/Excel row.
+
+    Returns {"donor": Donor, "donation": Donation, "receipt_number":
+    str|None, "no_pdf_skipped": bool}. Raises on a real DB error
+    (duplicate receipt number, etc.) -- callers already wrap this in
+    their own try/except."""
+    donor = find_or_create_donor(row)
+
+    donation = Donation(
+        donor_id=donor.id,
+        campaign_id=campaign.id,
+        amount=amount,
+        payment_mode=payment_mode,
+        status="success",
+        donation_date=donation_date,
+        is_80g_requested=is_80g_requested,
+        cheque_number=(row.get("cheque_number") or "")[:50] or None,
+        cheque_bank_name=(row.get("cheque_bank_name") or "")[:150] or None,
+        bank_transaction_id=(row.get("bank_transaction_id") or "")[:100] or None,
+        remarks=(row.get("remarks") or "").strip()[:300] or "Imported from legacy records",
+        recorded_by=recorded_by,
+    )
+    db.session.add(donation)
+    db.session.flush()
+
+    # financial_year is always computed from the actual donation date
+    # regardless of receipt number -- it's what Form 10BD and every
+    # annual report group by.
+    donation.financial_year = get_financial_year(donation_date)
+
+    if existing_receipt:
+        donation.receipt_number = existing_receipt[:50]
+    else:
+        # Deliberately NOT auto-generating one from this site's own
+        # sequence here -- see this function's docstring.
+        donation.receipt_number = None
+
+    no_pdf_skipped = False
+    if generate_pdfs and donation.receipt_number:
+        donation.receipt_pdf = generate_receipt_pdf(donation, donor, campaign, org_cfg)
+    elif generate_pdfs:
+        no_pdf_skipped = True
+
+    db.session.commit()
+    return {
+        "donor": donor, "donation": donation,
+        "receipt_number": donation.receipt_number, "no_pdf_skipped": no_pdf_skipped,
+    }
+
+
 @bp.route("/donations/import-legacy", methods=["GET", "POST"])
 @login_required
 @admin_role_required
@@ -2785,7 +2862,11 @@ def import_legacy_donations():
     already exist from live donations.
     """
     if request.method == "GET":
-        return render_template("admin/import_legacy_donations.html", results=None)
+        active_tab = "single" if request.args.get("tab") == "single" else "bulk"
+        return render_template(
+            "admin/import_legacy_donations.html", results=None, active_tab=active_tab,
+            campaigns=Campaign.query.order_by(Campaign.name).all(), today=now_ist().date(),
+        )
 
     file = request.files.get("csv_file")
     if not file or not file.filename:
@@ -2902,53 +2983,15 @@ def import_legacy_donations():
             continue
 
         try:
-            donor = find_or_create_donor(row)
-
-            donation = Donation(
-                donor_id=donor.id,
-                campaign_id=campaign.id,
-                amount=amount,
-                payment_mode=payment_mode,
-                status="success",
-                donation_date=donation_date,
-                is_80g_requested=is_80g_requested,
-                cheque_number=(row.get("cheque_number") or "")[:50] or None,
-                cheque_bank_name=(row.get("cheque_bank_name") or "")[:150] or None,
-                bank_transaction_id=(row.get("bank_transaction_id") or "")[:100] or None,
-                remarks=(row.get("remarks") or "").strip()[:300] or "Imported from legacy records",
+            result = _create_legacy_donation(
+                row, campaign, amount, payment_mode, donation_date, is_80g_requested,
+                existing_receipt, generate_pdfs, org_cfg,
                 recorded_by=f"legacy import ({current_user.username})",
             )
-            db.session.add(donation)
-            db.session.flush()
-
-            # financial_year is always computed from the actual donation
-            # date regardless of receipt number -- it's what Form 10BD and
-            # every annual report group by.
-            donation.financial_year = get_financial_year(donation_date)
-
-            if existing_receipt:
-                donation.receipt_number = existing_receipt[:50]
-            else:
-                # Deliberately NOT auto-generating one from this site's own
-                # sequence (032511/ISK500000...) here -- unlike a brand new
-                # donation, a legacy row with no receipt_number in the CSV
-                # usually means no receipt was ever actually issued for it
-                # (or the number just wasn't captured in the export), and
-                # minting a fresh number now would misrepresent it as if
-                # this site had issued an official receipt at the time.
-                # The donation still counts correctly everywhere (totals,
-                # Analytics, Form 10BD by financial_year) -- it just has no
-                # receipt number on file, same as it had none before.
-                donation.receipt_number = None
-
-            if generate_pdfs and donation.receipt_number:
-                donation.receipt_pdf = generate_receipt_pdf(donation, donor, campaign, org_cfg)
-            elif generate_pdfs:
+            if result["no_pdf_skipped"]:
                 no_receipt_pdf_skipped += 1
 
-            db.session.commit()
-
-            results.append({"line": line_num, "name": full_name, "ok": True, "receipt_number": donation.receipt_number})
+            results.append({"line": line_num, "name": full_name, "ok": True, "receipt_number": result["receipt_number"]})
             created += 1
         except Exception as exc:
             db.session.rollback()
@@ -2977,7 +3020,109 @@ def import_legacy_donations():
     flash(flash_msg)
     return render_template(
         "admin/import_legacy_donations.html", results=results, created=created,
-        skipped=skipped, preview=preview, summary=_preview_summary(results))
+        skipped=skipped, preview=preview, summary=_preview_summary(results),
+        active_tab="bulk", campaigns=Campaign.query.order_by(Campaign.name).all(),
+        today=now_ist().date(),
+    )
+
+
+@bp.route("/donations/import-legacy/single", methods=["POST"])
+@login_required
+@admin_role_required
+def import_legacy_donation_single():
+    """Single-record counterpart to import_legacy_donations()'s CSV/Excel
+    uploader -- same historical-import rules (existing_receipt kept as-is,
+    no PAN/address enforcement, no donor notification, opt-in PDF), just
+    for entering one old record by hand instead of preparing a whole file
+    for it. Shares _create_legacy_donation() with the bulk loop so the two
+    entry points can't drift, the same reasoning manual_donation() /
+    bulk_import_donations() already document for the live-donation side.
+
+    Field-level validation mirrors manual_donation() (PAN/phone format,
+    a real campaign, a parseable amount) rather than the bulk loop's
+    row_errors list, since there's only one record and redirecting back
+    to the Single Entry tab with a flash is simpler than a results table."""
+    form = request.form
+
+    full_name = (form.get("full_name") or "").strip()
+    if not full_name:
+        flash("Full name is required.")
+        return redirect(url_for("admin.import_legacy_donations", tab="single"))
+
+    try:
+        campaign_id = int(form["campaign_id"])
+        amount = float(form["amount"])
+        if amount <= 0:
+            raise ValueError("amount must be greater than 0")
+    except (KeyError, TypeError, ValueError):
+        flash("Please choose a campaign and enter a valid amount.")
+        return redirect(url_for("admin.import_legacy_donations", tab="single"))
+    campaign = Campaign.query.get(campaign_id)
+    if not campaign:
+        flash("That campaign no longer exists -- please choose another.")
+        return redirect(url_for("admin.import_legacy_donations", tab="single"))
+
+    pan = (form.get("pan") or "").strip().upper()
+    if pan and not is_valid_pan(pan):
+        flash("That PAN doesn't look right. It should be 10 characters like ABCDE1234F.")
+        return redirect(url_for("admin.import_legacy_donations", tab="single"))
+
+    if not is_valid_phone(form.get("phone")):
+        flash("That phone number doesn't look right. Please enter a 10-digit mobile number, or a foreign number starting with + and country code.")
+        return redirect(url_for("admin.import_legacy_donations", tab="single"))
+    if not is_valid_phone(form.get("whatsapp_number")):
+        flash("That WhatsApp number doesn't look right. Please enter a 10-digit mobile number, or a foreign number starting with + and country code.")
+        return redirect(url_for("admin.import_legacy_donations", tab="single"))
+
+    payment_mode = (form.get("payment_mode") or "cash").lower()
+    if payment_mode not in ("cash", "cheque", "bank_transfer", "online"):
+        payment_mode = "cash"
+
+    donation_date_str = form.get("donation_date")
+    try:
+        donation_date = datetime.datetime.strptime(donation_date_str, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        flash("That donation date doesn't look right.")
+        return redirect(url_for("admin.import_legacy_donations", tab="single"))
+
+    is_80g_raw = (form.get("is_80g_requested") or "").strip().lower()
+    if is_80g_raw == "yes":
+        is_80g_requested = True
+    elif is_80g_raw == "no":
+        is_80g_requested = False
+    else:
+        is_80g_requested = None  # blank -- falls back to the campaign's own default
+
+    existing_receipt = (form.get("receipt_number") or "").strip() or None
+    generate_pdfs = form.get("generate_pdfs") == "yes"
+
+    row = _sanitize_donor_data(form)
+    row["pan"] = pan
+    row["cheque_number"] = form.get("cheque_number")
+    row["cheque_bank_name"] = form.get("cheque_bank_name")
+    row["bank_transaction_id"] = form.get("bank_transaction_id")
+    row["remarks"] = form.get("remarks")
+
+    try:
+        result = _create_legacy_donation(
+            row, campaign, amount, payment_mode, donation_date, is_80g_requested,
+            existing_receipt, generate_pdfs, _org_cfg(),
+            recorded_by=f"legacy import ({current_user.username})",
+        )
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("Single-entry legacy import failed")
+        reason = "duplicate receipt number" if "unique" in str(exc).lower() else f"unexpected error ({exc})"
+        flash(f"Couldn't save that record -- {reason}.")
+        return redirect(url_for("admin.import_legacy_donations", tab="single"))
+
+    if result["receipt_number"]:
+        flash(f"Historical donation recorded with receipt {result['receipt_number']}.")
+    elif result["no_pdf_skipped"]:
+        flash("Historical donation recorded with no receipt number, so no PDF was generated.")
+    else:
+        flash("Historical donation recorded with no receipt number on file.")
+    return redirect(url_for("admin.donor_detail", donor_id=result["donor"].id))
 
 
 # Donor-only master-data import -- no donation records are created here.

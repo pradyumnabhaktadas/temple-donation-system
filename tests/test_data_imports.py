@@ -321,6 +321,131 @@ class TestLegacyImport:
         assert Donation.query.count() == len(amounts)
 
 
+class TestLegacyImportSingleEntry:
+    """The single-record counterpart to TestLegacyImport above -- same
+    _create_legacy_donation() helper, so most of these mirror the bulk
+    assertions one row at a time, plus the extra validation this entry
+    point does inline instead of via a results table."""
+    URL = "/admin/donations/import-legacy/single"
+
+    def _campaign_id(self, name="Annadan"):
+        from models import Campaign
+        return Campaign.query.filter_by(name=name).one().id
+
+    def _post(self, client, **overrides):
+        data = {
+            "full_name": "Gopal Das",
+            "campaign_id": str(self._campaign_id()),
+            "amount": "11000",
+            "donation_date": "2023-06-10",
+            "payment_mode": "cash",
+        }
+        data.update(overrides)
+        return client.post(self.URL, data=data, follow_redirects=True)
+
+    def test_existing_receipt_number_is_preserved(self, app, client):
+        from models import Donation
+        login(client)
+        self._post(client, receipt_number="OLD/2023/00456")
+        assert Donation.query.one().receipt_number == "OLD/2023/00456"
+
+    def test_no_receipt_number_stays_blank(self, app, client):
+        from models import Donation
+        login(client)
+        self._post(client)
+        assert not Donation.query.one().receipt_number
+
+    def test_full_name_is_required(self, app, client):
+        from models import Donation
+        login(client)
+        resp = self._post(client, full_name="")
+        assert Donation.query.count() == 0
+        assert b"name" in resp.data.lower()
+
+    def test_invalid_campaign_is_rejected(self, app, client):
+        from models import Donation
+        login(client)
+        self._post(client, campaign_id="999999")
+        assert Donation.query.count() == 0
+
+    def test_invalid_pan_is_rejected(self, app, client):
+        from models import Donation
+        login(client)
+        self._post(client, pan="NOTAPAN")
+        assert Donation.query.count() == 0
+
+    def test_invalid_amount_is_rejected(self, app, client):
+        from models import Donation
+        login(client)
+        self._post(client, amount="not-a-number")
+        assert Donation.query.count() == 0
+
+    def test_invalid_date_is_rejected(self, app, client):
+        from models import Donation
+        login(client)
+        self._post(client, donation_date="not-a-date")
+        assert Donation.query.count() == 0
+
+    def test_historical_date_keeps_its_year(self, app, client):
+        from models import Donation
+        login(client)
+        self._post(client, donation_date="2023-06-10")
+        d = Donation.query.one()
+        assert d.donation_date.year == 2023
+        assert d.financial_year == "2023-24"
+
+    def test_duplicate_receipt_number_is_reported(self, app, client):
+        from models import Donation
+        login(client)
+        self._post(client, receipt_number="OLD/2023/DUP")
+        resp = self._post(client, receipt_number="OLD/2023/DUP", full_name="Second Donor")
+        assert Donation.query.count() == 1, "the same old receipt was imported twice"
+        assert b"duplicate" in resp.data.lower()
+
+    def test_is_80g_flag_is_honoured(self, app, client):
+        from models import Donation
+        login(client)
+        self._post(client, is_80g_requested="no")
+        assert Donation.query.one().effective_is_80g is False
+
+    def test_never_notifies(self, app, client):
+        from unittest.mock import patch
+        login(client)
+        with patch("admin._send_receipt_notifications_background") as send:
+            self._post(client, email="gopal@example.com")
+        send.assert_not_called()
+
+    def test_no_pdf_without_a_receipt_number_even_if_requested(self, app, client):
+        """generate_pdfs is opt-in, but there's nothing to print a PDF
+        receipt number on when the row has none -- same rule as the bulk
+        importer's no_receipt_pdf_skipped counter."""
+        from models import Donation
+        login(client)
+        self._post(client, generate_pdfs="yes")
+        assert not Donation.query.one().receipt_pdf
+
+    def test_pdf_generated_when_receipt_number_given_and_requested(self, app, client):
+        from models import Donation
+        login(client)
+        self._post(client, receipt_number="OLD/2023/PDF1", generate_pdfs="yes")
+        assert Donation.query.one().receipt_pdf
+
+    def test_donor_is_deduplicated_with_existing_records(self, app, client):
+        """Importing a second historical donation for the same person (same
+        phone) must not create a second Donor row."""
+        from models import Donor
+        login(client)
+        self._post(client, phone="9811122233", full_name="Gopal Das")
+        self._post(client, phone="9811122233", full_name="Gopal Das", receipt_number="OLD/2023/DUP2")
+        assert Donor.query.filter_by(phone="9811122233").count() == 1
+
+    def test_staff_cannot_use_single_entry_import(self, app, client):
+        from models import Donation
+        login(client, username="teststaff")
+        self._post(client)
+        assert Donation.query.count() == 0, "staff was able to use the admin-only single-entry import"
+
+
 class TestImportTemplates:
     """The demo/template files must match what the importers require, or
     someone downloads a template that gets rejected."""
