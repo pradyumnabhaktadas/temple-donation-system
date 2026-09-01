@@ -537,12 +537,23 @@ campaign-wise breakdown of each, and delivers it to whoever is listed under
 **Admin -> Settings -> Daily Report Recipients** — no code change or
 redeploy needed to add/remove a recipient.
 
-- **`python daily_report.py`** — runs the report for yesterday (IST) and
-  sends it. Meant to run automatically at 4:00 AM IST every day — see the
+- **`python daily_report.py`** — triggers the report for yesterday (IST).
+  Meant to run automatically at 4:00 AM IST every day — see the
   `temple-daily-report` Cron Job in `render.yaml` (schedule `30 22 * * *`,
   which is UTC — 10:30 PM UTC is 4:00 AM IST the *next* calendar day).
   `--date YYYY-MM-DD` re-runs it for a specific date; `--force` re-sends
   even if that date's report already went out.
+  This script is a thin HTTP client, not the sender — it POSTs to the
+  already-running web app's own `/internal/daily-report/send`
+  (authenticated with `INTERNAL_TASK_TOKEN`, shared between the web
+  service and this Cron Job), and the web app does the actual computing
+  and emailing/WhatsApping. It moved out of the Cron Job's own process
+  because every automatic run failed both channels while manual re-runs
+  and every donor-facing receipt this same web app sends, all day, every
+  day, succeeded — pointing at that separate container's own outbound
+  networking rather than a bug in the send functions. See
+  `config.py`'s `INTERNAL_TASK_TOKEN` for the full story and
+  `public.internal_daily_report_send` for the endpoint itself.
 - **Email** works automatically once `SMTP_HOST` etc. are configured (see
   above) — no extra setup.
 - **WhatsApp** uses its own approved template, separate from the receipt

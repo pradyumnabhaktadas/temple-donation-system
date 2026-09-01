@@ -3591,6 +3591,54 @@ def daily_report_recipient_delete(recipient_id):
     return redirect(url_for("admin.daily_report_recipients"))
 
 
+def _send_daily_report_now_background(app, report_date, force):
+    """Runs on a background thread (or inline under TESTING) -- see
+    send_daily_report_now below for why this isn't inline on the request."""
+    with app.app_context():
+        try:
+            from daily_report_utils import send_report
+            send_report(app, report_date=report_date, force=force)
+        except Exception:
+            app.logger.exception("Manually triggered daily report send failed")
+
+
+@bp.route("/daily-report-recipients/send-now", methods=["POST"])
+@login_required
+@admin_role_required
+def send_daily_report_now():
+    """"Send Report Now" button on this page -- runs the same
+    daily_report_utils.send_report() the 4 AM Cron Job normally triggers
+    (see public.internal_daily_report_send), just kicked off here instead
+    of on a schedule. Useful right after an automatic run failed (see
+    config.py's INTERNAL_TASK_TOKEN docstring for that story) or just to
+    see today's figures without waiting for tomorrow's run.
+
+    Backgrounded for the same reason as _send_receipt_notifications_background
+    elsewhere in this file: up to 3 retries each on email and on every
+    WhatsApp recipient (utils.retry()) can add up to roughly a minute if
+    SMTP/WhatsApp are genuinely unreachable -- comfortably past gunicorn's
+    worker timeout, and exactly the situation an admin is most likely to
+    reach for this button during. The actual result lands in the Activity
+    Log (Admin -> Activity Log) a few seconds after this redirect, same as
+    every automatic run's outcome always does.
+
+    Not forced -- if today's report already went out (automatically or
+    from an earlier click), this just reports that rather than resending
+    to every recipient again. Use `python daily_report.py --force` from a
+    shell for a genuine forced resend."""
+    log_activity("daily_report_manual_trigger", target_type="daily_report")
+    db.session.commit()
+
+    app = current_app._get_current_object()
+    if app.config.get("TESTING"):
+        _send_daily_report_now_background(app, None, False)
+    else:
+        threading.Thread(target=_send_daily_report_now_background, args=(app, None, False), daemon=True).start()
+
+    flash("Daily report send triggered -- check Activity Log in a few seconds for the result.")
+    return redirect(url_for("admin.daily_report_recipients"))
+
+
 def _bace_campaign_or_none():
     """The single "BACE Contribution" campaign that public.bace_rent_form()
     fixes every BACE donation to -- see that route for the same lookup.

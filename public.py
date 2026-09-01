@@ -1354,6 +1354,73 @@ def _handle_payment_captured(event):
     return jsonify({"ok": True, "receipt_number": donation.receipt_number}), 200
 
 
+@bp.route("/internal/daily-report/send", methods=["POST"])
+@csrf.exempt
+@_safe_json_route
+def internal_daily_report_send():
+    """Runs the 4 AM daily collection report's actual send (see
+    daily_report_utils.send_report) from inside this always-on web app,
+    triggered by daily_report.py over HTTPS instead of running in the
+    separate Cron Job container.
+
+    Why: every automatic run of that Cron Job failed to deliver both
+    email and WhatsApp (2026-08-29, 08-30, 08-31), while manual re-runs
+    -- and every donor-facing receipt this same web app sends over email/
+    WhatsApp, all day, every day -- succeed without issue. Adding retries
+    inside the send functions (utils.retry()) didn't change that, which
+    rules out a code bug in the sends themselves and points at the Cron
+    Job container's own networking being unreliable on cold start,
+    distinct from this process. Moving the actual SMTP/WhatsApp network
+    calls here sidesteps whatever that difference is, rather than trying
+    to diagnose an environment this app has no visibility into.
+
+    No browser/cookie is involved in this server-to-server call, so
+    there's nothing to CSRF-protect -- same reasoning as the Razorpay
+    webhook above. Authenticated instead via INTERNAL_TASK_TOKEN, a
+    shared secret compared with hmac.compare_digest (not a plain ==,
+    which would leak timing information about how many leading
+    characters matched).
+    """
+    expected_token = current_app.config.get("INTERNAL_TASK_TOKEN")
+    if not expected_token:
+        return jsonify({"error": "INTERNAL_TASK_TOKEN not configured"}), 503
+
+    provided_token = request.headers.get("X-Internal-Token", "")
+    if not hmac.compare_digest(provided_token, expected_token):
+        return jsonify({"error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+
+    report_date = None
+    if payload.get("date"):
+        try:
+            report_date = datetime.datetime.strptime(payload["date"], "%Y-%m-%d").date()
+        except ValueError:
+            return jsonify({"error": "Invalid date, expected YYYY-MM-DD"}), 400
+
+    from daily_report_utils import send_report
+
+    result = send_report(current_app._get_current_object(), report_date=report_date, force=bool(payload.get("force")))
+
+    if result.get("skipped"):
+        return jsonify({"skipped": result["skipped"], "report_date": result["report_date"].isoformat()})
+
+    return jsonify({
+        "report_date": result["report_date"].isoformat(),
+        "data": {
+            "today": result["data"]["today"],
+            "week": result["data"]["week"],
+            "month": result["data"]["month"],
+        },
+        "email_sent": result["email_sent"],
+        "email_recipients_count": len(result["email_recipients"]),
+        "email_error": result["email_error"],
+        "whatsapp_sent_count": result["whatsapp_sent_count"],
+        "whatsapp_recipients_count": len(result["whatsapp_recipients"]),
+        "whatsapp_error": result["whatsapp_error"],
+    })
+
+
 def _handle_payment_failed(event):
     """Marks a donation failed the moment Razorpay reports the payment
     itself failed, instead of waiting for the Dashboard's time-based

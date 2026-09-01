@@ -43,6 +43,14 @@ services:
     envVars:
       - key: SECRET_KEY
         generateValue: true
+      # Shared with the temple-daily-report Cron Job below (same key name,
+      # sync: false there) -- authenticates that job's trigger request to
+      # this app's /internal/daily-report/send. generateValue here, then
+      # copy the generated value into the cron job's Environment tab once
+      # after the first deploy (Render doesn't support referencing one
+      # service's generated value from another service's env directly).
+      - key: INTERNAL_TASK_TOKEN
+        generateValue: true
       - key: DATABASE_URL
         fromDatabase:
           name: temple-donation-db
@@ -121,13 +129,20 @@ services:
       - key: SMTP_PASSWORD
         sync: false
 
-  # Runs daily_report.py at 4:00 AM IST -- emails (and, once a report
-  # template is approved with Airtel, WhatsApps) the collection totals for
+  # Runs daily_report.py at 4:00 AM IST -- a thin HTTP trigger, not the
+  # sender. It POSTs to the web service's own /internal/daily-report/send,
+  # which does the actual emailing (and, once a report template is
+  # approved with Airtel, WhatsApping) of the collection totals for
   # yesterday/this week/this month to whoever is listed under
-  # Admin -> Settings -> Daily Report Recipients. Render Cron schedules are
-  # in UTC: 30 22 * * * is 10:30 PM UTC, which is 4:00 AM IST the *next*
-  # calendar day -- don't "fix" this to 0 4 * * * expecting 4 AM IST, that
-  # would actually run at 4 AM UTC (9:30 AM IST).
+  # Admin -> Settings -> Daily Report Recipients -- see config.py's
+  # INTERNAL_TASK_TOKEN docstring for why the sending itself moved into
+  # the web service instead of running here. This job therefore only
+  # needs enough environment to make that one HTTPS request, not
+  # DATABASE_URL/SECRET_KEY/SMTP_*/WHATSAPP_* -- those live on the web
+  # service now. Render Cron schedules are in UTC: 30 22 * * * is 10:30 PM
+  # UTC, which is 4:00 AM IST the *next* calendar day -- don't "fix" this
+  # to 0 4 * * * expecting 4 AM IST, that would actually run at 4 AM UTC
+  # (9:30 AM IST).
   # NOTE: Cron Job services require a Render plan that supports them -- see
   # the same note on temple-weekly-backup above if yours doesn't.
   - type: cron
@@ -137,32 +152,10 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: python daily_report.py
     envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: temple-donation-db
-          property: connectionString
-      - key: SECRET_KEY
-        sync: false   # same value as the web service's SECRET_KEY
-      - key: ORG_NAME
-        sync: false
-      - key: SMTP_HOST
-        sync: false
-      - key: SMTP_USERNAME
-        sync: false
-      - key: SMTP_PASSWORD
-        sync: false
-      - key: MAIL_FROM_ADDRESS
-        sync: false
-      - key: MAIL_FROM_NAME
-        sync: false
-      - key: WHATSAPP_AIRTEL_USERNAME
-        sync: false
-      - key: WHATSAPP_AIRTEL_PASSWORD
-        sync: false
-      - key: WHATSAPP_FROM_NUMBER
-        sync: false
-      - key: WHATSAPP_REPORT_TEMPLATE_ID
-        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false   # the web service's own URL, e.g. https://givetokrishna.com
+      - key: INTERNAL_TASK_TOKEN
+        sync: false   # same value as the web service's INTERNAL_TASK_TOKEN (generated there)
 
 databases:
   - name: temple-donation-db

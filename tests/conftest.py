@@ -47,6 +47,7 @@ def app(tmp_path):
             "WHATSAPP_REPORT_TEMPLATE_ID": "",
             "PUBLIC_BASE_URL": "",
             "SMTP_HOST": "",
+            "INTERNAL_TASK_TOKEN": "",
 
             # Backups go to a temp directory, not instance/backups. Tests
             # that exercise the restore route trigger a real safety backup,

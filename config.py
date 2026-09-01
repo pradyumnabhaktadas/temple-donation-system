@@ -249,8 +249,30 @@ class Config:
     WHATSAPP_AIRTEL_COOKIE = os.environ.get("WHATSAPP_AIRTEL_COOKIE", "")
     # The site's own public URL, used to build the receipt link Airtel's
     # servers fetch the PDF from (see whatsapp_utils.py) -- also handy as a
-    # single place to change if the domain ever changes.
+    # single place to change if the domain ever changes. Also where
+    # daily_report.py sends its trigger request (see INTERNAL_TASK_TOKEN
+    # below).
     PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "https://givetokrishna.com")
+
+    # --- Internal task trigger (daily_report.py) ---
+    # Every automatic 4 AM daily-report Cron Job run failed to send email
+    # and WhatsApp (2026-08-29, 08-30, 08-31), while manual re-runs and
+    # every donor-facing receipt sent from this web app all succeed --
+    # pointing at the separate Cron Job container's outbound networking,
+    # not a code bug in the send functions themselves (see utils.retry(),
+    # added first and confirmed not to fix it). daily_report.py is now a
+    # thin HTTP client: it POSTs to this app's own
+    # /internal/daily-report/send instead of sending email/WhatsApp itself,
+    # so the actual network calls run from this always-on web dyno instead
+    # of the cron container.
+    #
+    # This route has no browser session to authenticate with, so it
+    # checks this shared secret instead (X-Internal-Token header), compared
+    # with hmac.compare_digest -- same pattern as RAZORPAY_WEBHOOK_SECRET
+    # above, just for a request this app's own cron script sends rather
+    # than Razorpay. Leave blank to refuse all requests to that route
+    # (503) rather than run unauthenticated.
+    INTERNAL_TASK_TOKEN = os.environ.get("INTERNAL_TASK_TOKEN", "")
 
     # --- Donor OTP login ---
     # No SMS provider is wired up yet (see sms_utils.py) -- OTPs are shown
