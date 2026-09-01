@@ -1346,6 +1346,28 @@ def _apply_donations_filters(query):
     if associated_with_id:
         query = query.filter_by(associated_with_id=associated_with_id)
 
+    # Free-text search across donor name/phone and every payment reference
+    # staff might actually have in hand when someone calls asking about a
+    # donation -- the Razorpay order/payment IDs and Order ID column
+    # already shown on this page, plus the offline equivalents (cheque
+    # number, bank transfer UTR) and the receipt number itself. Same "q"
+    # param name and .ilike() pattern as the Donors list search above, so
+    # it behaves the same way whichever admin page you're on.
+    q = (request.args.get("q") or "").strip()
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            Donation.donor.has(Donor.full_name.ilike(like))
+            | Donation.donor.has(Donor.phone.ilike(like))
+            | Donation.donor.has(Donor.whatsapp_number.ilike(like))
+            | Donation.donor.has(Donor.email.ilike(like))
+            | Donation.receipt_number.ilike(like)
+            | Donation.razorpay_payment_id.ilike(like)
+            | Donation.razorpay_order_id.ilike(like)
+            | Donation.cheque_number.ilike(like)
+            | Donation.bank_transaction_id.ilike(like)
+        )
+
     date_from_raw = request.args.get("date_from") or ""
     date_to_raw = request.args.get("date_to") or ""
 
@@ -1410,7 +1432,7 @@ def _apply_donations_filters(query):
 
     return query, {
         "status": status, "campaign_id": campaign_id, "mode": mode,
-        "associated_with_id": associated_with_id,
+        "associated_with_id": associated_with_id, "q": q,
         "date_from": date_from_raw, "date_to": date_to_raw,
         "date_range": date_range,
     }

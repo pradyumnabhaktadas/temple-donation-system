@@ -23,6 +23,11 @@
 </div>
 <form class="row g-2 mb-3">
   <div class="col-auto">
+    <input type="search" name="q" class="form-control" style="min-width: 220px"
+           placeholder="Search donor name, phone, receipt no., payment/order ID..."
+           aria-label="Search donations" value="{{ q or '' }}">
+  </div>
+  <div class="col-auto">
     <select name="campaign_id" class="form-select" aria-label="Campaign" onchange="this.form.submit()">
       <option value="">All Campaigns</option>
       {% for c in campaigns %}
@@ -82,7 +87,10 @@
   <div class="col-auto">
     <button type="submit" class="btn btn-outline-secondary">Filter</button>
     {% if date_range != 'this_month' %}
-    <a href="{{ url_for('admin.donations', status=status, campaign_id=campaign_id, mode=mode, associated_with_id=associated_with_id) }}" class="btn btn-link btn-sm">Reset dates</a>
+    <a href="{{ url_for('admin.donations', status=status, campaign_id=campaign_id, mode=mode, associated_with_id=associated_with_id, q=q) }}" class="btn btn-link btn-sm">Reset dates</a>
+    {% endif %}
+    {% if q %}
+    <a href="{{ url_for('admin.donations', status=status, campaign_id=campaign_id, mode=mode, associated_with_id=associated_with_id, date_from=date_from, date_to=date_to, range=date_range) }}" class="btn btn-link btn-sm">Clear search</a>
     {% endif %}
   </div>
 </form>
