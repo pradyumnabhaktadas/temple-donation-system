@@ -106,9 +106,10 @@ class TestDailyReportEmailRetry:
             return cm
 
         with app.app_context(), patch("email_utils.smtplib.SMTP", side_effect=smtp_side_effect) as mock_smtp:
-            sent = send_daily_report_email(app.config, ["a@example.org"], _fake_report_data(), "ISKCON Dwarka")
+            sent, error = send_daily_report_email(app.config, ["a@example.org"], _fake_report_data(), "ISKCON Dwarka")
 
         assert sent is True
+        assert error is None
         assert mock_smtp.call_count == 3
         assert mock_server.send_message.call_count == 1
 
@@ -119,9 +120,14 @@ class TestDailyReportEmailRetry:
         from email_utils import send_daily_report_email
 
         with app.app_context(), patch("email_utils.smtplib.SMTP", side_effect=OSError("connection refused")) as mock_smtp:
-            sent = send_daily_report_email(app.config, ["a@example.org"], _fake_report_data(), "ISKCON Dwarka")
+            sent, error = send_daily_report_email(app.config, ["a@example.org"], _fake_report_data(), "ISKCON Dwarka")
 
         assert sent is False
+        # The actual reason now survives the swallow -- this is exactly
+        # what AdminActivityLog's "email_error=" field surfaces (see
+        # daily_report_utils.send_report), which is what was missing
+        # during the 2026-08-29/08-30/08-31 incident.
+        assert "connection refused" in error
         assert mock_smtp.call_count == 3  # default attempts=3, never raised out of send_daily_report_email
 
 
@@ -144,9 +150,10 @@ class TestDailyReportWhatsappRetry:
         with app.app_context(), patch(
             "whatsapp_utils.requests.post", side_effect=[bad_resp, bad_resp, good_resp]
         ) as mock_post:
-            sent = send_daily_report_whatsapp(app.config, "9876543210", _fake_report_data(), "ISKCON Dwarka")
+            sent, error = send_daily_report_whatsapp(app.config, "9876543210", _fake_report_data(), "ISKCON Dwarka")
 
         assert sent is True
+        assert error is None
         assert mock_post.call_count == 3
 
     def test_gives_up_after_exhausting_retries(self, app, monkeypatch):
@@ -158,7 +165,10 @@ class TestDailyReportWhatsappRetry:
         bad_resp = MagicMock(ok=False, status_code=500, text="server error")
 
         with app.app_context(), patch("whatsapp_utils.requests.post", return_value=bad_resp) as mock_post:
-            sent = send_daily_report_whatsapp(app.config, "9876543210", _fake_report_data(), "ISKCON Dwarka")
+            sent, error = send_daily_report_whatsapp(app.config, "9876543210", _fake_report_data(), "ISKCON Dwarka")
 
         assert sent is False
+        # Same visibility fix as the email side -- the actual Airtel
+        # response (status + body) survives instead of being swallowed.
+        assert "500" in error and "server error" in error
         assert mock_post.call_count == 3

@@ -161,18 +161,23 @@ def send_daily_report_whatsapp(cfg, phone, report_data, org_name):
     """Sends the 4 AM daily collection report (see daily_report_utils.py)
     to `phone` via Airtel, using WHATSAPP_REPORT_TEMPLATE_ID -- a distinct
     template from the receipt one (see module docstring for the required
-    variable order). Returns True if sent, False if skipped (demo mode: no
-    report template configured yet). Never raises, same contract as
-    send_receipt_whatsapp."""
+    variable order). Still never raises -- an unattended cron/relay run
+    must not crash on a bad Airtel config -- but unlike
+    send_receipt_whatsapp, returns (sent, error) instead of a plain bool:
+    `error` is None for both success and demo mode (no report template
+    configured, not a failure), and the actual exception/response message
+    for a genuine send failure. See send_daily_report_email's docstring
+    for why this distinction matters -- the Activity Log couldn't show
+    *why* WhatsApp sends kept failing without it."""
     if not phone:
-        return False
+        return False, None
 
     username = cfg.get("WHATSAPP_AIRTEL_USERNAME")
     password = cfg.get("WHATSAPP_AIRTEL_PASSWORD")
     from_number = cfg.get("WHATSAPP_FROM_NUMBER")
     template_id = cfg.get("WHATSAPP_REPORT_TEMPLATE_ID")
     if not (username and password and from_number and template_id):
-        return False  # DEMO MODE: no report template approved/configured yet
+        return False, None  # DEMO MODE: no report template approved/configured yet
 
     try:
         base_url = cfg.get("WHATSAPP_AIRTEL_BASE_URL") or DEFAULT_AIRTEL_BASE_URL
@@ -237,10 +242,10 @@ def send_daily_report_whatsapp(cfg, phone, report_data, org_name):
             "WhatsApp (Airtel) daily report accepted for %s: %s %s",
             phone, resp.status_code, resp.text[:500],
         )
-        return True
-    except Exception:
+        return True, None
+    except Exception as exc:
         current_app.logger.exception("Failed to send WhatsApp daily report to %s", phone)
-        return False
+        return False, str(exc)
 
 
 def _headers(cfg):

@@ -83,11 +83,11 @@ class TestInternalDailyReportSendRoute:
         whatsapp_calls = []
         monkeypatch.setattr(
             "email_utils.send_daily_report_email",
-            lambda cfg, to, data, org: email_calls.append(to) or True,
+            lambda cfg, to, data, org: (email_calls.append(to) or True, None),
         )
         monkeypatch.setattr(
             "whatsapp_utils.send_daily_report_whatsapp",
-            lambda cfg, phone, data, org: whatsapp_calls.append(phone) or True,
+            lambda cfg, phone, data, org: (whatsapp_calls.append(phone) or True, None),
         )
 
         resp = client.post(
@@ -109,8 +109,8 @@ class TestInternalDailyReportSendRoute:
 
     def test_second_call_for_same_date_is_skipped_unless_forced(self, client, app, monkeypatch):
         app.config["INTERNAL_TASK_TOKEN"] = TOKEN
-        monkeypatch.setattr("email_utils.send_daily_report_email", lambda *a, **k: True)
-        monkeypatch.setattr("whatsapp_utils.send_daily_report_whatsapp", lambda *a, **k: True)
+        monkeypatch.setattr("email_utils.send_daily_report_email", lambda *a, **k: (True, None))
+        monkeypatch.setattr("whatsapp_utils.send_daily_report_whatsapp", lambda *a, **k: (True, None))
 
         headers = {"X-Internal-Token": TOKEN}
         first = client.post("/internal/daily-report/send", json={"date": "2026-08-27"}, headers=headers)
@@ -145,8 +145,8 @@ class TestSendDailyReportNowButton:
     def test_admin_trigger_logs_activity_and_runs_send_report(self, app, client, monkeypatch):
         from models import AdminActivityLog
 
-        monkeypatch.setattr("email_utils.send_daily_report_email", lambda *a, **k: True)
-        monkeypatch.setattr("whatsapp_utils.send_daily_report_whatsapp", lambda *a, **k: True)
+        monkeypatch.setattr("email_utils.send_daily_report_email", lambda *a, **k: (True, None))
+        monkeypatch.setattr("whatsapp_utils.send_daily_report_whatsapp", lambda *a, **k: (True, None))
 
         login(client)
         resp = client.post("/admin/daily-report-recipients/send-now", follow_redirects=True)
@@ -168,9 +168,9 @@ class TestSendDailyReportNowButton:
         calls = []
         monkeypatch.setattr(
             "email_utils.send_daily_report_email",
-            lambda cfg, to, data, org: calls.append(1) or True,
+            lambda cfg, to, data, org: (calls.append(1) or True, None),
         )
-        monkeypatch.setattr("whatsapp_utils.send_daily_report_whatsapp", lambda *a, **k: True)
+        monkeypatch.setattr("whatsapp_utils.send_daily_report_whatsapp", lambda *a, **k: (True, None))
 
         with app.app_context():
             from extensions import db

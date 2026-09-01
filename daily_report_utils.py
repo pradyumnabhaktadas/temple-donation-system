@@ -191,10 +191,13 @@ def send_report(app, report_date=None, force=False):
     email_error = None
     if email_recipients:
         try:
-            email_sent = email_utils.send_daily_report_email(
+            email_sent, email_error = email_utils.send_daily_report_email(
                 app.config, email_recipients, data, org_name
             )
-        except Exception as exc:  # never let a send failure crash the whole job
+        except Exception as exc:  # last-resort safety net -- send_daily_report_email
+            # itself already catches and reports its own failures via the
+            # (sent, error) tuple above; this only fires for something truly
+            # unanticipated (e.g. a bug in that function itself).
             email_error = str(exc)
             app.logger.exception("Daily report email send failed")
 
@@ -202,16 +205,37 @@ def send_report(app, report_date=None, force=False):
     whatsapp_error = None
     for number in whatsapp_recipients:
         try:
-            if whatsapp_utils.send_daily_report_whatsapp(app.config, number, data, org_name):
+            sent, error = whatsapp_utils.send_daily_report_whatsapp(app.config, number, data, org_name)
+            if sent:
                 whatsapp_sent_count += 1
+            elif error:
+                # Keeps the most recent real failure, if more than one
+                # recipient fails -- enough to point at "what's wrong",
+                # without needing a per-recipient error list on this
+                # already-terse audit-log line.
+                whatsapp_error = error
         except Exception as exc:
             whatsapp_error = str(exc)
             app.logger.exception("Daily report WhatsApp send failed for %s", number)
 
+    # email_error/whatsapp_error used to be computed but never actually
+    # written here -- the 2026-08-29/08-30/08-31 incident showed up in
+    # AdminActivityLog as just "email_sent=False", with the real reason
+    # only ever reaching this function's own app.logger calls, which
+    # aren't visible anywhere in the admin UI. Including them here means
+    # the Activity Log alone can now answer "why", not just "whether".
+    #
+    # Truncated to 150 chars each: AdminActivityLog.details is a
+    # String(500), and Postgres (production) enforces that length --
+    # unlike SQLite, an over-length value here would raise on commit and
+    # take down the whole report run, exactly the kind of failure this
+    # change exists to make visible rather than hide.
     details = (
         f"date={data['report_date']} email_sent={email_sent} "
-        f"({len(email_recipients)} recipient(s)) "
-        f"whatsapp_sent={whatsapp_sent_count}/{len(whatsapp_recipients)}"
+        f"({len(email_recipients)} recipient(s))"
+        + (f" email_error={email_error[:150]!r}" if email_error else "")
+        + f" whatsapp_sent={whatsapp_sent_count}/{len(whatsapp_recipients)}"
+        + (f" whatsapp_error={whatsapp_error[:150]!r}" if whatsapp_error else "")
     )
     db.session.add(
         AdminActivityLog(

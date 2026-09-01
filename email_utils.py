@@ -129,17 +129,25 @@ def send_backup_email(cfg, to_email, filename, zip_bytes):
 
 def send_daily_report_email(cfg, to_addresses, report_data, org_name):
     """Emails the 4 AM daily collection report (see daily_report_utils.py)
-    to every address in `to_addresses`. Same demo-mode/never-raises
-    contract as the other senders in this file. Recipients are BCC'd on a
-    single message rather than one email per recipient -- keeps this a
-    single SMTP round trip and doesn't expose the recipient list to
-    everyone on it."""
+    to every address in `to_addresses`. Still never raises -- an
+    unattended cron/relay run must not crash on a bad SMTP config -- but
+    unlike the donor-facing senders in this file, returns (sent, error)
+    instead of a plain bool: `error` is None for both success and demo
+    mode (nothing configured, not a failure), and the actual exception
+    message for a genuine send failure. Without this, the 2026-08-29/
+    08-30/08-31 incident (AdminActivityLog only ever showed
+    "email_sent=False", never *why*) was undiagnosable from the Activity
+    Log alone -- the real reason only ever existed in this function's own
+    logger.exception() call, which isn't visible anywhere in the admin UI.
+    Recipients are BCC'd on a single message rather than one email per
+    recipient -- keeps this a single SMTP round trip and doesn't expose
+    the recipient list to everyone on it."""
     if not to_addresses:
-        return False
+        return False, None
 
     smtp_host = cfg.get("SMTP_HOST")
     if not smtp_host:
-        return False  # DEMO MODE: nothing was actually sent
+        return False, None  # DEMO MODE: nothing was actually sent, not an error
 
     from daily_report_utils import _render_email_html
 
@@ -188,10 +196,10 @@ def send_daily_report_email(cfg, to_addresses, report_data, org_name):
             ),
         )
 
-        return True
-    except Exception:
+        return True, None
+    except Exception as exc:
         current_app.logger.exception("Failed to email daily report to %s", to_addresses)
-        return False
+        return False, str(exc)
 
 
 def _from_header(cfg):

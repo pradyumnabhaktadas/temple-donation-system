@@ -336,11 +336,11 @@ class TestSendReport:
 
             def fake_email(cfg, to_addresses, data, org_name):
                 email_calls.append((to_addresses, org_name))
-                return True
+                return True, None
 
             def fake_whatsapp(cfg, phone, data, org_name):
                 whatsapp_calls.append(phone)
-                return True
+                return True, None
 
             monkeypatch.setattr("email_utils.send_daily_report_email", fake_email)
             monkeypatch.setattr("whatsapp_utils.send_daily_report_whatsapp", fake_whatsapp)
@@ -362,8 +362,8 @@ class TestSendReport:
         from extensions import db
 
         with app.app_context():
-            monkeypatch.setattr("email_utils.send_daily_report_email", lambda *a, **k: True)
-            monkeypatch.setattr("whatsapp_utils.send_daily_report_whatsapp", lambda *a, **k: True)
+            monkeypatch.setattr("email_utils.send_daily_report_email", lambda *a, **k: (True, None))
+            monkeypatch.setattr("whatsapp_utils.send_daily_report_whatsapp", lambda *a, **k: (True, None))
 
             from daily_report_utils import send_report
             report_date = datetime.date(2026, 8, 26)
@@ -376,8 +376,8 @@ class TestSendReport:
     def test_force_resends_even_if_already_sent(self, app, monkeypatch):
         with app.app_context():
             calls = []
-            monkeypatch.setattr("email_utils.send_daily_report_email", lambda *a, **k: (calls.append(1) or True))
-            monkeypatch.setattr("whatsapp_utils.send_daily_report_whatsapp", lambda *a, **k: True)
+            monkeypatch.setattr("email_utils.send_daily_report_email", lambda *a, **k: (calls.append(1) or True, None))
+            monkeypatch.setattr("whatsapp_utils.send_daily_report_whatsapp", lambda *a, **k: (True, None))
 
             from extensions import db
             from models import DailyReportRecipient
@@ -391,6 +391,40 @@ class TestSendReport:
 
             assert not result.get("skipped")
             assert len(calls) == 2
+
+    def test_send_failure_reason_reaches_activity_log_details(self, app, monkeypatch):
+        """Regression test for the 2026-08-29/08-30/08-31 incident:
+        AdminActivityLog showed only "email_sent=False", never *why*, even
+        though the underlying functions had the real reason all along --
+        they just logged it via app.logger and swallowed it before
+        send_report() ever saw it. Now the (sent, error) tuple carries it
+        through into this same audit-log line."""
+        from extensions import db
+        from models import DailyReportRecipient, AdminActivityLog
+
+        with app.app_context():
+            db.session.add(DailyReportRecipient(contact_type="email", value="diag@example.org"))
+            db.session.add(DailyReportRecipient(contact_type="whatsapp", value="9876500700"))
+            db.session.commit()
+
+            monkeypatch.setattr(
+                "email_utils.send_daily_report_email",
+                lambda *a, **k: (False, "connection refused"),
+            )
+            monkeypatch.setattr(
+                "whatsapp_utils.send_daily_report_whatsapp",
+                lambda *a, **k: (False, "500 Internal Server Error"),
+            )
+
+            from daily_report_utils import send_report
+            result = send_report(app, report_date=datetime.date(2026, 8, 29))
+
+            assert result["email_error"] == "connection refused"
+            assert result["whatsapp_error"] == "500 Internal Server Error"
+
+            log = AdminActivityLog.query.filter_by(action="daily_report_sent").first()
+            assert "email_error='connection refused'" in log.details
+            assert "whatsapp_error='500 Internal Server Error'" in log.details
 
     def test_no_recipients_configured_still_logs_and_does_not_crash(self, app):
         with app.app_context():
@@ -408,8 +442,8 @@ class TestSendReport:
         from models import DailyReportRecipient
 
         with app.app_context():
-            monkeypatch.setattr("email_utils.send_daily_report_email", lambda *a, **k: True)
-            monkeypatch.setattr("whatsapp_utils.send_daily_report_whatsapp", lambda *a, **k: True)
+            monkeypatch.setattr("email_utils.send_daily_report_email", lambda *a, **k: (True, None))
+            monkeypatch.setattr("whatsapp_utils.send_daily_report_whatsapp", lambda *a, **k: (True, None))
 
             db.session.add(DailyReportRecipient(
                 contact_type="email", value="daily@example.org", frequency="daily"))
