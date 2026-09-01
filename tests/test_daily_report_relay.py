@@ -187,6 +187,37 @@ class TestSendDailyReportNowButton:
         # the button doesn't force a resend.
         assert len(calls) == 1
 
+    def test_force_resend_button_bypasses_the_idempotency_guard(self, app, client, monkeypatch):
+        """The "Force Resend" button (force=1) exists specifically for
+        confirming a fix actually works without shell access -- it must
+        actually resend, and log a distinct action so an accidental
+        duplicate send to real recipients is traceable in Activity Log."""
+        from models import AdminActivityLog
+
+        calls = []
+        monkeypatch.setattr(
+            "email_utils.send_daily_report_email",
+            lambda cfg, to, data, org: (calls.append(1) or True, None),
+        )
+        monkeypatch.setattr("whatsapp_utils.send_daily_report_whatsapp", lambda *a, **k: (True, None))
+
+        with app.app_context():
+            from extensions import db
+            from models import DailyReportRecipient
+            db.session.add(DailyReportRecipient(contact_type="email", value="force-button@example.org"))
+            db.session.commit()
+
+        login(client)
+        client.post("/admin/daily-report-recipients/send-now", follow_redirects=True)
+        client.post("/admin/daily-report-recipients/send-now", data={"force": "1"}, follow_redirects=True)
+
+        assert len(calls) == 2
+
+        with app.app_context():
+            forced = AdminActivityLog.query.filter_by(action="daily_report_manual_force_resend").first()
+            assert forced is not None
+            assert forced.admin_username == "testadmin"
+
 
 class TestDailyReportCliClient:
     """daily_report.py itself, with requests.post mocked out -- these never

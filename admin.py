@@ -3644,18 +3644,25 @@ def send_daily_report_now():
     Log (Admin -> Activity Log) a few seconds after this redirect, same as
     every automatic run's outcome always does.
 
-    Not forced -- if today's report already went out (automatically or
-    from an earlier click), this just reports that rather than resending
-    to every recipient again. Use `python daily_report.py --force` from a
-    shell for a genuine forced resend."""
-    log_activity("daily_report_manual_trigger", target_type="daily_report")
+    Not forced by default -- if today's report already went out
+    (automatically or from an earlier click), a plain click here just
+    reports that rather than resending to every recipient again. The
+    template's second "Force Resend" button posts force=1 for the rare
+    case that's actually wanted -- e.g. confirming a fix actually works,
+    where waiting for tomorrow isn't practical and shell access to run
+    `python daily_report.py --force` isn't convenient."""
+    force = request.form.get("force") == "1"
+    log_activity(
+        "daily_report_manual_trigger" if not force else "daily_report_manual_force_resend",
+        target_type="daily_report",
+    )
     db.session.commit()
 
     app = current_app._get_current_object()
     if app.config.get("TESTING"):
-        _send_daily_report_now_background(app, None, False)
+        _send_daily_report_now_background(app, None, force)
     else:
-        threading.Thread(target=_send_daily_report_now_background, args=(app, None, False), daemon=True).start()
+        threading.Thread(target=_send_daily_report_now_background, args=(app, None, force), daemon=True).start()
 
     flash("Daily report send triggered -- check Activity Log in a few seconds for the result.")
     return redirect(url_for("admin.daily_report_recipients"))
