@@ -51,6 +51,14 @@ services:
       # service's generated value from another service's env directly).
       - key: INTERNAL_TASK_TOKEN
         generateValue: true
+      # Authenticates /internal/zoho-form-donation -- see config.py's
+      # ZOHO_FORMS_WEBHOOK_TOKEN docstring and README's "Zoho Forms"
+      # section. generateValue here, then copy the generated value into
+      # every Zoho Form's own Webhook Custom Header (X-Zoho-Webhook-Token)
+      # -- Zoho calls this web service directly, so unlike
+      # INTERNAL_TASK_TOKEN this one never needs to reach the cron job.
+      - key: ZOHO_FORMS_WEBHOOK_TOKEN
+        generateValue: true
       - key: DATABASE_URL
         fromDatabase:
           name: temple-donation-db

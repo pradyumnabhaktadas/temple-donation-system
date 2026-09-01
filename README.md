@@ -567,6 +567,76 @@ redeploy needed to add/remove a recipient.
   (same demo-mode pattern as everywhere else) — email delivery is
   unaffected either way.
 
+## Zoho Forms donations (webhook)
+
+Some collection happens through separate Zoho Forms (each with its own
+Razorpay-backed payment field configured inside Zoho, for donation
+campaigns that live outside this website) rather than this site's own
+`donate.html`. `public.zoho_form_donation_webhook` (`POST
+/internal/zoho-form-donation`) turns a completed payment on one of those
+forms into a real donation here, with a real receipt number and the same
+email/WhatsApp receipt this site's own online donations get.
+
+This route is only half of the integration — the other half is
+configuring each Zoho Form's own **Webhook** integration (Zoho Forms →
+that form → Integrations → Developer & Automation → Webhooks → Configure
+Webhook). This app has no way to do that part for you; do it once per
+Zoho Form:
+
+- **Webhook URL**: `https://<your-domain>/internal/zoho-form-donation`
+- **Content Type**: `application/json`
+- **URL Parameters**: add `campaign` with the exact name of the Campaign
+  in this site's Admin → Campaigns that this particular Zoho Form's
+  donations should be recorded under (one static value per form — this is
+  how multiple Zoho Forms all point at the same webhook URL but land in
+  different campaigns).
+- **Custom Headers**: add `X-Zoho-Webhook-Token` set to this app's
+  `ZOHO_FORMS_WEBHOOK_TOKEN` (same value as the Render env var below).
+- **Payload Parameters**: map each of these parameter names to the
+  matching field on that form (skip any that form doesn't collect —
+  everything but `amount`, `phone`, `payment_status` and
+  `payment_transaction_id` is optional):
+  `full_name`, `phone`, `whatsapp_number`, `email`, `pan`, `address`,
+  `city`, `state`, `pincode`, `amount`, `remarks`, `receipt_type` (send
+  `80g` or `non80g` if the form lets the donor choose; leave unmapped to
+  use the campaign's own fixed 80G/Non-80G default). For the payment
+  field itself, Zoho Forms exposes `Payment Amount`, `Payment Status` and
+  `Payment Transaction ID` as payload-parameter sources — map those to
+  `amount`, `payment_status` and `payment_transaction_id` respectively
+  (`Payment Amount` arrives as a plain decimal like `100.00`, no special
+  handling needed). Zoho's own `Payment Transaction ID` field isn't a bare
+  Razorpay payment ID — on a live account it's a combined string like
+  `Txn ID : pay_TWnsKWUifmlYnc Order ID : order_TWns42m6OljsvJ`; this
+  route pulls the `pay_...` and `order_...` pieces out of that string
+  itself, so map the field as-is and don't try to reformat it on the Zoho
+  side. `Payment Status` on a confirmed live account only ever reads
+  `Completed` (payment went through — the only value this route acts on),
+  `Processing` (still the early async call below) or `Processing not
+  needed` (no payment field was actually triggered on that submission) —
+  both of the latter are acknowledged and ignored, not errors.
+- Zoho sends the payment result **asynchronously** from the form
+  submission (an early "pending" call, then the real outcome once the
+  gateway responds) — enable the payment field's **workflow** option so
+  the *final* status/transaction ID reach this webhook directly, or every
+  submission will only ever arrive as "pending" here and never create a
+  donation. This route acknowledges (`200`) and ignores any status other
+  than a recognised success value rather than treating it as an
+  integration failure Zoho would retry or email-alert about.
+
+Idempotency is keyed on `payment_transaction_id` (stored as
+`Donation.razorpay_payment_id`) — a redelivered or manually re-pushed
+webhook for a transaction already recorded is a no-op. See
+`public.zoho_form_donation_webhook`'s docstring for the one known gap in
+that (a same-millisecond duplicate delivery isn't fully closed by a
+database constraint) and why it's an accepted tradeoff rather than a
+migration.
+
+Every successful call is logged to **Admin → Settings → Activity Log**
+(`zoho_form_donation_received`) with the campaign, amount, and transaction
+ID, so a duplicate or a rejected submission (check the Zoho Form's own
+**Webhooks - Failed Entries** view for the latter — Zoho shows this
+route's error response there) is easy to trace back.
+
 ## Running the tests
 
 ```bash

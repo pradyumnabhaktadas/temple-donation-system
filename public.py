@@ -46,7 +46,7 @@ from werkzeug.exceptions import HTTPException
 from extensions import db, csrf, limiter
 from models import (
     Donor, Campaign, Donation, ReceiptCounter, BaceProperty, Festival, SevaType, LiveToGivePurpose,
-    AssociatedWith,
+    AssociatedWith, AdminActivityLog,
 )
 from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email
@@ -1418,6 +1418,207 @@ def internal_daily_report_send():
         "whatsapp_sent_count": result["whatsapp_sent_count"],
         "whatsapp_recipients_count": len(result["whatsapp_recipients"]),
         "whatsapp_error": result["whatsapp_error"],
+    })
+
+
+@bp.route("/internal/zoho-form-donation", methods=["POST"])
+@csrf.exempt
+@_safe_json_route
+def zoho_form_donation_webhook():
+    """Receives a payment-confirmed submission from a Zoho Forms donation
+    form and turns it into a real donation with a real receipt, the same
+    way a donation made directly on this site would be -- via
+    _finalize_success, since the underlying payment is a genuine Razorpay
+    transaction either way; the account's Zoho Forms are just configured
+    to charge through Razorpay from a different form UI, for collection
+    that happens outside this website. See README's "Zoho Forms" section
+    for exactly what to configure on the Zoho side (Payload Parameters,
+    URL Parameter, Custom Header) -- this route is only half of the
+    integration; each Zoho Form's own Webhook settings are the other half,
+    and this app has no way to configure those for you.
+
+    No browser/cookie is involved -- authenticated the same way as
+    internal_daily_report_send, via a shared secret (X-Zoho-Webhook-Token
+    header) compared with hmac.compare_digest, not session/CSRF.
+
+    Which campaign a submission belongs to is fixed per Zoho Form, not
+    something the submitted data can claim -- passed as a URL Parameter
+    (?campaign=<name>) configured once in that form's own Webhook setup,
+    the same way the shared token is a Custom Header rather than part of
+    the JSON body every form's own payload mapping would otherwise have to
+    repeat.
+
+    Zoho sends the payment result asynchronously from the form submission
+    itself -- a "pending" call first, then the real outcome once the
+    gateway responds (Zoho's docs recommend enabling the payment field's
+    "workflow" option so the *final* status/transaction ID reach here
+    directly instead of the initial pending one). Anything other than a
+    recognised success status is acknowledged with 200 and otherwise
+    ignored -- not treated as an integration failure Zoho would retry or
+    alert on.
+
+    payment_transaction_id doesn't arrive as a bare Razorpay payment ID --
+    Zoho's own "Payment Transaction ID" field (confirmed from a live
+    account's Reports grid) is a combined string like "Txn ID :
+    pay_TWnsKWUifmlYnc Order ID : order_TWns42m6OljsvJ". Pulled apart with
+    a regex below rather than a fixed split position, so a bare "pay_..."
+    (if some future form's payload parameter ever sends one on its own)
+    still works the same way.
+
+    Idempotency: keyed on the extracted payment_id (stored as
+    Donation.razorpay_payment_id, same column the site's own Razorpay flow
+    uses) -- a re-pushed or duplicate-delivered webhook for a
+    transaction_id already recorded is a no-op, returning the donation
+    that already exists rather than creating a second one. This is a
+    plain SELECT-then-INSERT check, not a database-enforced uniqueness
+    constraint (razorpay_payment_id has no unique index -- some rows
+    already share the literal value "SIMULATED" from demo-mode testing),
+    so two deliveries for the same transaction_id arriving within
+    milliseconds of each other could in principle both pass the check
+    before either commits. Realistic donation traffic through a form is
+    human-paced, not concurrent, so this is an accepted gap rather than
+    one closed with a schema migration -- any duplicate that did slip
+    through would still show up in Activity Log against the same
+    transaction_id and campaign, so it wouldn't go unnoticed.
+    """
+    expected_token = current_app.config.get("ZOHO_FORMS_WEBHOOK_TOKEN")
+    if not expected_token:
+        return jsonify({"error": "ZOHO_FORMS_WEBHOOK_TOKEN not configured"}), 503
+
+    provided_token = request.headers.get("X-Zoho-Webhook-Token", "")
+    if not hmac.compare_digest(provided_token, expected_token):
+        return jsonify({"error": "Unauthorized"}), 401
+
+    campaign_name = (request.args.get("campaign") or "").strip()
+    if not campaign_name:
+        return jsonify({"error": "Missing ?campaign= URL parameter"}), 400
+    campaign = Campaign.query.filter(db.func.lower(Campaign.name) == campaign_name.lower()).first()
+    if not campaign:
+        return jsonify({
+            "error": f"No campaign named '{campaign_name}' -- create it first under Admin > Campaigns"
+        }), 400
+
+    # Zoho can send application/json, application/x-www-form-urlencoded, or
+    # multipart/form-data depending on the webhook's Content-Type setting
+    # -- none of our payload parameters are file attachments, so all three
+    # carry everything this route needs; falls back to form data (covers
+    # both of the non-JSON content types) when the body isn't JSON.
+    payload = request.get_json(silent=True)
+    if payload is None:
+        payload = request.form.to_dict()
+
+    # Confirmed from a live account's Reports grid: Zoho's own values here
+    # are "Completed" (payment went through), "Processing" (still the
+    # early async call -- see the docstring), and "Processing not needed"
+    # (no payment field was actually triggered on that submission). Only
+    # "completed" should ever create a donation; the other synonyms below
+    # are kept only as a defensive fallback in case wording differs by
+    # account/API version -- "processing"/"processing not needed" must
+    # never match here.
+    payment_status = (payload.get("payment_status") or "").strip().lower()
+    if payment_status not in ("completed", "success", "succeeded", "paid", "captured"):
+        return jsonify({"skipped": "payment not completed", "status": payment_status}), 200
+
+    # Zoho's own "Payment Transaction ID" field (the same one its Reports
+    # grid shows) isn't a bare Razorpay payment ID -- it's a combined
+    # string like "Txn ID : pay_TWnsKWUifmlYnc Order ID : order_TWns42m6OljsvJ".
+    # Pulled apart with a regex rather than trusting either the whole
+    # string or a fixed split position, so this still works if that
+    # string's exact wording/spacing ever changes, or if a future form's
+    # payload parameter happens to send a bare "pay_..." on its own.
+    raw_transaction_field = (payload.get("payment_transaction_id") or "").strip()
+    payment_id_match = re.search(r"pay_\w+", raw_transaction_field)
+    order_id_match = re.search(r"order_\w+", raw_transaction_field)
+    transaction_id = payment_id_match.group() if payment_id_match else raw_transaction_field
+    order_id = order_id_match.group() if order_id_match else None
+    if not transaction_id:
+        return jsonify({"error": "Missing payment_transaction_id for a completed payment"}), 400
+
+    existing = Donation.query.filter_by(razorpay_payment_id=transaction_id).first()
+    if existing:
+        return jsonify({
+            "skipped": "already processed", "donation_id": existing.id,
+            "receipt_number": existing.receipt_number,
+        }), 200
+
+    try:
+        amount = float(payload.get("amount"))
+        if amount <= 0:
+            raise ValueError("amount must be greater than 0")
+    except (TypeError, ValueError):
+        return jsonify({"error": f"Invalid amount '{payload.get('amount')}'"}), 400
+
+    pan = (payload.get("pan") or "").strip().upper()
+    if pan and not is_valid_pan(pan):
+        return jsonify({"error": f"Invalid PAN '{pan}'"}), 400
+    if not is_valid_phone(payload.get("phone")):
+        return jsonify({"error": f"Invalid phone '{payload.get('phone')}'"}), 400
+    if payload.get("whatsapp_number") and not is_valid_phone(payload.get("whatsapp_number")):
+        return jsonify({"error": f"Invalid whatsapp_number '{payload.get('whatsapp_number')}'"}), 400
+
+    high_value_error = high_value_pan_address_error(amount, pan, payload.get("address"))
+    if high_value_error:
+        return jsonify({"error": high_value_error}), 400
+
+    # Same three-way choice as create_order()'s receipt_type: the Zoho
+    # Form can pass "80g"/"non80g" explicitly (a payload parameter mapped
+    # to a field on that form), or leave it blank to fall back to the
+    # campaign's own fixed Campaign.is_80g default.
+    receipt_type = (payload.get("receipt_type") or "").strip().lower()
+    if receipt_type == "80g":
+        is_80g_requested = True
+    elif receipt_type == "non80g":
+        is_80g_requested = False
+    else:
+        is_80g_requested = None
+
+    effective_is_80g = is_80g_requested if is_80g_requested is not None else campaign.is_80g
+    if effective_is_80g and not pan:
+        return jsonify({
+            "error": "A PAN is required to issue an 80G tax receipt for this donation."
+        }), 400
+
+    # Same REG-001 backstop as create_order(): a PAN that arrived despite
+    # not being legally required here (not 80G, not above the high-value
+    # threshold) is spurious and must not be written to the donor's shared
+    # profile.
+    donor_data = dict(payload)
+    if not (effective_is_80g or amount > HIGH_VALUE_PAN_THRESHOLD):
+        donor_data["pan"] = ""
+
+    donor = find_or_create_donor(donor_data)
+
+    donation = Donation(
+        donor_id=donor.id,
+        campaign_id=campaign.id,
+        amount=amount,
+        payment_mode="online",
+        status="pending",
+        recorded_by="zoho_form",
+        razorpay_payment_id=transaction_id,
+        razorpay_order_id=order_id,
+        is_80g_requested=is_80g_requested,
+        remarks=(payload.get("remarks") or "").strip()[:300] or f"Collected via Zoho Form ({campaign.name})",
+    )
+    db.session.add(donation)
+    db.session.commit()
+
+    _finalize_success(donation)
+
+    db.session.add(AdminActivityLog(
+        admin_username="system", action="zoho_form_donation_received", target_type="donation",
+        target_id=donation.id,
+        details=(
+            f"campaign={campaign.name} amount={amount} transaction_id={transaction_id}"
+            + (f" order_id={order_id}" if order_id else "")
+        )[:500],
+    ))
+    db.session.commit()
+
+    return jsonify({
+        "ok": True, "donation_id": donation.id, "donor_id": donor.id,
+        "receipt_number": donation.receipt_number, "transaction_id": transaction_id,
+        "order_id": order_id,
     })
 
 

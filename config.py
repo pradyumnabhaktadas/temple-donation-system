@@ -274,6 +274,24 @@ class Config:
     # (503) rather than run unauthenticated.
     INTERNAL_TASK_TOKEN = os.environ.get("INTERNAL_TASK_TOKEN", "")
 
+    # --- Zoho Forms donation webhook ---
+    # Some collection happens through separate Zoho Forms (each with its
+    # own Razorpay-backed payment field configured inside Zoho) rather than
+    # this site's own donate.html. Zoho's native Webhooks integration POSTs
+    # the submission -- including the payment result -- to a URL of our
+    # choosing the moment a payment completes; see README's "Zoho Forms"
+    # section for the exact Payload Parameters/URL Parameter/Custom Header
+    # setup each Zoho Form needs.
+    #
+    # Same shared-secret pattern as INTERNAL_TASK_TOKEN above, just for a
+    # request Zoho's servers send rather than our own cron script -- kept
+    # as its own token (not reused) so rotating access for one integration
+    # never touches the other. Sent as a Custom Header (X-Zoho-Webhook-
+    # Token) from the Zoho side, compared with hmac.compare_digest. Leave
+    # blank to refuse all requests to that route (503) rather than run
+    # unauthenticated.
+    ZOHO_FORMS_WEBHOOK_TOKEN = os.environ.get("ZOHO_FORMS_WEBHOOK_TOKEN", "")
+
     # --- Donor OTP login ---
     # No SMS provider is wired up yet (see sms_utils.py) -- OTPs are shown
     # directly on the verify page instead of texted, clearly marked "Demo
