@@ -164,7 +164,15 @@ class TestSendDailyReportNowButton:
             assert sent_log is not None
             assert sent_log.admin_username == "system"
 
-    def test_second_click_same_day_reports_already_sent_without_resending(self, app, client, monkeypatch):
+    def test_second_click_same_day_resends_anyway(self, app, client, monkeypatch):
+        """A separate "Force Resend" button used to exist for this --
+        collapsed into the one button (see send_daily_report_now's
+        docstring) because a plain click that silently no-ops was never
+        actually useful: the whole point of this button is confirming a
+        fix works right after diagnosing a failure, not waiting for
+        tomorrow's automatic run. Every click really does resend, so the
+        confirm dialog in the template is what protects against an
+        accidental duplicate now, not server-side idempotency."""
         calls = []
         monkeypatch.setattr(
             "email_utils.send_daily_report_email",
@@ -182,41 +190,7 @@ class TestSendDailyReportNowButton:
         client.post("/admin/daily-report-recipients/send-now", follow_redirects=True)
         client.post("/admin/daily-report-recipients/send-now", follow_redirects=True)
 
-        # send_report()'s own idempotency guard (AdminActivityLog lookup by
-        # report_date) means the second trigger the same day is a no-op --
-        # the button doesn't force a resend.
-        assert len(calls) == 1
-
-    def test_force_resend_button_bypasses_the_idempotency_guard(self, app, client, monkeypatch):
-        """The "Force Resend" button (force=1) exists specifically for
-        confirming a fix actually works without shell access -- it must
-        actually resend, and log a distinct action so an accidental
-        duplicate send to real recipients is traceable in Activity Log."""
-        from models import AdminActivityLog
-
-        calls = []
-        monkeypatch.setattr(
-            "email_utils.send_daily_report_email",
-            lambda cfg, to, data, org: (calls.append(1) or True, None),
-        )
-        monkeypatch.setattr("whatsapp_utils.send_daily_report_whatsapp", lambda *a, **k: (True, None))
-
-        with app.app_context():
-            from extensions import db
-            from models import DailyReportRecipient
-            db.session.add(DailyReportRecipient(contact_type="email", value="force-button@example.org"))
-            db.session.commit()
-
-        login(client)
-        client.post("/admin/daily-report-recipients/send-now", follow_redirects=True)
-        client.post("/admin/daily-report-recipients/send-now", data={"force": "1"}, follow_redirects=True)
-
         assert len(calls) == 2
-
-        with app.app_context():
-            forced = AdminActivityLog.query.filter_by(action="daily_report_manual_force_resend").first()
-            assert forced is not None
-            assert forced.admin_username == "testadmin"
 
 
 class TestDailyReportCliClient:

@@ -3,15 +3,12 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
   <h3 class="mb-0">📊 Daily Report Recipients</h3>
-  <form method="post" action="{{ url_for('admin.send_daily_report_now') }}" class="d-flex gap-2">
+  <form method="post" action="{{ url_for('admin.send_daily_report_now') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <button class="btn btn-gold btn-sm" title="Runs today's report right now instead of waiting for the 4 AM automatic run. Skipped if today's report was already sent. Result appears in Activity Log a few seconds later.">
+    <button class="btn btn-gold btn-sm"
+            data-confirm="Send today's report to every active recipient now? This sends real email/WhatsApp, even if today's report already went out earlier."
+            title="Runs today's report right now instead of waiting for the 4 AM automatic run -- always sends, even if today's report already went out. Result appears in Activity Log a few seconds later.">
       Send Report Now
-    </button>
-    <button class="btn btn-outline-danger btn-sm" name="force" value="1"
-            data-confirm="Force-resend today's report to every recipient even though it may have already gone out? Use this only to confirm a fix actually works -- it can send a duplicate email/WhatsApp to real recipients."
-            title="Resends even if today's report already went out. Sends real emails/WhatsApps to every active recipient -- use only to confirm a fix, not routinely.">
-      Force Resend
     </button>
   </form>
 </div>
