@@ -20,6 +20,32 @@ class Config:
     # comfortably under typical cloud idle-connection timeouts. No effect
     # on SQLite (used for local/demo mode).
     SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True, "pool_recycle": 240}
+    # Postgres only: cap how long a query will block waiting to *acquire* a
+    # row lock. Two places in this app take an explicit row lock --
+    # ReceiptCounter.next_receipt_number()'s with_for_update() (one shared
+    # counter row, touched by every donation-finalizing path in the app:
+    # public checkout, the Razorpay webhook, the Zoho Forms webhook, and
+    # offline/manual entry) and _finalize_success()'s lock on the donation
+    # row itself. Without a lock_timeout, if any one of those holders ever
+    # gets stuck mid-transaction -- an orphaned connection, a request that
+    # hung on something upstream of its own commit -- every *other* request
+    # needing that same lock queues up with no ceiling, until gunicorn's own
+    # worker timeout kills the whole worker. That's indistinguishable, from
+    # the browser, from the connection simply dropping mid-submit: nothing
+    # reaches the app's own try/except (the hang is inside the lock wait,
+    # before any of that code runs), and nothing is written to the access
+    # log (which is only emitted once a request completes). A lock_timeout
+    # turns that into a normal, fast, loggable error -- the existing
+    # try/except around every with_for_update() call already rolls back and
+    # reports it cleanly; it just never had a ceiling to hit before now.
+    # Deliberately lock_timeout only, not statement_timeout: bulk CSV/XLSX
+    # imports run many inserts in one transaction and can legitimately take
+    # longer than a few seconds with no lock contention involved -- a
+    # statement_timeout would kill those; lock_timeout only fires while
+    # *waiting to acquire* a lock, so uncontended long-running work is
+    # unaffected. No effect on SQLite (used for local/demo mode and tests).
+    if SQLALCHEMY_DATABASE_URI.startswith("postgresql"):
+        SQLALCHEMY_ENGINE_OPTIONS["connect_args"] = {"options": "-c lock_timeout=8000"}
 
     # Without this, Flask doesn't send a Cache-Control max-age on files
     # served from /static (logo, gallery photos, style.css) -- browsers
