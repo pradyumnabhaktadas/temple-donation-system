@@ -197,6 +197,39 @@ class TestDonationCreation:
         assert d.razorpay_payment_id == "pay_TWnsKWUifmlYnc"
         assert d.razorpay_order_id == "order_TWns42m6OljsvJ"
 
+    def test_real_zoho_webhook_transaction_id_has_no_order_id_embedded(self, client, app):
+        """Confirmed from a live production call: unlike the Reports grid
+        (which shows "Txn ID : ... Order ID : ..."), the actual webhook
+        payload for payment_transaction_id arrived as just the bare
+        "pay_..." id. The donation must still be created correctly with
+        no order ID rather than failing or mis-parsing."""
+        from models import Donation
+        app.config["ZOHO_FORMS_WEBHOOK_TOKEN"] = TOKEN
+        resp = _post(client, payment_transaction_id="pay_TX10nlyMiM6Lga")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["transaction_id"] == "pay_TX10nlyMiM6Lga"
+        assert body["order_id"] is None
+
+        d = Donation.query.one()
+        assert d.razorpay_payment_id == "pay_TX10nlyMiM6Lga"
+        assert d.razorpay_order_id is None
+
+    def test_separate_payment_order_id_parameter_is_picked_up(self, client, app):
+        """If a form's Payload Parameters do map a separate Order ID field
+        (payment_order_id), it's used since payment_transaction_id alone
+        doesn't carry one in practice (see the test above)."""
+        from models import Donation
+        app.config["ZOHO_FORMS_WEBHOOK_TOKEN"] = TOKEN
+        resp = _post(
+            client, payment_transaction_id="pay_SeparateOrderTest",
+            payment_order_id="order_SeparateOrderTest",
+        )
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["order_id"] == "order_SeparateOrderTest"
+        assert Donation.query.one().razorpay_order_id == "order_SeparateOrderTest"
+
     def test_redelivery_of_the_combined_string_is_still_deduped(self, client, app):
         from models import Donation
         app.config["ZOHO_FORMS_WEBHOOK_TOKEN"] = TOKEN

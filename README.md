@@ -609,7 +609,17 @@ Zoho Form:
   `Txn ID : pay_TWnsKWUifmlYnc Order ID : order_TWns42m6OljsvJ`; this
   route pulls the `pay_...` and `order_...` pieces out of that string
   itself, so map the field as-is and don't try to reformat it on the Zoho
-  side. `Payment Status` on a confirmed live account only ever reads
+  side. In practice, though, a live webhook call's `payment_transaction_id`
+  has come through as just the bare `pay_...` id, without the order half
+  the Reports grid displays alongside it — Zoho only officially lists
+  Payment Amount/Status/Currency/Transaction ID as webhook-transferable
+  payment fields, not a separate Order ID. If that form's payment field
+  does expose an Order ID as its own selectable option under **Choose
+  Field**, add one more Payload Parameter named `payment_order_id` mapped
+  to it and this route will pick it up that way instead; if it doesn't,
+  the order ID is simply left blank on that donation (the payment ID
+  alone is what the receipt and idempotency check rely on — the order ID
+  is a nice-to-have, not required). `Payment Status` on a confirmed live account only ever reads
   `Completed` (payment went through — the only value this route acts on),
   `Processing` (still the early async call below) or `Processing not
   needed` (no payment field was actually triggered on that submission) —

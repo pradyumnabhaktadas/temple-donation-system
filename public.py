@@ -1539,8 +1539,23 @@ def zoho_form_donation_webhook():
     # payload parameter happens to send a bare "pay_..." on its own.
     raw_transaction_field = (payload.get("payment_transaction_id") or "").strip()
     payment_id_match = re.search(r"pay_\w+", raw_transaction_field)
+    # In practice, a live account's webhook payload for this parameter has
+    # come through as just the bare "pay_..." transaction ID, without the
+    # "Order ID : order_..." half the Reports grid shows alongside it (the
+    # combined display there appears to be Reports-only, not something the
+    # webhook payload itself carries) -- so the order ID is picked up two
+    # ways: from inside payment_transaction_id if it happens to be there
+    # (some accounts/forms may still combine them), or from a separate
+    # `payment_order_id` payload parameter if that form's Payload
+    # Parameters were mapped to include one (see README -- Zoho Forms
+    # doesn't officially list "Order ID" as one of its four
+    # webhook-transferable payment fields, so this may not always be
+    # available; it's a nice-to-have here, not required for the receipt).
     order_id_match = re.search(r"order_\w+", raw_transaction_field)
-    order_id = order_id_match.group() if order_id_match else None
+    order_id = (
+        order_id_match.group() if order_id_match
+        else (payload.get("payment_order_id") or "").strip() or None
+    )
     # Deliberately not falling back to the raw string when no "pay_..."
     # pattern is found -- a "Completed" status with no genuine-looking
     # Razorpay payment ID attached is exactly the ambiguous case a real
