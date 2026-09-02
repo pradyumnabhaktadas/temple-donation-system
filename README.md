@@ -625,13 +625,42 @@ Zoho Form:
   needed` (no payment field was actually triggered on that submission) —
   both of the latter are acknowledged and ignored, not errors.
 - Zoho sends the payment result **asynchronously** from the form
-  submission (an early "pending" call, then the real outcome once the
-  gateway responds) — enable the payment field's **workflow** option so
-  the *final* status/transaction ID reach this webhook directly, or every
-  submission will only ever arrive as "pending" here and never create a
-  donation. This route acknowledges (`200`) and ignores any status other
-  than a recognised success value rather than treating it as an
-  integration failure Zoho would retry or email-alert about.
+  submission (an early "pending"/"processing" call, then in theory the
+  real outcome once the gateway responds) — Zoho's docs recommend
+  enabling the payment field's **workflow** option so the *final*
+  status/transaction ID reach this webhook directly instead of just the
+  early one; do that regardless. **But don't rely on it alone** — see the
+  next section for why this route no longer trusts `payment_status` as
+  the pass/fail gate.
+
+### Why the pass/fail decision is Razorpay's, not Zoho's
+
+On a live account, the "final" webhook call has not reliably arrived even
+with **workflow** enabled: a real submission's own Zoho record went on to
+show `Payment Status: Completed`, but the *only* webhook call this route
+ever received for it carried `status: processing`, and no follow-up call
+ever came. Zoho counts a `200` response as a successfully delivered
+webhook regardless of what this route did with it, so there was nothing
+on Zoho's side to retry or alert on — the donation was silently lost.
+
+Because of that, `payment_status` is now advisory only, used solely to
+short-circuit a call that has no transaction ID at all yet (nothing to
+check). The actual pass/fail decision is made by asking **Razorpay
+directly** whether the extracted payment ID is captured
+(`public._zoho_payment_is_captured`, retried a few times via the same
+`utils.retry()` the daily report's sends use, to ride out a brief network
+hiccup talking to Razorpay). This means a donation can be created off the
+very first call this route ever receives for a given payment, regardless
+of what status label Zoho attached to it or whether Zoho ever sends a
+second call at all.
+
+This does mean `RAZORPAY_ENABLED`/`RAZORPAY_KEY_ID`/`RAZORPAY_KEY_SECRET`
+must be configured on this deployment for the Zoho integration to create
+anything — without them (or if Razorpay can't be reached after retrying),
+the route returns `502` rather than silently trusting Zoho's own label,
+so the call shows up in that Zoho Form's **Webhooks - Failed Entries**
+and can be manually re-pushed once Razorpay is reachable again, instead
+of the donation vanishing with no trace.
 
 Idempotency is keyed on `payment_transaction_id` (stored as
 `Donation.razorpay_payment_id`) — a redelivered or manually re-pushed

@@ -52,7 +52,7 @@ from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email
 from whatsapp_utils import send_receipt_whatsapp
 from utils import (
-    HIGH_VALUE_PAN_THRESHOLD, is_valid_pan, is_valid_phone, normalize_phone, receipt_access_token,
+    HIGH_VALUE_PAN_THRESHOLD, is_valid_pan, is_valid_phone, normalize_phone, receipt_access_token, retry,
 )
 
 bp = Blueprint("public", __name__)
@@ -1421,6 +1421,40 @@ def internal_daily_report_send():
     })
 
 
+def _zoho_payment_is_captured(payment_id):
+    """Returns (captured: bool, error: str|None). The Zoho webhook's only
+    proof a payment is genuine and captured -- unlike _payment_is_captured
+    above (used by the site's own flow, where the caller has *already*
+    verified a Razorpay signature and this only refines "captured vs.
+    merely authorized"), so this fails closed rather than open: an error
+    here is reported as an error to the caller (which turns into a
+    non-2xx response Zoho logs as a failed webhook delivery, re-pushable
+    once Razorpay is reachable again), never silently treated as success.
+
+    retry()'d (same helper daily_report_utils's email/WhatsApp sends use)
+    since this runs synchronously inside the webhook request -- a single
+    transient network hiccup talking to Razorpay shouldn't be the
+    difference between a real donation getting its receipt or not."""
+    if not current_app.config.get("RAZORPAY_ENABLED"):
+        return False, "Razorpay isn't configured on this deployment"
+
+    try:
+        import razorpay
+
+        def _fetch():
+            client = razorpay.Client(
+                auth=(current_app.config["RAZORPAY_KEY_ID"], current_app.config["RAZORPAY_KEY_SECRET"])
+            )
+            return client.payment.fetch(payment_id)
+
+        payment = retry(_fetch, attempts=3, delay_seconds=2) or {}
+    except Exception as exc:
+        current_app.logger.exception("Could not fetch payment %s from Razorpay for Zoho webhook", payment_id)
+        return False, str(exc)
+
+    return payment.get("status") == "captured", None
+
+
 @bp.route("/internal/zoho-form-donation", methods=["POST"])
 @csrf.exempt
 @_safe_json_route
@@ -1449,22 +1483,39 @@ def zoho_form_donation_webhook():
     repeat.
 
     Zoho sends the payment result asynchronously from the form submission
-    itself -- a "pending" call first, then the real outcome once the
-    gateway responds (Zoho's docs recommend enabling the payment field's
-    "workflow" option so the *final* status/transaction ID reach here
-    directly instead of the initial pending one). Anything other than a
-    recognised success status is acknowledged with 200 and otherwise
-    ignored -- not treated as an integration failure Zoho would retry or
-    alert on.
+    itself -- a "pending" call first, then (in theory) the real outcome
+    once the gateway responds, and Zoho's docs recommend enabling the
+    payment field's "workflow" option so the *final* status/transaction ID
+    reach here directly instead of the initial pending one. In practice,
+    on a live account, that second call has not reliably arrived even with
+    workflow enabled: a submission's own Zoho record went on to show
+    `Payment Status: Completed`, but the one and only webhook call this
+    route ever received for it carried `status: processing`, and no
+    follow-up call ever came -- Zoho counts a 200 response as a
+    successfully delivered webhook regardless of what this route did with
+    it, so there's nothing on Zoho's side to retry or alert on, and the
+    donation would otherwise have been silently lost forever.
 
-    A receipt is only ever issued when *both* of these hold: the status is
-    a recognised success value, and payment_transaction_id contains a
-    genuine-looking Razorpay payment ID. Neither is trusted alone -- a
-    success status with a blank/unrecognisable transaction id is rejected
-    (400) rather than accepted with a placeholder, and a real-looking
-    transaction id on a non-success status is still ignored, since a
-    receipt must never be issued for anything short of a confirmed
-    payment.
+    Because of that, Zoho's self-reported payment_status is treated as
+    advisory, not authoritative -- it's used only to short-circuit calls
+    that don't even have a transaction ID yet, avoiding a wasted Razorpay
+    API call. The actual pass/fail decision is made by asking Razorpay
+    directly whether the extracted payment ID is captured
+    (_zoho_payment_is_captured), the same source of truth every other
+    payment-confirmation path in this codebase ultimately defers to. This
+    means a donation can be created off the *very first* call this route
+    receives for a given payment, regardless of what status label Zoho
+    attached to it or whether Zoho ever sends a second call at all.
+
+    A receipt is only ever issued when *both* of these hold: a
+    genuine-looking Razorpay payment ID was extracted from
+    payment_transaction_id, and Razorpay itself confirms that payment is
+    captured. Neither is trusted alone -- a "Completed"-labelled call with
+    a blank/unrecognisable transaction id is rejected (400) rather than
+    accepted with a placeholder, and a real-looking transaction id is
+    still checked against Razorpay regardless of what status Zoho
+    attached to it, since a receipt must never be issued for anything
+    short of a confirmed payment.
 
     payment_transaction_id doesn't arrive as a bare Razorpay payment ID --
     Zoho's own "Payment Transaction ID" field (confirmed from a live
@@ -1518,17 +1569,13 @@ def zoho_form_donation_webhook():
     if payload is None:
         payload = request.form.to_dict()
 
-    # Confirmed from a live account's Reports grid: Zoho's own values here
-    # are "Completed" (payment went through), "Processing" (still the
-    # early async call -- see the docstring), and "Processing not needed"
-    # (no payment field was actually triggered on that submission). Only
-    # "completed" should ever create a donation; the other synonyms below
-    # are kept only as a defensive fallback in case wording differs by
-    # account/API version -- "processing"/"processing not needed" must
-    # never match here.
+    # Zoho's own payment_status (confirmed from a live account's Reports
+    # grid: "Completed"/"Processing"/"Processing not needed") is advisory
+    # only now -- see the docstring for why. Used here just to recognise
+    # the one case worth flagging as an error rather than a normal skip: a
+    # "Completed"-labelled call that somehow has no transaction id at all.
     payment_status = (payload.get("payment_status") or "").strip().lower()
-    if payment_status not in ("completed", "success", "succeeded", "paid", "captured"):
-        return jsonify({"skipped": "payment not completed", "status": payment_status}), 200
+    looks_like_success_label = payment_status in ("completed", "success", "succeeded", "paid", "captured")
 
     # Zoho's own "Payment Transaction ID" field (the same one its Reports
     # grid shows) isn't a bare Razorpay payment ID -- it's a combined
@@ -1557,14 +1604,18 @@ def zoho_form_donation_webhook():
         else (payload.get("payment_order_id") or "").strip() or None
     )
     # Deliberately not falling back to the raw string when no "pay_..."
-    # pattern is found -- a "Completed" status with no genuine-looking
-    # Razorpay payment ID attached is exactly the ambiguous case a real
-    # receipt must never be issued for, so it's treated the same as a
-    # missing transaction_id (rejected below) rather than trusted as-is.
+    # pattern is found. No payment id at all is the normal shape of Zoho's
+    # early async call -- skipped like any other incomplete submission,
+    # *unless* Zoho itself already labelled this call "Completed", in
+    # which case a call with a success label but no id at all is genuinely
+    # anomalous and worth surfacing as an error rather than silently
+    # skipping.
     if not payment_id_match:
-        return jsonify({
-            "error": "Missing or unrecognised payment_transaction_id for a completed payment"
-        }), 400
+        if looks_like_success_label:
+            return jsonify({
+                "error": "Missing or unrecognised payment_transaction_id for a completed payment"
+            }), 400
+        return jsonify({"skipped": "no payment transaction id yet", "status": payment_status}), 200
     transaction_id = payment_id_match.group()
 
     existing = Donation.query.filter_by(razorpay_payment_id=transaction_id).first()
@@ -1573,6 +1624,27 @@ def zoho_form_donation_webhook():
             "skipped": "already processed", "donation_id": existing.id,
             "receipt_number": existing.receipt_number,
         }), 200
+
+    # The actual pass/fail decision: verified against Razorpay directly
+    # rather than trusting payment_status, which production traffic showed
+    # can arrive as "processing" on the only call this route ever gets for
+    # a payment that Razorpay itself goes on to capture moments later (see
+    # the docstring). captured=True here is what "the payment is real and
+    # the money is ours" now actually means for this route.
+    captured, verify_error = _zoho_payment_is_captured(transaction_id)
+    if verify_error:
+        # Non-2xx and deliberately so: unlike _payment_is_captured's
+        # fail-open (used by the site's own already-signature-verified
+        # flow), this webhook has no other proof the payment is genuine,
+        # so an inability to check is a failure, not a shrug. Zoho logs a
+        # non-2xx response as a failed webhook delivery under that form's
+        # "Webhooks - Failed Entries", re-pushable by hand once Razorpay
+        # is reachable again -- better than the donation silently vanishing.
+        return jsonify({
+            "error": f"Could not confirm payment {transaction_id} with Razorpay: {verify_error}"
+        }), 502
+    if not captured:
+        return jsonify({"skipped": "payment not yet captured", "transaction_id": transaction_id}), 200
 
     try:
         amount = float(payload.get("amount"))
