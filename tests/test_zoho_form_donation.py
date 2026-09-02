@@ -134,6 +134,19 @@ class TestPaymentStatusGate:
         assert resp.status_code == 400
         assert Donation.query.count() == 0
 
+    def test_unrecognisable_transaction_id_on_a_success_is_rejected(self, client, app):
+        """A "Completed" status with a transaction_id that doesn't contain
+        a genuine-looking Razorpay payment ID (no "pay_..." substring) must
+        be rejected outright rather than accepted with the raw garbage
+        string stored as the payment ID -- a receipt must only ever be
+        issued against something that actually looks like a real
+        payment, never a status flag alone."""
+        from models import Donation
+        app.config["ZOHO_FORMS_WEBHOOK_TOKEN"] = TOKEN
+        resp = _post(client, payment_transaction_id="not-a-real-transaction-id")
+        assert resp.status_code == 400
+        assert Donation.query.count() == 0
+
 
 class TestDonationCreation:
     def test_successful_payment_creates_a_donation_with_a_real_receipt(self, client, app):

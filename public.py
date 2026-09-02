@@ -1457,13 +1457,24 @@ def zoho_form_donation_webhook():
     ignored -- not treated as an integration failure Zoho would retry or
     alert on.
 
+    A receipt is only ever issued when *both* of these hold: the status is
+    a recognised success value, and payment_transaction_id contains a
+    genuine-looking Razorpay payment ID. Neither is trusted alone -- a
+    success status with a blank/unrecognisable transaction id is rejected
+    (400) rather than accepted with a placeholder, and a real-looking
+    transaction id on a non-success status is still ignored, since a
+    receipt must never be issued for anything short of a confirmed
+    payment.
+
     payment_transaction_id doesn't arrive as a bare Razorpay payment ID --
     Zoho's own "Payment Transaction ID" field (confirmed from a live
     account's Reports grid) is a combined string like "Txn ID :
     pay_TWnsKWUifmlYnc Order ID : order_TWns42m6OljsvJ". Pulled apart with
     a regex below rather than a fixed split position, so a bare "pay_..."
     (if some future form's payload parameter ever sends one on its own)
-    still works the same way.
+    still works the same way. If no "pay_..." pattern is found at all, the
+    transaction id is treated as missing rather than falling back to
+    whatever raw text arrived.
 
     Idempotency: keyed on the extracted payment_id (stored as
     Donation.razorpay_payment_id, same column the site's own Razorpay flow
@@ -1529,10 +1540,17 @@ def zoho_form_donation_webhook():
     raw_transaction_field = (payload.get("payment_transaction_id") or "").strip()
     payment_id_match = re.search(r"pay_\w+", raw_transaction_field)
     order_id_match = re.search(r"order_\w+", raw_transaction_field)
-    transaction_id = payment_id_match.group() if payment_id_match else raw_transaction_field
     order_id = order_id_match.group() if order_id_match else None
-    if not transaction_id:
-        return jsonify({"error": "Missing payment_transaction_id for a completed payment"}), 400
+    # Deliberately not falling back to the raw string when no "pay_..."
+    # pattern is found -- a "Completed" status with no genuine-looking
+    # Razorpay payment ID attached is exactly the ambiguous case a real
+    # receipt must never be issued for, so it's treated the same as a
+    # missing transaction_id (rejected below) rather than trusted as-is.
+    if not payment_id_match:
+        return jsonify({
+            "error": "Missing or unrecognised payment_transaction_id for a completed payment"
+        }), 400
+    transaction_id = payment_id_match.group()
 
     existing = Donation.query.filter_by(razorpay_payment_id=transaction_id).first()
     if existing:
