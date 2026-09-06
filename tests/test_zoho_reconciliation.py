@@ -625,6 +625,111 @@ class TestItDoesNotHoardDonorData:
             "a just-resolved row stays available for auditing the receipt it produced"
 
 
+class TestPaymentOrigin:
+    """Razorpay's notes say where a payment came from, and the two sources
+    need opposite handling. Without this every unexplained payment looked
+    alike, and a 141-row list mixing website checkouts, Zoho forms and
+    test traffic is one somebody backfills wholesale into duplicates."""
+
+    def test_a_zoho_payment_is_identified_by_its_form(self, client, app):
+        """Real note shape from production:
+        {"zform_custom": "iskcondwarka,BACERENT,<token>"}. The middle field
+        names the form -- the one fact that says which Zoho report to open."""
+        from public import unreconciled_razorpay_payments
+
+        app.config["RAZORPAY_ENABLED"] = True
+        pay = _payment("pay_Zf1", 8000, "8861957012")
+        pay["notes"] = {"zform_custom": "iskcondwarka,BACERENT,svofYsw8Cp2mh91a1nny7cIeUHj9myrg"}
+
+        with _razorpay([pay]):
+            payments, _ = unreconciled_razorpay_payments(app.config)
+
+        assert payments[0]["source"] == "zoho"
+        assert payments[0]["source_ref"] == "BACERENT"
+
+    def test_a_website_payment_is_identified_by_its_donation(self, client, app):
+        from public import unreconciled_razorpay_payments
+
+        app.config["RAZORPAY_ENABLED"] = True
+        pay = _payment("pay_Web1", 500, "9000000001")
+        pay["notes"] = {"donation_id": "4321", "campaign": "Annadan"}
+
+        with _razorpay([pay]):
+            payments, _ = unreconciled_razorpay_payments(app.config)
+
+        assert payments[0]["source"] == "website"
+        assert payments[0]["source_ref"] == "4321"
+
+    def test_a_payment_with_no_notes_is_unknown_not_guessed(self, client, app):
+        from public import unreconciled_razorpay_payments
+
+        app.config["RAZORPAY_ENABLED"] = True
+        with _razorpay([_payment("pay_Bare1", 100, "9000000002")]):
+            payments, _ = unreconciled_razorpay_payments(app.config)
+
+        assert payments[0]["source"] == "unknown"
+        assert payments[0]["source_ref"] is None
+
+    def test_a_settled_website_donation_is_not_an_orphan(self, client, app):
+        """The big false-positive class in a historical scan. A donor pays,
+        closes the tab before the browser confirms, and the payment id
+        never lands on the donation -- but a webhook or a later retry
+        finished it, so the receipt exists. Matching on notes.donation_id
+        recognises that; matching on the id columns alone flags it as
+        missing money forever."""
+        from extensions import db
+        from models import Campaign, Donation, Donor
+        from public import unreconciled_razorpay_payments
+
+        donor = Donor(full_name="Web Donor", phone="9000000003")
+        db.session.add(donor)
+        db.session.flush()
+        d = Donation(
+            donor_id=donor.id, campaign_id=Campaign.query.first().id, amount=500,
+            status="success", payment_mode="online", receipt_number="032511/ISK500999",
+        )
+        db.session.add(d)
+        db.session.commit()
+
+        app.config["RAZORPAY_ENABLED"] = True
+        pay = _payment("pay_Web2", 500, "9000000003")
+        pay["notes"] = {"donation_id": str(d.id), "campaign": "Annadan"}
+
+        with _razorpay([pay]):
+            payments, _ = unreconciled_razorpay_payments(app.config)
+
+        assert payments == [], "a successful donation accounts for its payment, id column or not"
+
+    def test_an_unfinished_website_donation_is_still_reported(self, client, app):
+        """The opposite case, and it must not be swept up by the above: a
+        captured payment against a donation still sitting pending is real
+        money with no receipt -- the same loss as the Zoho gap, arriving by
+        a different route."""
+        from extensions import db
+        from models import Campaign, Donation, Donor
+        from public import unreconciled_razorpay_payments
+
+        donor = Donor(full_name="Stuck Donor", phone="9000000004")
+        db.session.add(donor)
+        db.session.flush()
+        d = Donation(
+            donor_id=donor.id, campaign_id=Campaign.query.first().id, amount=500,
+            status="pending", payment_mode="online",
+        )
+        db.session.add(d)
+        db.session.commit()
+
+        app.config["RAZORPAY_ENABLED"] = True
+        pay = _payment("pay_Web3", 500, "9000000004")
+        pay["notes"] = {"donation_id": str(d.id), "campaign": "Annadan"}
+
+        with _razorpay([pay]):
+            payments, _ = unreconciled_razorpay_payments(app.config)
+
+        assert [p["payment_id"] for p in payments] == ["pay_Web3"]
+        assert payments[0]["source"] == "website"
+
+
 class TestHistoricalScan:
     """A fixed date range is for auditing an old period. It must report
     and change nothing -- pending submissions only exist from the day this

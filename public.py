@@ -1423,7 +1423,10 @@ def internal_zoho_reconcile():
         "failed": summary["failed"],
         "report_only": summary["report_only"],
         "orphan_payments": [
-            {"payment_id": p["payment_id"], "amount": p["amount"], "contact": p["contact"]}
+            {
+                "payment_id": p["payment_id"], "amount": p["amount"], "contact": p["contact"],
+                "source": p.get("source"), "source_ref": p.get("source_ref"),
+            }
             for p in summary["orphan_payments"]
         ],
     })
@@ -1530,6 +1533,41 @@ def _zoho_payment_is_captured(payment_id):
     return payment.get("status") == "captured", None
 
 
+def _payment_source(notes):
+    """Works out where a Razorpay payment came from, using the notes both
+    producers stamp on it. Returns (source, reference):
+
+      ("website", "<donation_id>") -- create_order() puts
+        {"donation_id": ..., "campaign": ...} on every order this site
+        raises, so a payment can be traced to its donation even if the
+        payment id never made it back onto the row.
+      ("zoho", "<form>")  -- Zoho Forms stamps zform_custom, e.g.
+        "iskcondwarka,BACERENT,<token>". The middle field names the form,
+        which is the single most useful thing to know when triaging an
+        unexplained payment: it says which Zoho report to go and look in.
+      ("unknown", None) -- neither. Worth a human's attention.
+
+    Without this, every unexplained payment looked alike, and telling a
+    website checkout that didn't finish apart from a Zoho form that never
+    reported meant cross-referencing exports by hand."""
+    notes = notes or {}
+
+    donation_id = (notes.get("donation_id") or "").strip()
+    if donation_id:
+        return "website", donation_id
+
+    zform = (notes.get("zform_custom") or "").strip()
+    if zform:
+        parts = [p.strip() for p in zform.split(",") if p.strip()]
+        # "<account>,<form>,<token>" in every sample seen so far; fall back
+        # to whatever is there rather than assuming the shape holds.
+        if len(parts) >= 2:
+            return "zoho", parts[1]
+        return "zoho", parts[0] if parts else None
+
+    return "unknown", None
+
+
 def unreconciled_razorpay_payments(config, lookback_days=3, from_date=None, to_date=None):
     """Returns (payments, error) -- every Razorpay payment captured in the
     trailing `lookback_days` that has no matching Donation anywhere in this
@@ -1631,6 +1669,26 @@ def unreconciled_razorpay_payments(config, lookback_days=3, from_date=None, to_d
         current_app.logger.exception("Razorpay reconciliation scan failed")
         return [], str(exc)
 
+    # Third matching key, after the two id columns below: the payment's own
+    # notes. create_order() stamps every order this site raises with
+    # {"donation_id": ..., "campaign": ...}, so a website payment can be
+    # tied back to its donation even when razorpay_payment_id was never
+    # written -- which is exactly what happens when a donor pays and then
+    # closes the tab before the browser confirms, leaving the donation
+    # stuck "pending". Without this, every one of those looks like an
+    # unexplained payment forever, even though the donation is sitting
+    # right there, already receipted or not.
+    #
+    # Only a donation that actually reached "success" counts as accounted
+    # for. One still pending or failed against a *captured* payment is
+    # real money with no receipt behind it -- the same class of loss as
+    # the Zoho gap, arriving by a different route -- so it stays on the
+    # list rather than being quietly excluded.
+    settled_donation_ids = {
+        str(did) for (did,) in db.session.query(Donation.id)
+        .filter(Donation.status == "success").all()
+    }
+
     # Both columns, deliberately. razorpay_payment_id is where this site's
     # own checkout and the Zoho webhook record a payment. But a donation
     # entered by hand through Offline Donation -> Single Entry puts the
@@ -1652,8 +1710,17 @@ def unreconciled_razorpay_payments(config, lookback_days=3, from_date=None, to_d
     }
     known_ids.discard("")
 
-    unreconciled = [
-        {
+    unreconciled = []
+    for item in captured:
+        if item["id"] in known_ids:
+            continue
+        notes = item.get("notes") or {}
+        source, source_ref = _payment_source(notes)
+        if source == "website" and source_ref in settled_donation_ids:
+            # Matched to an already-successful donation by its notes, even
+            # though the payment id was never written to it. Accounted for.
+            continue
+        unreconciled.append({
             "payment_id": item["id"],
             "order_id": item.get("order_id"),
             "amount": (item.get("amount") or 0) / 100,
@@ -1665,10 +1732,10 @@ def unreconciled_razorpay_payments(config, lookback_days=3, from_date=None, to_d
             # received_at it has stored, with no conversion at the comparison.
             "created_at": to_ist(datetime.datetime.utcfromtimestamp(item["created_at"])),
             "created_at_utc": datetime.datetime.utcfromtimestamp(item["created_at"]),
-            "notes": item.get("notes") or {},
-        }
-        for item in captured if item["id"] not in known_ids
-    ]
+            "notes": notes,
+            "source": source,
+            "source_ref": source_ref,
+        })
     unreconciled.sort(key=lambda p: p["created_at"], reverse=True)
     return unreconciled, None
 

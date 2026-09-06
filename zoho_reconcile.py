@@ -113,9 +113,34 @@ def main():
             print("No captured payments in this window are missing a donation.")
             return 0
         total = sum(p["amount"] for p in payments)
-        print(f"{len(payments)} captured payment(s) with no donation behind them, Rs. {total:,.2f}:")
+        print(f"{len(payments)} captured payment(s) with no donation behind them, Rs. {total:,.2f}\n")
+
+        # Grouped by where the payment came from -- Razorpay's own notes
+        # say, and they need completely different handling. Reading a flat
+        # list of 141 mixed payments and guessing which are real is how a
+        # backfill turns into duplicate receipts.
+        groups = {}
         for p in payments:
-            print(f"  {p['payment_id']} Rs. {p['amount']:>10,.2f} ({p['contact'] or 'no contact'})")
+            groups.setdefault((p.get("source") or "unknown", p.get("source_ref")), []).append(p)
+
+        headings = {
+            "zoho": "ZOHO FORM -- no receipt was ever issued. These need backfilling.",
+            "website": "WEBSITE -- donation exists but never finished. Check it before creating anything.",
+            "unknown": "UNIDENTIFIED -- no origin recorded. Investigate before acting.",
+        }
+        for source in ("zoho", "website", "unknown"):
+            keys = sorted([k for k in groups if k[0] == source], key=lambda k: str(k[1] or ""))
+            if not keys:
+                continue
+            print(headings[source])
+            for key in keys:
+                rows = groups[key]
+                label = f"  form {key[1]}" if source == "zoho" else (
+                    f"  donation #{key[1]}" if source == "website" else "  (no origin in notes)")
+                print(f"{label} -- {len(rows)} payment(s), Rs. {sum(r['amount'] for r in rows):,.2f}")
+                for p in rows:
+                    print(f"      {p['payment_id']} Rs. {p['amount']:>10,.2f} ({p['contact'] or 'no contact'})")
+            print()
         return 0
 
     created = result["created"]
