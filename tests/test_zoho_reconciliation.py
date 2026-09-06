@@ -730,6 +730,111 @@ class TestPaymentOrigin:
         assert payments[0]["source"] == "website"
 
 
+class TestIgnoredTestForms:
+    """A test form charges real money through the live gateway, so its
+    payments look exactly like donations and would sit in the report
+    forever. A report carrying permanent known-noise is one people stop
+    reading -- which is how the original failures went unnoticed for
+    weeks. Filtered out, but never silently."""
+
+    def _test_payment(self):
+        p = _payment("pay_TX5LUCwylz2UWo", 10, "9650150283")
+        p["notes"] = {"zform_custom": "iskcondwarka,TestingWebsitewithFormsintergration,tok"}
+        return p
+
+    def _real_payment(self):
+        p = _payment("pay_TY1ckLpy6lUDMr", 100, "9319880507")
+        p["notes"] = {"zform_custom": "iskcondwarka,EssenceofBhagavadGitaOnlyForBOYSP,tok"}
+        return p
+
+    def test_a_listed_form_is_kept_out_of_the_actionable_list(self, client, app):
+        from public import reconcile_zoho_submissions
+
+        app.config["RAZORPAY_ENABLED"] = True
+        app.config["RECONCILE_IGNORED_ZOHO_FORMS"] = "TestingWebsitewithFormsintergration"
+
+        with _razorpay([self._test_payment(), self._real_payment()]):
+            summary = reconcile_zoho_submissions(app.config, min_age_minutes=0)
+
+        assert [p["payment_id"] for p in summary["orphan_payments"]] == ["pay_TY1ckLpy6lUDMr"]
+
+    def test_it_is_reported_separately_rather_than_disappearing(self, client, app):
+        """A form listed here by mistake must show up as a suspiciously
+        busy 'ignored' line, not vanish."""
+        from public import reconcile_zoho_submissions
+
+        app.config["RAZORPAY_ENABLED"] = True
+        app.config["RECONCILE_IGNORED_ZOHO_FORMS"] = "TestingWebsitewithFormsintergration"
+
+        with _razorpay([self._test_payment()]):
+            summary = reconcile_zoho_submissions(app.config, min_age_minutes=0)
+
+        assert [p["payment_id"] for p in summary["ignored_payments"]] == ["pay_TX5LUCwylz2UWo"]
+
+    def test_an_ignored_payment_never_becomes_a_receipt(self, client, app):
+        """The consequential half: ignoring it only in the report would
+        leave the matcher free to turn a test charge into a real tax
+        receipt for whoever happens to match on phone and amount."""
+        from models import Donation, PendingZohoSubmission
+        from public import reconcile_zoho_submissions
+
+        _submit_form(client, app, phone="9650150283", amount="10")
+        _age_submissions(minutes=60)
+        submitted = PendingZohoSubmission.query.one().received_at
+
+        app.config["RAZORPAY_ENABLED"] = True
+        app.config["RECONCILE_IGNORED_ZOHO_FORMS"] = "TestingWebsitewithFormsintergration"
+
+        pay = _payment("pay_TX5LUCwylz2UWo", 10, "9650150283", submitted_at=submitted)
+        pay["notes"] = {"zform_custom": "iskcondwarka,TestingWebsitewithFormsintergration,tok"}
+
+        with _razorpay([pay]):
+            summary = reconcile_zoho_submissions(app.config, min_age_minutes=0)
+
+        assert Donation.query.count() == 0
+        assert summary["created"] == []
+
+    def test_matching_is_case_and_space_insensitive(self, client, app):
+        from public import reconcile_zoho_submissions
+
+        app.config["RAZORPAY_ENABLED"] = True
+        app.config["RECONCILE_IGNORED_ZOHO_FORMS"] = "  testingwebsitewithformsintergration , OtherForm "
+
+        with _razorpay([self._test_payment()]):
+            summary = reconcile_zoho_submissions(app.config, min_age_minutes=0)
+
+        assert summary["orphan_payments"] == []
+        assert len(summary["ignored_payments"]) == 1
+
+    def test_nothing_is_ignored_when_the_setting_is_empty(self, client, app):
+        """The default. An unset ignore-list must not accidentally filter."""
+        from public import reconcile_zoho_submissions
+
+        app.config["RAZORPAY_ENABLED"] = True
+        app.config["RECONCILE_IGNORED_ZOHO_FORMS"] = ""
+
+        with _razorpay([self._test_payment(), self._real_payment()]):
+            summary = reconcile_zoho_submissions(app.config, min_age_minutes=0)
+
+        assert len(summary["orphan_payments"]) == 2
+        assert summary["ignored_payments"] == []
+
+    def test_a_website_payment_is_unaffected_by_the_list(self, client, app):
+        """The list names Zoho forms. A website payment has no form name,
+        and must not be caught by a stray empty match."""
+        from public import unreconciled_razorpay_payments
+
+        app.config["RAZORPAY_ENABLED"] = True
+        app.config["RECONCILE_IGNORED_ZOHO_FORMS"] = "TestingWebsitewithFormsintergration"
+        pay = _payment("pay_Web9", 100, "9000000009")
+        pay["notes"] = {"donation_id": "9999", "campaign": "Annadan"}
+
+        with _razorpay([pay]):
+            payments, _ = unreconciled_razorpay_payments(app.config)
+
+        assert payments[0]["ignored"] is False
+
+
 class TestHistoricalScan:
     """A fixed date range is for auditing an old period. It must report
     and change nothing -- pending submissions only exist from the day this

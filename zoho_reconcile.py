@@ -39,6 +39,23 @@ import sys
 import requests
 
 
+def _print_ignored(result):
+    """One quiet line per ignored form. Deliberately still shown: these are
+    real charges on the live gateway, and a form listed in
+    RECONCILE_IGNORED_ZOHO_FORMS by mistake should be visible as a
+    suspiciously busy line here rather than disappearing entirely."""
+    ignored = result.get("ignored_payments") or []
+    if not ignored:
+        return
+    by_form = {}
+    for p in ignored:
+        by_form.setdefault(p.get("source_ref") or "(unnamed)", []).append(p["amount"])
+    print("Ignored as test forms (RECONCILE_IGNORED_ZOHO_FORMS):")
+    for form, amounts in sorted(by_form.items()):
+        print(f"  {form}: {len(amounts)} payment(s), Rs. {sum(amounts):,.2f}")
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
@@ -109,6 +126,7 @@ def main():
         payments = result["orphan_payments"]
         window = f"{args.from_date} to {args.to_date or 'today'}"
         print(f"REPORT ONLY ({window}) -- nothing was created or changed.\n")
+        _print_ignored(result)
         if not payments:
             print("No captured payments in this window are missing a donation.")
             return 0
@@ -142,6 +160,8 @@ def main():
                     print(f"      {p['payment_id']} Rs. {p['amount']:>10,.2f} ({p['contact'] or 'no contact'})")
             print()
         return 0
+
+    _print_ignored(result)
 
     created = result["created"]
     if created:

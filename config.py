@@ -318,6 +318,26 @@ class Config:
     # unauthenticated.
     ZOHO_FORMS_WEBHOOK_TOKEN = os.environ.get("ZOHO_FORMS_WEBHOOK_TOKEN", "")
 
+    # Comma-separated Zoho form identifiers whose payments are not real
+    # donations -- test/integration forms. Matched against the form name
+    # Razorpay carries in the payment's own notes (the middle field of
+    # zform_custom; see public._payment_source), case-insensitively.
+    #
+    # Exists because the reconciliation report is only useful if
+    # everything on it needs acting on. A test form charges real money
+    # through the live gateway, so its payments look exactly like
+    # donations and would sit in that report forever -- and a report with
+    # permanent known-noise in it is one people stop reading, which is
+    # precisely how the earlier failures went unnoticed for weeks.
+    #
+    # These are filtered out of the actionable list but never silently
+    # dropped: they're still counted and totalled under their own heading,
+    # so a form listed here by mistake shows up as a suspiciously busy
+    # "ignored" line rather than vanishing.
+    #
+    # e.g. RECONCILE_IGNORED_ZOHO_FORMS=TestingWebsitewithFormsintergration
+    RECONCILE_IGNORED_ZOHO_FORMS = os.environ.get("RECONCILE_IGNORED_ZOHO_FORMS", "")
+
     # --- Donor OTP login ---
     # No SMS provider is wired up yet (see sms_utils.py) -- OTPs are shown
     # directly on the verify page instead of texted, clearly marked "Demo

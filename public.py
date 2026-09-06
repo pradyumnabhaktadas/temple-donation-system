@@ -1429,6 +1429,13 @@ def internal_zoho_reconcile():
             }
             for p in summary["orphan_payments"]
         ],
+        "ignored_payments": [
+            {
+                "payment_id": p["payment_id"], "amount": p["amount"],
+                "source_ref": p.get("source_ref"),
+            }
+            for p in summary["ignored_payments"]
+        ],
     })
 
 
@@ -1710,6 +1717,12 @@ def unreconciled_razorpay_payments(config, lookback_days=3, from_date=None, to_d
     }
     known_ids.discard("")
 
+    ignored_forms = {
+        name.strip().lower()
+        for name in (config.get("RECONCILE_IGNORED_ZOHO_FORMS") or "").split(",")
+        if name.strip()
+    }
+
     unreconciled = []
     for item in captured:
         if item["id"] in known_ids:
@@ -1735,6 +1748,8 @@ def unreconciled_razorpay_payments(config, lookback_days=3, from_date=None, to_d
             "notes": notes,
             "source": source,
             "source_ref": source_ref,
+            # Flagged, not dropped -- see RECONCILE_IGNORED_ZOHO_FORMS.
+            "ignored": bool(source_ref) and source_ref.strip().lower() in ignored_forms,
         })
     unreconciled.sort(key=lambda p: p["created_at"], reverse=True)
     return unreconciled, None
@@ -1799,7 +1814,7 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
     unreachable Razorpay must never be read as "no payments exist")."""
     summary = {
         "created": [], "ambiguous": [], "unpaid": 0, "still_waiting": 0,
-        "orphan_payments": [], "failed": [], "pruned": 0, "expired": 0,
+        "orphan_payments": [], "ignored_payments": [], "failed": [], "pruned": 0, "expired": 0,
         "report_only": False, "error": None,
     }
 
@@ -1824,6 +1839,13 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
     if error:
         summary["error"] = error
         return summary
+
+    # Held aside before anything else looks at them. A test form's payments
+    # must not be matched to a pending submission and turned into a real
+    # receipt either -- ignoring them only in the report would leave the
+    # more consequential half of this job still acting on them.
+    summary["ignored_payments"] = [p for p in payments if p.get("ignored")]
+    payments = [p for p in payments if not p.get("ignored")]
 
     if from_date is not None or to_date is not None:
         # Report-only. An explicit date range means someone is auditing a
