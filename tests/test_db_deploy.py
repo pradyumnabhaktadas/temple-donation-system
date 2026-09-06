@@ -158,6 +158,11 @@ class TestExistingDatabase:
             "        # current models, so the forward migration's create_table would\n"
             "        # collide with it.\n"
             "        conn.execute(sa.text('DROP TABLE zoho_forms'))\n"
+            "        # zoho_submissions (f5d18e3c7a24) -- newest post-baseline\n"
+            "        # table, same reasoning again. This test has now caught this\n"
+            "        # exact failure mode four times; every new table needs a line\n"
+            "        # here.\n"
+            "        conn.execute(sa.text('DROP TABLE zoho_submissions'))\n"
             f"    stamp(revision='{revision}')\n"
         )
         env = dict(os.environ)

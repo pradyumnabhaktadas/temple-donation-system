@@ -809,6 +809,94 @@ class AdminUser(UserMixin, db.Model):
         return check_password_hash(self.password_hash, password)
 
 
+class ZohoSubmission(db.Model):
+    """This app's own copy of every call Zoho Forms makes, kept the way
+    the Google Sheet keeps them -- one row per call, nothing thrown away.
+
+    WHY KEEP THEM
+    -------------
+    Razorpay knows a payment was captured but not who made it; it records
+    a phone number, not a name. Zoho knows the name. Something has to hold
+    Zoho's side, and the alternative was reading a Google Sheet published
+    to a public link -- which meant exposing donor names and phone numbers
+    to anyone with the URL, configuring a sheet per form, and depending on
+    Google being reachable at the moment a receipt is due. Keeping our own
+    copy removes all three.
+
+    EVERY CALL, NOT A QUEUE
+    -----------------------
+    Deliberately a log, not a work list. Zoho fires once at submission
+    time (no transaction ID yet), and may fire again with the payment
+    result; a donor may submit twice; a payment may fail and be retried.
+    All of those are recorded as they arrive. Nothing is deduplicated,
+    because for the one question these rows are asked -- what is this
+    payer called -- several calls from the same person agree, and the
+    duplicates cost nothing.
+
+    That distinction matters. An earlier design stored these as *pending
+    work* and tried to decide, from a stored submission, whether a receipt
+    was owed. That produced a case with no correct answer: one donor with
+    two submissions for the same amount is indistinguishable from one
+    submission paid for twice, and those need opposite handling. These
+    rows never decide whether a receipt is owed -- Razorpay decides that.
+    They only supply the name.
+
+    HOW A PAYMENT FINDS ITS ROW
+    ---------------------------
+    Best case, `transaction_id` is set, because Zoho did send a call
+    carrying it: the match is then exact and there is nothing to guess.
+    Otherwise by normalised phone (and amount, where recorded), which is
+    safe for naming even when several rows match, since they are the same
+    person.
+
+    RETENTION
+    ---------
+    These hold donor names and phone numbers, including for people who
+    filled in a form and never paid. Rows older than the retention window
+    are deleted -- a month by default, comfortably longer than the few
+    days any reconciliation looks back. Anything genuinely outstanding
+    after that still surfaces through Razorpay, which never depended on
+    this table.
+    """
+
+    __tablename__ = "zoho_submissions"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # The ?campaign= value the form's webhook was configured with, and the
+    # campaign it resolved to. Kept as text as well as a foreign key so a
+    # misconfigured form is diagnosable from the row itself.
+    campaign_param = db.Column(db.String(150))
+    campaign_id = db.Column(db.Integer, db.ForeignKey("campaigns.id"), nullable=True)
+
+    full_name = db.Column(db.String(200))
+    # Last ten digits, matching how phone numbers are compared everywhere
+    # else here: Zoho sends "+919873287387" where Razorpay returns
+    # "9873287387" for the same donor.
+    phone_normalized = db.Column(db.String(20), index=True)
+    amount = db.Column(db.Float)
+
+    # Present only when Zoho's call carried it. When it is, matching is
+    # exact and no guessing happens at all.
+    transaction_id = db.Column(db.String(100), index=True)
+    # Zoho's own view of the payment: "Completed", "Failed", "Processing",
+    # "Processing not needed". Recorded for diagnosis, never trusted --
+    # production has had it wrong in both directions.
+    payment_status = db.Column(db.String(50))
+
+    # The call as it arrived, so a field this app doesn't read today can
+    # still be recovered later without asking Zoho for it again.
+    payload_json = db.Column(db.Text)
+
+    received_at = db.Column(db.DateTime, default=datetime.datetime.utcnow,
+                            nullable=False, index=True)
+
+    campaign = db.relationship("Campaign")
+
+    def __repr__(self):
+        return f"<ZohoSubmission {self.id} {self.full_name} {self.transaction_id or 'no txn'}>"
+
+
 class ZohoForm(db.Model):
     """One Zoho Form that takes money, and what this app needs to know
     about it: which campaign its donations belong to, and where to read
@@ -827,17 +915,6 @@ class ZohoForm(db.Model):
     its form, and it is exactly what the reconciliation report prints, so
     it can be copied straight from there.
 
-    `sheet_csv_url` is that form's own Google Sheet, published to web as
-    CSV. Each form writes to its own sheet, so each row carries its own
-    URL -- and because a payment names its form, only that form's sheet is
-    consulted for it. Two donors with the same phone number on different
-    forms therefore cannot be confused with one another.
-
-    Leaving sheet_csv_url blank is valid and means "report this form's
-    payments, don't receipt them": useful for a form whose submissions
-    aren't in a sheet, and for setting a form up before its sheet is
-    published.
-
     is_test marks a form whose payments aren't real donations. Those are
     kept out of the actionable report but still counted under their own
     heading -- never silently dropped, since a form marked test by mistake
@@ -852,7 +929,6 @@ class ZohoForm(db.Model):
     # (Only For BOYS)" reads better than the run-together form_key.
     display_name = db.Column(db.String(200))
     campaign_id = db.Column(db.Integer, db.ForeignKey("campaigns.id"), nullable=True)
-    sheet_csv_url = db.Column(db.String(600))
     is_test = db.Column(db.Boolean, default=False, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
@@ -865,10 +941,11 @@ class ZohoForm(db.Model):
 
     @property
     def can_receipt(self):
-        """Whether a payment from this form can be turned into a receipt
-        without a person. Needs both a campaign to file it under and a
-        sheet to name the donor from."""
-        return bool(self.campaign_id and (self.sheet_csv_url or "").strip() and not self.is_test)
+        """Whether a payment from this form can become a receipt without a
+        person. Needs a campaign to file it under; the donor's name comes
+        from the recorded Zoho call matched on transaction ID, which needs
+        no configuration here."""
+        return bool(self.campaign_id and not self.is_test)
 
     def __repr__(self):
         return f"<ZohoForm {self.form_key}>"

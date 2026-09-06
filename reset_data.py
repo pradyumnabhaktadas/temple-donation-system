@@ -34,7 +34,7 @@ from extensions import db
 from models import (
     Camp, Donation, Donor, Campaign, BaceProperty, Festival, SevaType,
     LiveToGivePurpose, Preacher, AssociatedWith, ReceiptCounter, DonorLoginOTP,
-    AdminActivityLog, AdminUser, DailyReportRecipient, ZohoForm,
+    AdminActivityLog, AdminUser, DailyReportRecipient, ZohoForm, ZohoSubmission,
 )
 
 CONFIRMATION_PHRASE = "DELETE ALL DATA"
@@ -51,8 +51,9 @@ CONFIRMATION_PHRASE = "DELETE ALL DATA"
 # before asking for confirmation. A list maintained by hand needs something
 # checking it.
 MODELS_IN_DELETE_ORDER = [
-    # Before Campaign -- it holds a foreign key to it.
+    # Both before Campaign -- they hold foreign keys to it.
     ZohoForm,
+    ZohoSubmission,
     Donation,
     DonorLoginOTP,
     AdminActivityLog,

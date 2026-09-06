@@ -2496,7 +2496,6 @@ def zoho_forms():
             form_key=form_key[:150],
             display_name=(request.form.get("display_name") or "").strip()[:200] or None,
             campaign_id=campaign_id,
-            sheet_csv_url=(request.form.get("sheet_csv_url") or "").strip()[:600] or None,
             is_test=request.form.get("is_test") == "yes",
         )
         db.session.add(entry)
@@ -2526,7 +2525,6 @@ def update_zoho_form(form_id):
 
     entry.display_name = (request.form.get("display_name") or "").strip()[:200] or None
     entry.campaign_id = campaign_id
-    entry.sheet_csv_url = (request.form.get("sheet_csv_url") or "").strip()[:600] or None
     entry.is_test = request.form.get("is_test") == "yes"
     entry.is_active = request.form.get("is_active") == "yes"
     db.session.commit()

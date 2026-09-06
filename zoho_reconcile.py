@@ -8,12 +8,14 @@ account it repeatedly hasn't: the donor's own Zoho record goes on to show
 only call this app ever received was the first one. The money arrives and
 nothing in the app knows about it -- no donor, no donation, no receipt.
 
-This job closes that gap without needing Zoho to behave: it takes the
-donor details from the Google Sheet Zoho writes each submission into, and
-matches them against the payments Razorpay itself confirms it captured,
-then creates the donation and issues the receipt exactly as the webhook
-would have. See public.reconcile_zoho_submissions() for the matching rules
-and why they're deliberately strict.
+This job closes that gap without needing Zoho to behave. Every call Zoho
+makes is recorded locally as it arrives (see models.ZohoSubmission), and
+this job asks Razorpay which payments it actually captured, then matches
+each one to a recorded call **on the transaction ID and nothing else** --
+no phone, no amount, no timing. A match names the donor; the donation and
+receipt are then created exactly as the webhook would have. Anything
+unmatched is printed with the reason rather than guessed at. See
+public.reconcile_zoho_submissions() for why the rules are that strict.
 
 Thin HTTP client on purpose, same as daily_report.py -- it POSTs to the
 already-running web app rather than doing the work itself, because that
@@ -67,9 +69,11 @@ def main():
         help=(
             "Scan a fixed historical window instead of the last N days. "
             "REPORT ONLY: it lists payments with no donation behind them and "
-            "changes nothing, because pending submissions only exist from the "
-            "day this feature was deployed -- matching them against an older "
-            "window would close today's open ones as unpaid."
+            "changes nothing. Recorded Zoho calls are pruned after 30 days, so "
+            "an older window has a record for some of its payments and not "
+            "others -- issuing backdated receipts for an arbitrary subset of a "
+            "month is worse than issuing none. A person decides what to do "
+            "with the list."
         ),
     )
     parser.add_argument(
@@ -170,15 +174,6 @@ def main():
             print(f"  Rs. {d['amount']:,.2f} -- receipt {d['receipt_number']} (donation #{d['donation_id']})")
     else:
         print("No new receipts to issue.")
-
-    if result.get("sheet_error"):
-        print(f"\nThe submissions sheet could not be read: {result['sheet_error']}")
-        print("Nothing was named from it this run -- payments below are unreceipted, not lost.")
-
-    if result.get("failed"):
-        print(f"\n{len(result['failed'])} entry(ies) errored while being written -- retried next run:")
-        for f in result["failed"]:
-            print(f"  {f}")
 
     orphans = result.get("orphan_payments") or []
     if orphans:

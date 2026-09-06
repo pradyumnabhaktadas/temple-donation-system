@@ -12,14 +12,15 @@ amount, two payments is indistinguishable from one submission paid for
 twice, and those need opposite handling.
 
 None of it is needed. Razorpay knows which payments were captured and have
-no donation behind them, and the Google Sheet Zoho writes every submission
-into supplies the donor's name (see test_zoho_reconciliation). So a call
-without a transaction ID is now acknowledged and forgotten.
+no donation behind them, and this app's own record of Zoho's calls supplies
+the donor's name (see test_zoho_submissions). So a call without a
+transaction ID is now simply recorded and acknowledged -- there is a
+complete, unambiguous path that picks that donation up regardless.
 
 What remains is the one case this route can settle by itself: when Zoho
 *does* send the transaction ID, the receipt is issued immediately rather
-than at the next hourly sweep. That happened for real throughout
-September, for EBG_Registration and Bhakti_Vriksha.
+than at the next sweep. That happened for real throughout September, for
+EBG_Registration and Bhakti_Vriksha.
 """
 import os
 import sys
@@ -94,15 +95,19 @@ class TestCampaign:
 
 class TestTheCallWithoutATransactionId:
     """Zoho's ordinary pre-payment call: the whole form, no payment yet.
-    Nothing is stored -- reconciliation finds the payment in Razorpay and
-    names the donor from the sheet regardless."""
+    Recorded rather than discarded -- that record is what lets
+    reconciliation name the donor once Razorpay reports the payment."""
 
-    def test_it_is_acknowledged_and_nothing_is_created(self, client, app):
-        from models import Donation
+    def test_it_is_acknowledged_and_recorded_but_creates_no_donation(self, client, app):
+        """No longer a dead end: the call is kept as this app's own copy
+        of Zoho's record, which is what lets reconciliation name the donor
+        once Razorpay reports the payment. See test_zoho_submissions."""
+        from models import Donation, ZohoSubmission
         resp = _post(client, app, payment_transaction_id="", payment_status="processing")
         assert resp.status_code == 200
-        assert resp.get_json()["acknowledged"] == "no transaction id yet"
+        assert "submission recorded" in resp.get_json()["acknowledged"]
         assert Donation.query.count() == 0
+        assert ZohoSubmission.query.count() == 1
 
     def test_a_completed_label_with_no_id_is_also_just_acknowledged(self, client, app):
         """Zoho's own status is not consulted at all any more -- it has

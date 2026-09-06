@@ -149,38 +149,23 @@ def _render_email_html(data, org_name):
                 f'against Razorpay directly:</p><ul style="margin:0 0 10px;">{rows}</ul>'
             )
 
-        if rec.get("ambiguous"):
-            rows = "".join(
-                f'<li>{s.full_name or "(no name)"} -- Rs. {format_inr(float(s.amount or 0))}: {s.note}</li>'
-                for s in rec["ambiguous"]
-            )
-            blocks.append(
-                f'<p style="margin:0 0 4px;"><strong>{len(rec["ambiguous"])} submission(s) need a person to '
-                'decide.</strong> A payment matched, but not unambiguously enough to issue a tax receipt '
-                f'automatically:</p><ul style="margin:0 0 10px;">{rows}</ul>'
-            )
-
-        if rec.get("failed"):
-            rows = "".join(
-                f'<li>Pending submission #{f["pending_id"]}: {f["error"]}</li>'
-                for f in rec["failed"]
-            )
-            blocks.append(
-                f'<p style="margin:0 0 4px;"><strong>{len(rec["failed"])} submission(s) errored while '
-                'being turned into a receipt.</strong> The payment matched, but writing the donation '
-                f'failed -- these are retried automatically, but worth a look:</p>'
-                f'<ul style="margin:0 0 10px;">{rows}</ul>'
-            )
-
         if rec.get("orphan_payments"):
+            # why_not_receipted is the point of this block. "pay_X -- Rs.
+            # 100" tells the reader money is unaccounted for but not what
+            # to do; "form 'MYTE' isn't set up" tells them exactly what to
+            # do, and is the difference between a report that gets acted
+            # on and one people learn to scroll past.
             rows = "".join(
                 f'<li>{p["payment_id"]} -- Rs. {format_inr(p["amount"])} '
-                f'({p["contact"] or "no contact number"})</li>'
+                f'({p["contact"] or "no contact number"})'
+                + (f'<br><span style="color:#555;">{p["why_not_receipted"]}</span>'
+                   if p.get("why_not_receipted") else "")
+                + '</li>'
                 for p in rec["orphan_payments"]
             )
             blocks.append(
                 f'<p style="margin:0 0 4px;"><strong>{len(rec["orphan_payments"])} captured payment(s) with '
-                'nothing in this system to match them to.</strong> Money Razorpay received that no donation '
+                'no receipt issued.</strong> Money Razorpay received that no donation '
                 f'accounts for -- worth checking:</p><ul style="margin:0 0 10px;">{rows}</ul>'
             )
 
@@ -253,9 +238,13 @@ def run_reconciliation_safely(app):
         return reconcile_zoho_submissions(app.config)
     except Exception as exc:
         app.logger.exception("Zoho reconciliation from the daily report failed")
+        # Same keys reconcile_zoho_submissions returns, so the email
+        # renders a failed run the same way it renders a clean one. This
+        # dict drifted once already, keeping keys ("unpaid",
+        # "still_waiting", "expired") from a queue that no longer exists.
         return {
-            "created": [], "ambiguous": [], "unpaid": 0, "still_waiting": 0,
-            "orphan_payments": [], "failed": [], "pruned": 0, "expired": 0, "error": str(exc),
+            "created": [], "orphan_payments": [], "ignored_payments": [],
+            "report_only": False, "pruned": 0, "error": str(exc),
         }
 
 

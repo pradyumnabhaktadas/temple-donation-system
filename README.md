@@ -700,22 +700,31 @@ them, and neither is asked a question it can't answer:
 
 - **Razorpay** knows which payments it captured and which have no donation
   behind them. It is the authority on whether a receipt is owed.
-- **The Google Sheet** that Zoho writes every submission into knows the
-  donor's name — the one thing Razorpay lacks.
+- **This app's own record of every call Zoho makes** knows the donor's
+  name — the one thing Razorpay lacks. Every webhook call is written to
+  `zoho_submissions` as it arrives, whether or not it carries a payment,
+  the same way a Google Sheet records every submission. Rows older than 30
+  days are pruned automatically.
 
 `public.reconcile_zoho_submissions()` joins the two, hourly. The direction
-matters: letting the sheet decide whether a receipt is owed cannot work
-(it has no payment ID, and its own Payment Status column has been wrong in
-both directions), so the sheet is only ever asked *what the payer is
-called*.
+matters: letting Zoho decide whether a receipt is owed cannot work (the
+call that arrives has no payment ID, and Zoho's own Payment Status has
+been wrong in both directions), so the record is only ever asked *what the
+payer is called*.
 
-That also disposes of a case the previous design could not resolve.
-Matching payments to submissions by phone and amount was unsafe because
+**The match is the transaction ID and nothing else.** No phone, no amount,
+no timing. Every hard case this feature ever hit came from inferring one:
 two submissions from one donor are indistinguishable from one submission
-paid for twice — and those need opposite handling (two receipts, versus
-one receipt and a refund). Asking only for a name has no such problem:
-when several rows match they are the same person and agree. Rows that
-genuinely disagree are refused with a reason.
+paid for twice, and those need opposite handling (two receipts, versus one
+receipt and a refund); a shared family phone names the wrong person; a
+donor who pays from a different number than they typed matches nothing.
+A guess that looks like a match is worse than no match — it produces a tax
+receipt in the wrong name and nobody notices.
+
+So this depends on each form's webhook being configured to send the
+transaction ID. That is the right place for the dependency: it is visible
+and fixable, unlike a silent mis-match. A payment whose ID never reached
+us is reported with exactly that reason.
 
 **Each form is a row under Admin → Settings → Zoho Forms**, not a setting
 in the environment. There are six of these already and a new one appears
@@ -729,29 +738,21 @@ Each row carries:
 |---|---|
 | **Form name** | Exactly as Razorpay records it in the payment notes — the reconciliation report prints this, so copy it from there |
 | **Campaign** | Which campaign that form's donations are filed under |
-| **Submissions sheet** | That form's own Google Sheet, published to web as CSV |
 | **Test form** | Its payments aren't real donations |
 
-A form with **both a campaign and a sheet** gets its donations receipted
-automatically. Without either, its payments are *reported* instead —
-never filed under a guessed campaign, because that would quietly corrupt
-every figure this app reports on.
-
-Because each form has its own sheet, and each payment names its own form,
-only that form's sheet is ever consulted for it. Two donors sharing a
-phone number across different programmes therefore can't be confused.
-
-> **Privacy.** A "publish to web" link is readable by anyone who has it,
-> and those sheets hold donor names and phone numbers. A private sheet
-> behind a read-only service account is the better arrangement if this
-> becomes permanent; only `zoho_sheet.fetch_rows()` would change.
+A form with a campaign set gets its donations receipted automatically.
+Without one, its payments are *reported* instead — never filed under a
+guessed campaign, because that would quietly corrupt every figure this app
+reports on.
 
 Everything fails towards reporting. A receipt is issued only when the
-sheet was read successfully, the payment names a Zoho form, that form is
-mapped, exactly one name matches, and the donation validates. Any of those
-failing leaves the payment on the report with the reason attached. In
-particular a failed sheet fetch is **reported, never read as "no
-submissions"** — that reading is what let donations go missing for weeks.
+payment names a Zoho form, that form is mapped with a campaign, a recorded
+Zoho call carries the same transaction ID, exactly one name is on it,
+Razorpay re-confirms that specific payment as captured, and the donation
+validates. Any of those failing leaves the payment on the report with the
+reason attached — and an unreachable Razorpay is **reported as an error,
+never read as "no payments exist"**, which is the reading that let
+donations go missing for weeks.
 
 It runs hourly (`temple-zoho-reconcile`), and again from the daily report
 as a fallback, since this project's cron jobs have silently failed for
@@ -769,7 +770,8 @@ normally and which had to be recovered.
 ### Importing a Zoho report by hand
 
 **Admin → Import Zoho Report** is the manual counterpart, for history and
-for forms whose submissions never reached a sheet. Export the form's
+for history predating this feature and for forms whose webhook was
+never configured. Export the form's
 report from Zoho — it must include the **Payment Transaction ID** column —
 choose the campaign, and Preview first.
 
