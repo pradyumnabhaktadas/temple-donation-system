@@ -318,51 +318,8 @@ class Config:
     # unauthenticated.
     ZOHO_FORMS_WEBHOOK_TOKEN = os.environ.get("ZOHO_FORMS_WEBHOOK_TOKEN", "")
 
-    # Comma-separated Zoho form identifiers whose payments are not real
-    # donations -- test/integration forms. Matched against the form name
-    # Razorpay carries in the payment's own notes (the middle field of
-    # zform_custom; see public._payment_source), case-insensitively.
-    #
-    # Exists because the reconciliation report is only useful if
-    # everything on it needs acting on. A test form charges real money
-    # through the live gateway, so its payments look exactly like
-    # donations and would sit in that report forever -- and a report with
-    # permanent known-noise in it is one people stop reading, which is
-    # precisely how the earlier failures went unnoticed for weeks.
-    #
-    # These are filtered out of the actionable list but never silently
-    # dropped: they're still counted and totalled under their own heading,
-    # so a form listed here by mistake shows up as a suspiciously busy
-    # "ignored" line rather than vanishing.
-    #
-    # e.g. RECONCILE_IGNORED_ZOHO_FORMS=TestingWebsitewithFormsintergration
-    RECONCILE_IGNORED_ZOHO_FORMS = os.environ.get("RECONCILE_IGNORED_ZOHO_FORMS", "")
 
-    # CSV export URL of the Google Sheet that Zoho Forms writes each
-    # submission into ("publish to web" -> CSV). Used to put a name on a
-    # payment Razorpay has already confirmed -- see zoho_sheet.py for why
-    # that direction round is the safe one.
-    #
-    # Leave blank and reconciliation behaves exactly as before: it reports
-    # unexplained payments rather than receipting them.
-    #
-    # NOTE: a published link is readable by anyone who has it, and this
-    # sheet holds donor names and phone numbers. A private sheet behind a
-    # read-only service account is the better arrangement if this becomes
-    # permanent.
-    ZOHO_SHEET_CSV_URL = os.environ.get("ZOHO_SHEET_CSV_URL", "")
 
-    # Per-form campaign mapping for automatic receipts, as
-    # "<form name>=<campaign name>" pairs separated by semicolons. The form
-    # name is the one Razorpay carries in the payment notes -- exactly what
-    # the reconciliation report prints, so it can be copied from there.
-    #
-    # A payment from a form that isn't mapped is reported, never guessed
-    # at: filing a donation under the wrong campaign quietly corrupts the
-    # figures every report in this app is built on.
-    #
-    # e.g. EssenceofBhagavadGitaOnlyForBOYSP=EBG_Registration;IGFForm=Retreats and Event Registrations
-    ZOHO_FORM_CAMPAIGNS = os.environ.get("ZOHO_FORM_CAMPAIGNS", "")
 
     # --- Zoho Forms API (pull, rather than waiting to be pushed to) ---
     #

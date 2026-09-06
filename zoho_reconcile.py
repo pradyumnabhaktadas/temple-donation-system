@@ -40,9 +40,9 @@ import requests
 
 
 def _print_ignored(result):
-    """One quiet line per ignored form. Deliberately still shown: these are
-    real charges on the live gateway, and a form listed in
-    RECONCILE_IGNORED_ZOHO_FORMS by mistake should be visible as a
+    """One quiet line per form marked as a test form under
+    Admin -> Zoho Forms. Deliberately still shown: these are real charges
+    on the live gateway, and a form ticked by mistake should appear as a
     suspiciously busy line here rather than disappearing entirely."""
     ignored = result.get("ignored_payments") or []
     if not ignored:
@@ -50,7 +50,7 @@ def _print_ignored(result):
     by_form = {}
     for p in ignored:
         by_form.setdefault(p.get("source_ref") or "(unnamed)", []).append(p["amount"])
-    print("Ignored as test forms (RECONCILE_IGNORED_ZOHO_FORMS):")
+    print("Ignored as test forms (Admin -> Zoho Forms):")
     for form, amounts in sorted(by_form.items()):
         print(f"  {form}: {len(amounts)} payment(s), Rs. {sum(amounts):,.2f}")
     print()

@@ -94,6 +94,22 @@ def _submit_form(client, app, campaign="BACE Contribution", **overrides):
     )
 
 
+def _setup_form(app, form_key="EBG", campaign_name="BACE Contribution",
+                sheet_url="https://docs.google.com/x/pub?output=csv", is_test=False):
+    """A configured Zoho form, as Admin -> Zoho Forms would create it."""
+    from extensions import db
+    from models import Campaign, ZohoForm
+    campaign = Campaign.query.filter_by(name=campaign_name).first()
+    entry = ZohoForm(
+        form_key=form_key, campaign_id=campaign.id if campaign else None,
+        sheet_csv_url=sheet_url, is_test=is_test,
+    )
+    db.session.add(entry)
+    db.session.commit()
+    app.config["RAZORPAY_ENABLED"] = True
+    return entry
+
+
 def _reconcile(app, payments, **kwargs):
     from public import reconcile_zoho_submissions
     with _razorpay(payments, fetch_status=kwargs.pop("fetch_status", "captured")):
@@ -227,8 +243,8 @@ class TestIgnoredTestForms:
     def test_a_listed_form_is_kept_out_of_the_actionable_list(self, client, app):
         from public import reconcile_zoho_submissions
 
-        app.config["RAZORPAY_ENABLED"] = True
-        app.config["RECONCILE_IGNORED_ZOHO_FORMS"] = "TestingWebsitewithFormsintergration"
+        _setup_form(app, form_key="TestingWebsitewithFormsintergration", is_test=True)
+        _setup_form(app, form_key="EssenceofBhagavadGitaOnlyForBOYSP")
 
         with _razorpay([self._test_payment(), self._real_payment()]):
             summary = reconcile_zoho_submissions(app.config)
@@ -240,8 +256,7 @@ class TestIgnoredTestForms:
         busy 'ignored' line, not vanish."""
         from public import reconcile_zoho_submissions
 
-        app.config["RAZORPAY_ENABLED"] = True
-        app.config["RECONCILE_IGNORED_ZOHO_FORMS"] = "TestingWebsitewithFormsintergration"
+        _setup_form(app, form_key="TestingWebsitewithFormsintergration", is_test=True)
 
         with _razorpay([self._test_payment()]):
             summary = reconcile_zoho_submissions(app.config)
@@ -255,12 +270,7 @@ class TestIgnoredTestForms:
         from models import Donation
         from public import reconcile_zoho_submissions
 
-        app.config["RAZORPAY_ENABLED"] = True
-        app.config["RECONCILE_IGNORED_ZOHO_FORMS"] = "TestingWebsitewithFormsintergration"
-        app.config["ZOHO_SHEET_CSV_URL"] = "https://docs.google.com/x/pub?output=csv"
-        app.config["ZOHO_FORM_CAMPAIGNS"] = (
-            "TestingWebsitewithFormsintergration=BACE Contribution"
-        )
+        _setup_form(app, form_key="TestingWebsitewithFormsintergration", is_test=True)
 
         sheet = ("Name,Phone,Payment Amount\n"
                  '"Jatin, saini",919650150283,10\n')
@@ -279,8 +289,7 @@ class TestIgnoredTestForms:
     def test_matching_is_case_and_space_insensitive(self, client, app):
         from public import reconcile_zoho_submissions
 
-        app.config["RAZORPAY_ENABLED"] = True
-        app.config["RECONCILE_IGNORED_ZOHO_FORMS"] = "  testingwebsitewithformsintergration , OtherForm "
+        _setup_form(app, form_key="TestingWebsitewithFormsintergration", is_test=True)
 
         with _razorpay([self._test_payment()]):
             summary = reconcile_zoho_submissions(app.config)
@@ -292,8 +301,8 @@ class TestIgnoredTestForms:
         """The default. An unset ignore-list must not accidentally filter."""
         from public import reconcile_zoho_submissions
 
-        app.config["RAZORPAY_ENABLED"] = True
-        app.config["RECONCILE_IGNORED_ZOHO_FORMS"] = ""
+        _setup_form(app, form_key="TestingWebsitewithFormsintergration")   # not marked test
+        _setup_form(app, form_key="EssenceofBhagavadGitaOnlyForBOYSP")
 
         with _razorpay([self._test_payment(), self._real_payment()]):
             summary = reconcile_zoho_submissions(app.config)
@@ -306,8 +315,7 @@ class TestIgnoredTestForms:
         and must not be caught by a stray empty match."""
         from public import unreconciled_razorpay_payments
 
-        app.config["RAZORPAY_ENABLED"] = True
-        app.config["RECONCILE_IGNORED_ZOHO_FORMS"] = "TestingWebsitewithFormsintergration"
+        _setup_form(app, form_key="TestingWebsitewithFormsintergration", is_test=True)
         pay = _payment("pay_Web9", 100, "9000000009")
         pay["notes"] = {"donation_id": "9999", "campaign": "Annadan"}
 
@@ -337,10 +345,9 @@ class TestAutomaticReceiptsFromTheSubmissionsSheet:
     def _sheet(self, text=SUBMISSIONS_SHEET, status=200):
         return patch("zoho_sheet.requests.get", return_value=MagicMock(status_code=status, text=text))
 
-    def _configure(self, app, mapping="EssenceofBhagavadGitaOnlyForBOYSP=BACE Contribution"):
-        app.config["RAZORPAY_ENABLED"] = True
-        app.config["ZOHO_SHEET_CSV_URL"] = "https://docs.google.com/spreadsheets/d/x/pub?output=csv"
-        app.config["ZOHO_FORM_CAMPAIGNS"] = mapping
+    def _configure(self, app, form_key="EssenceofBhagavadGitaOnlyForBOYSP",
+                   campaign_name="BACE Contribution"):
+        _setup_form(app, form_key=form_key, campaign_name=campaign_name)
 
     def _zoho_payment(self, payment_id, amount, contact,
                       form="EssenceofBhagavadGitaOnlyForBOYSP"):
@@ -384,12 +391,12 @@ class TestAutomaticReceiptsFromTheSubmissionsSheet:
         from models import Donation
         from public import reconcile_zoho_submissions
 
-        self._configure(app, mapping="SomeOtherForm=BACE Contribution")
+        self._configure(app, form_key="SomeOtherForm")
         with self._sheet(), _razorpay([self._zoho_payment("pay_Unmapped1", 100, "+919319880507")]):
             summary = reconcile_zoho_submissions(app.config)
 
         assert Donation.query.count() == 0
-        assert "ZOHO_FORM_CAMPAIGNS" in summary["orphan_payments"][0]["why_not_receipted"]
+        assert "isn't set up" in summary["orphan_payments"][0]["why_not_receipted"]
 
     def test_a_payer_the_sheet_does_not_know_is_reported_with_the_reason(self, client, app):
         from models import Donation
@@ -422,8 +429,7 @@ class TestAutomaticReceiptsFromTheSubmissionsSheet:
         from models import Donation
         from public import reconcile_zoho_submissions
 
-        app.config["RAZORPAY_ENABLED"] = True
-        app.config["ZOHO_SHEET_CSV_URL"] = ""
+        app.config["RAZORPAY_ENABLED"] = True   # no ZohoForm rows at all
         with _razorpay([self._zoho_payment("pay_NoSheet1", 100, "+919319880507")]):
             summary = reconcile_zoho_submissions(app.config)
 
@@ -447,8 +453,7 @@ class TestAutomaticReceiptsFromTheSubmissionsSheet:
         from models import Donation
         from public import reconcile_zoho_submissions
 
-        self._configure(app, mapping="TestingWebsitewithFormsintergration=BACE Contribution")
-        app.config["RECONCILE_IGNORED_ZOHO_FORMS"] = "TestingWebsitewithFormsintergration"
+        _setup_form(app, form_key="TestingWebsitewithFormsintergration", is_test=True)
         pay = self._zoho_payment("pay_TestForm2", 10, "+919650150283",
                             form="TestingWebsitewithFormsintergration")
         with self._sheet(), _razorpay([pay]):
@@ -497,9 +502,7 @@ class TestImmediateReceiptOnRazorpayWebhook:
         )
 
     def _configure(self, app):
-        app.config["RAZORPAY_ENABLED"] = True
-        app.config["ZOHO_SHEET_CSV_URL"] = "https://docs.google.com/x/pub?output=csv"
-        app.config["ZOHO_FORM_CAMPAIGNS"] = "EBG=BACE Contribution"
+        _setup_form(app, form_key="EBG")
 
     def _sheet(self, text=None):
         return patch("zoho_sheet.requests.get",
@@ -546,7 +549,6 @@ class TestImmediateReceiptOnRazorpayWebhook:
         from models import Donation
 
         self._configure(app)
-        app.config["RECONCILE_IGNORED_ZOHO_FORMS"] = "TestingWebsitewithFormsintergration"
         with self._sheet():
             self._post_captured(
                 client, app, "pay_TestForm3", 100, "+919319880507",
@@ -602,9 +604,7 @@ class TestHistoricalScan:
         from models import Donation
         from public import reconcile_zoho_submissions
 
-        app.config["RAZORPAY_ENABLED"] = True
-        app.config["ZOHO_SHEET_CSV_URL"] = "https://docs.google.com/x/pub?output=csv"
-        app.config["ZOHO_FORM_CAMPAIGNS"] = "EBG=BACE Contribution"
+        _setup_form(app, form_key="EBG")
         sheet = ("Name,Phone,Payment Amount\n"
                  '"shivam, raj",919000000001,100\n')
 
@@ -822,9 +822,7 @@ class TestDailyReportSafetyNet:
         from daily_report_utils import run_reconciliation_safely
         from models import Donation
 
-        app.config["RAZORPAY_ENABLED"] = True
-        app.config["ZOHO_SHEET_CSV_URL"] = "https://docs.google.com/x/pub?output=csv"
-        app.config["ZOHO_FORM_CAMPAIGNS"] = "EBG=BACE Contribution"
+        _setup_form(app, form_key="EBG")
         sheet = ("Name,Phone,Payment Amount\n"
                  '"shivam, raj",919625901202,100\n')
 
@@ -912,9 +910,7 @@ class TestInternalRoute:
 
     def test_it_reports_what_it_issued(self, client, app):
         app.config["INTERNAL_TASK_TOKEN"] = "secret-token"
-        app.config["RAZORPAY_ENABLED"] = True
-        app.config["ZOHO_SHEET_CSV_URL"] = "https://docs.google.com/x/pub?output=csv"
-        app.config["ZOHO_FORM_CAMPAIGNS"] = "EBG=BACE Contribution"
+        _setup_form(app, form_key="EBG")
         sheet = ("Name,Phone,Payment Amount\n"
                  '"shivam, raj",919625901202,100\n')
 

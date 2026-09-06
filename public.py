@@ -46,7 +46,7 @@ from werkzeug.exceptions import HTTPException
 from extensions import db, csrf, limiter
 from models import (
     Donor, Campaign, Donation, ReceiptCounter, BaceProperty, Festival, SevaType, LiveToGivePurpose,
-    AssociatedWith, AdminActivityLog,
+    AssociatedWith, AdminActivityLog, ZohoForm,
 )
 from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email
@@ -1375,13 +1375,12 @@ def _receipt_now_from_sheet(payment_entity):
     notes = payment_entity.get("notes") or {}
     source, source_ref = _payment_source(notes)
 
-    ignored_forms = {
-        name.strip().lower()
-        for name in (current_app.config.get("RECONCILE_IGNORED_ZOHO_FORMS") or "").split(",")
-        if name.strip()
-    }
-    if source_ref and source_ref.strip().lower() in ignored_forms:
-        return None
+    if source_ref:
+        form = ZohoForm.query.filter(
+            db.func.lower(ZohoForm.form_key) == source_ref.strip().lower()
+        ).first()
+        if form is not None and form.is_test:
+            return None
 
     if Donation.query.filter(db.or_(
         Donation.razorpay_payment_id == payment_id,
@@ -1941,10 +1940,15 @@ def unreconciled_razorpay_payments(config, lookback_days=3, from_date=None, to_d
     }
     known_ids.discard("")
 
-    ignored_forms = {
-        name.strip().lower()
-        for name in (config.get("RECONCILE_IGNORED_ZOHO_FORMS") or "").split(",")
-        if name.strip()
+    # Which forms are test forms is a property of the form, kept on its
+    # own row (Admin -> Zoho Forms) rather than an environment setting --
+    # see ZohoForm. Marked here rather than dropped: a form flagged by
+    # mistake must show up as a suspiciously busy "ignored" line, not
+    # vanish.
+    test_form_keys = {
+        f.form_key.strip().lower()
+        for f in ZohoForm.query.filter_by(is_test=True).all()
+        if f.form_key
     }
 
     unreconciled = []
@@ -1972,8 +1976,7 @@ def unreconciled_razorpay_payments(config, lookback_days=3, from_date=None, to_d
             "notes": notes,
             "source": source,
             "source_ref": source_ref,
-            # Flagged, not dropped -- see RECONCILE_IGNORED_ZOHO_FORMS.
-            "ignored": bool(source_ref) and source_ref.strip().lower() in ignored_forms,
+            "ignored": bool(source_ref) and source_ref.strip().lower() in test_form_keys,
         })
     unreconciled.sort(key=lambda p: p["created_at"], reverse=True)
     return unreconciled, None
@@ -2003,8 +2006,9 @@ def reconcile_zoho_submissions(config, lookback_days=3, max_per_run=25,
 
     Everything fails towards reporting. A receipt is issued only when the
     sheet was read successfully, the payment names a Zoho form, that form
-    is mapped to a campaign in ZOHO_FORM_CAMPAIGNS, exactly one name
-    matches, and the donation validates through _create_zoho_donation.
+    is set up under Admin > Zoho Forms with a campaign and a sheet,
+    exactly one name matches, and the donation validates through
+    _create_zoho_donation.
     Any of those failing leaves the payment in orphan_payments with the
     reason attached, which is where a person can act on it.
 
@@ -2083,77 +2087,100 @@ def reconcile_zoho_submissions(config, lookback_days=3, max_per_run=25,
     return summary
 
 
-def _form_campaign_map(config):
-    """{form name (lowercased): Campaign} from ZOHO_FORM_CAMPAIGNS.
-
-    Campaigns are resolved by name here rather than id so the setting
-    stays readable, and an entry naming a campaign that doesn't exist is
-    left out -- the payment is then reported as unmapped rather than filed
-    somewhere arbitrary."""
-    mapping = {}
-    for pair in (config.get("ZOHO_FORM_CAMPAIGNS") or "").split(";"):
-        if "=" not in pair:
-            continue
-        form, _, campaign_name = pair.partition("=")
-        form, campaign_name = form.strip(), campaign_name.strip()
-        if not form or not campaign_name:
-            continue
-        campaign = Campaign.query.filter(
-            db.func.lower(Campaign.name) == campaign_name.lower()
-        ).first()
-        if campaign:
-            mapping[form.lower()] = campaign
-    return mapping
-
-
 def _receipt_from_submissions_sheet(config, payments, summary, max_per_run):
-    """Issues receipts for payments whose donor can be named from the
-    submissions sheet. Returns whatever is left unreceipted.
+    """Issues receipts for payments whose donor can be named from their
+    own form's submissions sheet. Returns whatever is left unreceipted.
 
-    Everything here fails towards reporting rather than guessing. A
-    payment is only turned into a donation when all of these hold:
+    Each payment names its Zoho form (Razorpay carries it in the payment's
+    notes), and each form has its own row -- campaign, sheet URL, test flag
+    -- under Admin -> Zoho Forms. So a payment is only ever matched against
+    the sheet belonging to the form it actually came from. That matters
+    with six forms and rising: two donors sharing a phone number across
+    different programmes cannot be confused with one another, because the
+    other programme's sheet is never consulted.
 
-      * the sheet was fetched successfully (a failed fetch is reported,
-        never read as "no submissions"),
-      * the payment names a Zoho form in its Razorpay notes,
-      * that form is mapped to a campaign in ZOHO_FORM_CAMPAIGNS,
-      * exactly one name matches the payer's phone (and amount, where the
-        sheet records one),
-      * the donation validates -- PAN/80G and the rest, via the same
-        _create_zoho_donation everything else uses.
+    Sheets are fetched once each per run and reused, since several
+    payments usually come from the same form.
 
-    Any of those failing leaves the payment on the report with the reason
-    attached, which is where a human can act on it."""
+    Everything fails towards reporting rather than guessing. A payment
+    becomes a donation only when all of these hold:
+
+      * it names a Zoho form, and that form has a row here,
+      * the row has a campaign and a sheet URL (ZohoForm.can_receipt),
+      * that sheet was fetched successfully -- a failed fetch is reported,
+        never read as "no submissions",
+      * exactly one name in it matches the payer's phone, and amount where
+        the sheet records one,
+      * the donation validates through the same _create_zoho_donation
+        every other path uses.
+
+    Anything else leaves the payment on the report with the reason
+    attached, which is where a person can act on it."""
     if not payments:
         return payments
 
     import zoho_sheet
 
-    rows, sheet_error = zoho_sheet.fetch_rows(config)
-    if sheet_error:
-        summary["sheet_error"] = sheet_error
-        return payments
-    if not rows:
-        return payments
-
-    campaigns = _form_campaign_map(config)
-    if not campaigns:
+    forms = {
+        f.form_key.strip().lower(): f
+        for f in ZohoForm.query.filter_by(is_active=True).all()
+        if f.form_key
+    }
+    if not forms:
         return payments
 
-    index = zoho_sheet.index_by_phone(rows)
+    sheets = {}          # form_key -> phone index
+    sheet_errors = {}    # form_key -> error string
     still_unreceipted = []
+
+    def _index_for(form):
+        """This form's sheet, fetched at most once per run."""
+        key = form.form_key.strip().lower()
+        if key in sheets or key in sheet_errors:
+            return sheets.get(key)
+        rows, error = zoho_sheet.fetch_rows({"ZOHO_SHEET_CSV_URL": form.sheet_csv_url})
+        if error:
+            sheet_errors[key] = error
+            # Surfaced on the summary too, so a broken sheet is visible in
+            # the daily report rather than only as per-payment reasons.
+            existing = summary.get("sheet_error")
+            note = f"{form.label}: {error}"
+            summary["sheet_error"] = f"{existing}; {note}" if existing else note
+            return None
+        sheets[key] = zoho_sheet.index_by_phone(rows)
+        return sheets[key]
 
     for payment in payments:
         if len(summary["created"]) >= max_per_run:
             still_unreceipted.append(payment)
             continue
 
-        campaign = campaigns.get((payment.get("source_ref") or "").lower())
-        if payment.get("source") != "zoho" or campaign is None:
+        if payment.get("source") != "zoho":
+            payment["why_not_receipted"] = "not a Zoho form payment"
+            still_unreceipted.append(payment)
+            continue
+
+        form = forms.get((payment.get("source_ref") or "").strip().lower())
+        if form is None:
             payment["why_not_receipted"] = (
-                "no campaign mapped for this form -- add it to ZOHO_FORM_CAMPAIGNS"
-                if payment.get("source") == "zoho" else
-                "not a Zoho form payment"
+                f"form '{payment.get('source_ref')}' isn't set up -- add it under "
+                "Admin > Zoho Forms"
+            )
+            still_unreceipted.append(payment)
+            continue
+
+        if not form.can_receipt:
+            payment["why_not_receipted"] = (
+                f"{form.label} has no campaign set" if not form.campaign_id
+                else f"{form.label} has no submissions sheet URL"
+            )
+            still_unreceipted.append(payment)
+            continue
+
+        index = _index_for(form)
+        if index is None:
+            payment["why_not_receipted"] = (
+                f"couldn't read {form.label}'s sheet: {sheet_errors.get(form.form_key.strip().lower())}"
             )
             still_unreceipted.append(payment)
             continue
@@ -2175,7 +2202,7 @@ def _receipt_from_submissions_sheet(config, payments, summary, max_per_run):
 
         try:
             donation, create_error = _create_zoho_donation(
-                payload, campaign, payment["payment_id"], payment.get("order_id"),
+                payload, form.campaign, payment["payment_id"], payment.get("order_id"),
             )
         except Exception as exc:
             db.session.rollback()
@@ -2197,15 +2224,15 @@ def _receipt_from_submissions_sheet(config, payments, summary, max_per_run):
             admin_username="system", action="zoho_donation_reconciled", target_type="donation",
             target_id=donation.id,
             details=(
-                f"campaign={campaign.name} amount={donation.amount} "
+                f"campaign={form.campaign.name} amount={donation.amount} "
                 f"transaction_id={payment['payment_id']} receipt={donation.receipt_number} "
-                f"(Razorpay confirmed the payment; donor named from the {payment.get('source_ref')} "
-                f"submissions sheet)"
+                f"(Razorpay confirmed the payment; donor named from {form.label}'s sheet)"
             )[:500],
         ))
         db.session.commit()
 
     return still_unreceipted
+
 
 
 def _create_zoho_donation(payload, campaign, transaction_id, order_id, send_notifications=True):

@@ -807,3 +807,68 @@ class AdminUser(UserMixin, db.Model):
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
+
+
+class ZohoForm(db.Model):
+    """One Zoho Form that takes money, and what this app needs to know
+    about it: which campaign its donations belong to, and where to read
+    its submissions.
+
+    A row per form, editable from Admin -> Zoho Forms, rather than
+    settings in the environment. There are six of these already and more
+    arrive whenever the temple runs a new programme -- keeping them in
+    env vars meant editing a semicolon-delimited string and redeploying to
+    add a seminar, which is both fiddly and invisible to whoever
+    afterwards wonders why a form's donations aren't being receipted.
+
+    `form_key` is the name Razorpay carries in the payment's own notes
+    (the middle field of zform_custom, e.g.
+    "EssenceofBhagavadGitaOnlyForBOYSP"). That is what ties a payment to
+    its form, and it is exactly what the reconciliation report prints, so
+    it can be copied straight from there.
+
+    `sheet_csv_url` is that form's own Google Sheet, published to web as
+    CSV. Each form writes to its own sheet, so each row carries its own
+    URL -- and because a payment names its form, only that form's sheet is
+    consulted for it. Two donors with the same phone number on different
+    forms therefore cannot be confused with one another.
+
+    Leaving sheet_csv_url blank is valid and means "report this form's
+    payments, don't receipt them": useful for a form whose submissions
+    aren't in a sheet, and for setting a form up before its sheet is
+    published.
+
+    is_test marks a form whose payments aren't real donations. Those are
+    kept out of the actionable report but still counted under their own
+    heading -- never silently dropped, since a form marked test by mistake
+    should show up as a suspiciously busy line rather than vanish.
+    """
+
+    __tablename__ = "zoho_forms"
+
+    id = db.Column(db.Integer, primary_key=True)
+    form_key = db.Column(db.String(150), nullable=False, unique=True, index=True)
+    # Free-text label for the admin list -- "Essence of Bhagavad Gita
+    # (Only For BOYS)" reads better than the run-together form_key.
+    display_name = db.Column(db.String(200))
+    campaign_id = db.Column(db.Integer, db.ForeignKey("campaigns.id"), nullable=True)
+    sheet_csv_url = db.Column(db.String(600))
+    is_test = db.Column(db.Boolean, default=False, nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    campaign = db.relationship("Campaign")
+
+    @property
+    def label(self):
+        return self.display_name or self.form_key
+
+    @property
+    def can_receipt(self):
+        """Whether a payment from this form can be turned into a receipt
+        without a person. Needs both a campaign to file it under and a
+        sheet to name the donor from."""
+        return bool(self.campaign_id and (self.sheet_csv_url or "").strip() and not self.is_test)
+
+    def __repr__(self):
+        return f"<ZohoForm {self.form_key}>"

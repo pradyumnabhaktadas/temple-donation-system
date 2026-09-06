@@ -153,6 +153,11 @@ class TestExistingDatabase:
             "        # own create_table doesn't collide with one create_all()\n"
             "        # already built.\n"
             "        conn.execute(sa.text('DROP TABLE daily_report_recipients'))\n"
+            "        # zoho_forms (e4c72a9b8d13) -- newest post-baseline table,\n"
+            "        # same reasoning: create_all() above already built it from the\n"
+            "        # current models, so the forward migration's create_table would\n"
+            "        # collide with it.\n"
+            "        conn.execute(sa.text('DROP TABLE zoho_forms'))\n"
             f"    stamp(revision='{revision}')\n"
         )
         env = dict(os.environ)

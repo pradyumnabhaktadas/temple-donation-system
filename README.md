@@ -717,22 +717,32 @@ one receipt and a refund). Asking only for a name has no such problem:
 when several rows match they are the same person and agree. Rows that
 genuinely disagree are refused with a reason.
 
-Two settings, both blank by default — and blank means the previous
-behaviour exactly, reporting rather than receipting:
+**Each form is a row under Admin → Settings → Zoho Forms**, not a setting
+in the environment. There are six of these already and a new one appears
+whenever the temple runs a programme, so adding a seminar shouldn't need a
+redeploy — and whoever later wonders why a form's donations aren't being
+receipted can see the answer.
 
-```
-ZOHO_SHEET_CSV_URL=https://docs.google.com/spreadsheets/d/…/pub?output=csv
-ZOHO_FORM_CAMPAIGNS=EssenceofBhagavadGitaOnlyForBOYSP=EBG_Registration;IGFForm=Retreats and Event Registrations
-```
+Each row carries:
 
-Form names are the ones Razorpay carries in the payment notes — exactly
-what the reconciliation report prints, so they can be copied from it. A
-payment from an unmapped form is **reported, never guessed at**: filing a
-donation under the wrong campaign quietly corrupts every figure this app
-reports on.
+| Field | What it's for |
+|---|---|
+| **Form name** | Exactly as Razorpay records it in the payment notes — the reconciliation report prints this, so copy it from there |
+| **Campaign** | Which campaign that form's donations are filed under |
+| **Submissions sheet** | That form's own Google Sheet, published to web as CSV |
+| **Test form** | Its payments aren't real donations |
+
+A form with **both a campaign and a sheet** gets its donations receipted
+automatically. Without either, its payments are *reported* instead —
+never filed under a guessed campaign, because that would quietly corrupt
+every figure this app reports on.
+
+Because each form has its own sheet, and each payment names its own form,
+only that form's sheet is ever consulted for it. Two donors sharing a
+phone number across different programmes therefore can't be confused.
 
 > **Privacy.** A "publish to web" link is readable by anyone who has it,
-> and that sheet holds donor names and phone numbers. A private sheet
+> and those sheets hold donor names and phone numbers. A private sheet
 > behind a read-only service account is the better arrangement if this
 > becomes permanent; only `zoho_sheet.fetch_rows()` would change.
 
