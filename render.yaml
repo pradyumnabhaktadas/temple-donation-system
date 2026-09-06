@@ -180,8 +180,13 @@ services:
   - type: cron
     name: temple-zoho-reconcile
     runtime: python
-    schedule: "7 * * * *"   # hourly, at 7 past -- off the hour so it isn't
-                            # competing with every other cron on the platform
+    schedule: "7,37 * * * *"   # every 30 minutes, at 7 and 37 past -- off the
+                               # hour so it isn't competing with every other
+                               # cron on the platform. The immediate path in
+                               # _handle_payment_captured already receipts most
+                               # payments within seconds; this is the sweep for
+                               # the ones it couldn't, so half an hour is the
+                               # longest a donor should ever wait.
     buildCommand: pip install -r requirements.txt
     startCommand: python zoho_reconcile.py
     envVars:
