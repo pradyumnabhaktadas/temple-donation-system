@@ -46,13 +46,14 @@ from werkzeug.exceptions import HTTPException
 from extensions import db, csrf, limiter
 from models import (
     Donor, Campaign, Donation, ReceiptCounter, BaceProperty, Festival, SevaType, LiveToGivePurpose,
-    AssociatedWith, AdminActivityLog,
+    AssociatedWith, AdminActivityLog, PendingZohoSubmission,
 )
 from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email
 from whatsapp_utils import send_receipt_whatsapp
 from utils import (
-    HIGH_VALUE_PAN_THRESHOLD, is_valid_pan, is_valid_phone, normalize_phone, receipt_access_token, retry,
+    HIGH_VALUE_PAN_THRESHOLD, is_valid_pan, is_valid_phone, normalize_phone, now_ist, receipt_access_token, retry,
+    to_ist,
 )
 
 bp = Blueprint("public", __name__)
@@ -1354,6 +1355,60 @@ def _handle_payment_captured(event):
     return jsonify({"ok": True, "receipt_number": donation.receipt_number}), 200
 
 
+@bp.route("/internal/zoho-reconcile", methods=["POST"])
+@csrf.exempt
+@_safe_json_route
+def internal_zoho_reconcile():
+    """Runs reconcile_zoho_submissions() -- the job that issues receipts
+    for Zoho Forms payments Zoho never sent us a confirmation for. Meant
+    to be called on a schedule (hourly; see render.yaml's
+    "temple-zoho-reconcile" Cron Job), and safe to call by hand at any
+    time: it only ever acts on submissions that are still unresolved and
+    payments not already attached to a donation, so running it twice in a
+    row does nothing the second time.
+
+    Same server-to-server auth story as internal_daily_report_send above:
+    no browser or cookie involved, so nothing to CSRF-protect;
+    INTERNAL_TASK_TOKEN compared with hmac.compare_digest instead."""
+    expected_token = current_app.config.get("INTERNAL_TASK_TOKEN")
+    if not expected_token:
+        return jsonify({"error": "INTERNAL_TASK_TOKEN not configured"}), 503
+
+    provided_token = request.headers.get("X-Internal-Token", "")
+    if not hmac.compare_digest(provided_token, expected_token):
+        return jsonify({"error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    summary = reconcile_zoho_submissions(
+        current_app.config,
+        lookback_days=int(payload.get("lookback_days") or 3),
+    )
+
+    if summary["error"]:
+        # 502, not 200: an unreachable Razorpay means nothing was checked,
+        # and a scheduled job that reports success on a scan it never
+        # performed is exactly the kind of silent failure this whole
+        # feature exists to eliminate.
+        return jsonify({"error": summary["error"]}), 502
+
+    return jsonify({
+        "created": [
+            {"donation_id": d.id, "receipt_number": d.receipt_number, "amount": d.amount}
+            for d in summary["created"]
+        ],
+        "ambiguous": [
+            {"pending_id": s.id, "name": s.full_name, "amount": s.amount, "note": s.note}
+            for s in summary["ambiguous"]
+        ],
+        "unpaid": summary["unpaid"],
+        "still_waiting": summary["still_waiting"],
+        "orphan_payments": [
+            {"payment_id": p["payment_id"], "amount": p["amount"], "contact": p["contact"]}
+            for p in summary["orphan_payments"]
+        ],
+    })
+
+
 @bp.route("/internal/daily-report/send", methods=["POST"])
 @csrf.exempt
 @_safe_json_route
@@ -1453,6 +1508,436 @@ def _zoho_payment_is_captured(payment_id):
         return False, str(exc)
 
     return payment.get("status") == "captured", None
+
+
+def unreconciled_razorpay_payments(config, lookback_days=3):
+    """Returns (payments, error) -- every Razorpay payment captured in the
+    trailing `lookback_days` that has no matching Donation anywhere in this
+    app, neither via this site's own checkout flow nor the Zoho Forms
+    webhook. This is the actual safety net behind
+    zoho_form_donation_webhook()/_zoho_payment_is_captured: those only ever
+    run when Zoho's webhook calls this app at all, carrying a transaction
+    ID for this route to check. On this live account, a submission's first
+    (and often only) call routinely carries no transaction ID yet -- the
+    normal shape of Zoho's call before a payment finishes -- and more than
+    once, no follow-up call has ever arrived once it did. When that
+    happens, nothing in this app ever runs again for that payment, and the
+    donation is otherwise lost with no trace anywhere in this app, no
+    matter how the webhook route itself is written.
+
+    Razorpay is the one party in this whole chain that never fails to
+    record a captured payment, so reconciling against it directly --
+    independent of whether Zoho or this app's webhook route ever gets
+    involved correctly -- is what makes a gap like that visible within a
+    day (via the daily report) instead of only being discovered whenever
+    someone happens to notice a stale "Webhook Status" cell in Zoho's own
+    Reports grid.
+
+    Each returned dict: payment_id/order_id/amount/email/contact/
+    created_at (IST)/notes. Deliberately doesn't create a Donation itself
+    -- there's no campaign or donor-consent data to attach here, only what
+    Razorpay itself recorded. Staff match a flagged payment to its real
+    Zoho submission (or other source) and finish the job via the existing
+    Offline Donation -> Single Entry form, same as every backfill this app
+    has needed so far.
+
+    error is None on success -- including when Razorpay isn't configured
+    at all, which returns ([], None): nothing to reconcile against isn't a
+    failure. A real API error returns ([], the error string) so the caller
+    (the daily report) can say the scan itself failed rather than silently
+    imply a clean one."""
+    if not config.get("RAZORPAY_ENABLED"):
+        return [], None
+
+    try:
+        import razorpay
+
+        client = razorpay.Client(auth=(config["RAZORPAY_KEY_ID"], config["RAZORPAY_KEY_SECRET"]))
+        from_ts = int((now_ist() - datetime.timedelta(days=lookback_days)).timestamp())
+
+        captured = []
+        skip = 0
+        page_size = 100
+        # Safety cap: 10 pages (1000 payments) is far beyond what a few
+        # days of a single temple's traffic could ever produce -- a bug in
+        # the pagination below then fails loud (an incomplete scan next to
+        # a suspiciously round 1000) rather than looping forever.
+        for _ in range(10):
+            page = retry(
+                lambda: client.payment.all({"from": from_ts, "count": page_size, "skip": skip}),
+                attempts=3, delay_seconds=2,
+            ) or {}
+            items = page.get("items", [])
+            captured.extend(item for item in items if item.get("status") == "captured")
+            if len(items) < page_size:
+                break
+            skip += page_size
+    except Exception as exc:
+        current_app.logger.exception("Razorpay reconciliation scan failed")
+        return [], str(exc)
+
+    known_ids = {
+        pid for (pid,) in db.session.query(Donation.razorpay_payment_id)
+        .filter(Donation.razorpay_payment_id.isnot(None)).all()
+    }
+
+    unreconciled = [
+        {
+            "payment_id": item["id"],
+            "order_id": item.get("order_id"),
+            "amount": (item.get("amount") or 0) / 100,
+            "email": item.get("email") or None,
+            "contact": item.get("contact") or None,
+            # Both frames kept deliberately: created_at (IST) is what the
+            # daily report and admin page display, created_at_utc is what
+            # reconcile_zoho_submissions() compares against the naive-UTC
+            # received_at it has stored, with no conversion at the comparison.
+            "created_at": to_ist(datetime.datetime.utcfromtimestamp(item["created_at"])),
+            "created_at_utc": datetime.datetime.utcfromtimestamp(item["created_at"]),
+            "notes": item.get("notes") or {},
+        }
+        for item in captured if item["id"] not in known_ids
+    ]
+    unreconciled.sort(key=lambda p: p["created_at"], reverse=True)
+    return unreconciled, None
+
+
+def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_age_hours=48):
+    """Issues the receipts Zoho never told us to issue.
+
+    This is the fix for the failure that kept recurring: Zoho Forms fires
+    its webhook once, at submission time, *before* the donor has paid --
+    so that call has the whole form but no transaction ID -- and then, on
+    this live account, repeatedly never calls again. The donor pays, the
+    money arrives in Razorpay, and nothing in this app ever hears about
+    it. No amount of logic inside the webhook route can fix that: by the
+    time the payment exists, nothing is calling us.
+
+    So this doesn't wait to be called. It takes the donor details Zoho did
+    give us (PendingZohoSubmission, written on that first call) and the
+    payments Razorpay knows it captured, and joins the two itself.
+
+    Matching, deliberately conservative -- these produce 80G tax receipts,
+    so a wrong match is worse than no match:
+      - exact amount, and
+      - same phone number, normalised (Zoho sends "+919873287387" where
+        Razorpay commonly returns "9873287387" for the same donor), and
+      - the payment was captured *after* the form was submitted and within
+        max_age_hours of it, and
+      - the payment isn't already attached to some other donation, and
+      - exactly one payment fits this submission and exactly one
+        submission fits that payment.
+    Anything ambiguous is marked "ambiguous" and left for a human rather
+    than guessed at. A submission older than max_age_hours with nothing
+    matching is marked "unpaid" -- the ordinary case of someone opening
+    the form and not paying -- so it stops being rechecked forever.
+
+    min_age_minutes leaves a payment in flight alone: a donor who
+    submitted the form 30 seconds ago may be mid-checkout, and Zoho's own
+    follow-up call (when it does work) should get the chance to handle it
+    first.
+
+    Returns a summary dict: created/ambiguous/unpaid/still_waiting counts,
+    the created donations' receipt numbers, and `error` if the Razorpay
+    scan itself failed (in which case nothing was resolved -- an
+    unreachable Razorpay must never be read as "no payments exist")."""
+    summary = {
+        "created": [], "ambiguous": [], "unpaid": 0, "still_waiting": 0,
+        "orphan_payments": [], "error": None,
+    }
+
+    payments, error = unreconciled_razorpay_payments(config, lookback_days=lookback_days)
+    if error:
+        summary["error"] = error
+        return summary
+
+    now = datetime.datetime.utcnow()
+    open_submissions = (
+        PendingZohoSubmission.query
+        .filter(PendingZohoSubmission.resolved_at.is_(None))
+        .filter(PendingZohoSubmission.received_at >= now - datetime.timedelta(days=lookback_days + 1))
+        .all()
+    )
+
+    def _candidates(submission):
+        """Payments that could plausibly belong to this submission."""
+        if not submission.phone_normalized or submission.amount is None:
+            return []
+        return [
+            p for p in payments
+            if abs(p["amount"] - submission.amount) < 0.01
+            and normalize_phone(p["contact"] or "") == submission.phone_normalized
+            # Both sides naive UTC: received_at is stored that way like
+            # every other timestamp in this codebase, and created_at_utc is
+            # carried alongside the IST created_at precisely so this
+            # comparison never has to straddle two frames.
+            and submission.received_at <= p["created_at_utc"]
+            <= submission.received_at + datetime.timedelta(hours=max_age_hours)
+        ]
+
+    # Ambiguity is worked out across the whole set *before* anything is
+    # resolved, deliberately. Deciding it as the loop went was subtly
+    # order-dependent and wrong: the first of two submissions competing for
+    # one payment would be flagged ambiguous, which then made it invisible
+    # as a rival to the second, which would sail through and claim the
+    # payment. One of two indistinguishable donors got a receipt purely by
+    # virtue of database row order. Counting first removes the ordering
+    # from the decision entirely.
+    eligible = [
+        s for s in open_submissions
+        if (now - s.received_at) >= datetime.timedelta(minutes=min_age_minutes)
+    ]
+    summary["still_waiting"] += len(open_submissions) - len(eligible)
+
+    candidates_by_submission = {s.id: _candidates(s) for s in eligible}
+
+    claims_per_payment = {}
+    for candidates in candidates_by_submission.values():
+        for candidate in candidates:
+            claims_per_payment[candidate["payment_id"]] = claims_per_payment.get(candidate["payment_id"], 0) + 1
+
+    for submission in eligible:
+        age = now - submission.received_at
+        candidates = candidates_by_submission[submission.id]
+
+        if len(candidates) > 1:
+            submission.resolution = "ambiguous"
+            submission.resolved_at = now
+            submission.note = (
+                f"{len(candidates)} captured payments match this submission "
+                f"({', '.join(c['payment_id'] for c in candidates)}) -- resolve by hand."
+            )[:300]
+            summary["ambiguous"].append(submission)
+            continue
+
+        if not candidates:
+            if age > datetime.timedelta(hours=max_age_hours):
+                submission.resolution = "unpaid"
+                submission.resolved_at = now
+                submission.note = "No captured payment ever matched -- most likely an abandoned checkout."
+                summary["unpaid"] += 1
+            else:
+                summary["still_waiting"] += 1
+            continue
+
+        payment = candidates[0]
+
+        # The mirror of the check above: if this one payment also fits some
+        # *other* submission, neither can be resolved safely.
+        if claims_per_payment.get(payment["payment_id"], 0) > 1:
+            submission.resolution = "ambiguous"
+            submission.resolved_at = now
+            submission.note = (
+                f"Payment {payment['payment_id']} matches this and "
+                f"{claims_per_payment[payment['payment_id']] - 1} other submission(s) "
+                "equally well -- resolve by hand."
+            )[:300]
+            summary["ambiguous"].append(submission)
+            continue
+
+        # Re-verify against Razorpay by ID before writing a receipt. The
+        # scan above already filtered on status == "captured", but that
+        # was a list read; this is the same single-payment confirmation
+        # the webhook path makes, and it costs one API call to be certain
+        # the thing we're about to issue a tax receipt for is real.
+        captured, verify_error = _zoho_payment_is_captured(payment["payment_id"])
+        if verify_error or not captured:
+            summary["still_waiting"] += 1
+            continue
+
+        payload = json.loads(submission.payload_json or "{}")
+        campaign = submission.campaign
+        if campaign is None:
+            submission.resolution = "ambiguous"
+            submission.resolved_at = now
+            submission.note = f"Campaign '{submission.campaign_param}' no longer exists -- resolve by hand."[:300]
+            summary["ambiguous"].append(submission)
+            continue
+
+        donation, create_error = _create_zoho_donation(
+            payload, campaign, payment["payment_id"], payment.get("order_id"),
+        )
+        if create_error:
+            body, _status = create_error
+            submission.resolution = "ambiguous"
+            submission.resolved_at = now
+            submission.note = f"Payment {payment['payment_id']} matched, but: {body.get('error')}"[:300]
+            summary["ambiguous"].append(submission)
+            continue
+
+        submission.resolution = "reconciled"
+        submission.resolved_at = now
+        submission.donation_id = donation.id
+        summary["created"].append(donation)
+
+        # Keeps a payment from being matched twice within one run.
+        payments = [p for p in payments if p["payment_id"] != payment["payment_id"]]
+
+        db.session.add(AdminActivityLog(
+            admin_username="system", action="zoho_donation_reconciled", target_type="donation",
+            target_id=donation.id,
+            details=(
+                f"campaign={campaign.name} amount={donation.amount} "
+                f"transaction_id={payment['payment_id']} receipt={donation.receipt_number} "
+                f"(Zoho never sent a payment-confirmed webhook; matched from Razorpay)"
+            )[:500],
+        ))
+
+    db.session.commit()
+
+    # Whatever's left is money Razorpay captured that this app still can't
+    # account for from any source -- not just Zoho. Reported, never
+    # guessed at, since there's no donor or campaign data behind it.
+    summary["orphan_payments"] = payments
+    return summary
+
+
+def _record_pending_zoho_submission(payload, campaign, campaign_param):
+    """Stores Zoho's early (pre-payment) webhook call so the donor details
+    on it survive until a payment can be matched to them. See
+    PendingZohoSubmission's docstring for why this exists at all.
+
+    Deduplicated on (campaign, normalised phone, amount) among records
+    still unresolved: Zoho can send this early call more than once for one
+    submission (its own internal retries, a donor retrying a failed
+    payment on the same form), and two pending rows for one real
+    submission would later look to the reconciler like two people owed a
+    receipt -- which it would then correctly refuse to resolve as
+    ambiguous, turning a recoverable case into a manual one for no
+    reason."""
+    phone_normalized = normalize_phone(payload.get("phone") or "") or None
+    try:
+        amount = float(payload.get("amount"))
+    except (TypeError, ValueError):
+        amount = None
+
+    existing = PendingZohoSubmission.query.filter_by(
+        campaign_id=campaign.id, phone_normalized=phone_normalized,
+        amount=amount, resolved_at=None,
+    ).first()
+    if existing:
+        # Refresh the stored payload -- a resubmission may carry corrected
+        # details (a fixed typo in the name/PAN), and the newest version of
+        # what the donor told us is the one worth keeping.
+        existing.payload_json = json.dumps(payload)
+        existing.full_name = (payload.get("full_name") or "")[:150] or None
+        db.session.commit()
+        return existing
+
+    pending = PendingZohoSubmission(
+        campaign_id=campaign.id,
+        campaign_param=(campaign_param or "")[:150] or None,
+        full_name=(payload.get("full_name") or "")[:150] or None,
+        phone_normalized=phone_normalized,
+        amount=amount,
+        payload_json=json.dumps(payload),
+    )
+    db.session.add(pending)
+    db.session.commit()
+    return pending
+
+
+def _close_pending_for_donation(donation, resolution):
+    """Marks any still-open pending submission that this donation clearly
+    satisfies as resolved, so reconciliation stops looking for a payment
+    that has already been accounted for. Matched on the same three fields
+    the reconciler itself matches on (campaign, normalised phone, amount);
+    a pending row that doesn't match stays open on purpose rather than
+    being closed on a guess."""
+    phone_normalized = normalize_phone(donation.donor.phone or "") if donation.donor else None
+    if not phone_normalized:
+        return
+
+    for pending in PendingZohoSubmission.query.filter_by(
+        campaign_id=donation.campaign_id, phone_normalized=phone_normalized,
+        amount=float(donation.amount), resolved_at=None,
+    ).all():
+        pending.resolved_at = datetime.datetime.utcnow()
+        pending.resolution = resolution
+        pending.donation_id = donation.id
+    db.session.commit()
+
+
+def _create_zoho_donation(payload, campaign, transaction_id, order_id):
+    """Turns a validated Zoho Forms payload plus a *confirmed-captured*
+    Razorpay payment into a real donation with a real receipt. Returns
+    (donation, error) -- error is (dict, status_code) ready to jsonify, and
+    is None on success.
+
+    Extracted from zoho_form_donation_webhook() so reconcile_zoho_submissions()
+    can create donations through the identical path rather than a
+    second implementation of the same rules. That mattered: the whole
+    reason reconciliation exists is that Zoho's follow-up call often never
+    arrives, which means the reconciler -- not the webhook -- is the path
+    most of these donations will actually be created through. Two copies
+    of the PAN/80G/high-value rules would have meant the path that runs
+    least often is the only one anybody ever reviews.
+
+    Callers must have already verified with Razorpay that transaction_id
+    is captured. This function does not re-check; it's the "write it down"
+    half, not the "is it real" half."""
+    try:
+        amount = float(payload.get("amount"))
+        if amount <= 0:
+            raise ValueError("amount must be greater than 0")
+    except (TypeError, ValueError):
+        return None, ({"error": f"Invalid amount '{payload.get('amount')}'"}, 400)
+
+    pan = (payload.get("pan") or "").strip().upper()
+    if pan and not is_valid_pan(pan):
+        return None, ({"error": f"Invalid PAN '{pan}'"}, 400)
+    if not is_valid_phone(payload.get("phone")):
+        return None, ({"error": f"Invalid phone '{payload.get('phone')}'"}, 400)
+    if payload.get("whatsapp_number") and not is_valid_phone(payload.get("whatsapp_number")):
+        return None, ({"error": f"Invalid whatsapp_number '{payload.get('whatsapp_number')}'"}, 400)
+
+    high_value_error = high_value_pan_address_error(amount, pan, payload.get("address"))
+    if high_value_error:
+        return None, ({"error": high_value_error}, 400)
+
+    # Same three-way choice as create_order()'s receipt_type: the Zoho
+    # Form can pass "80g"/"non80g" explicitly (a payload parameter mapped
+    # to a field on that form), or leave it blank to fall back to the
+    # campaign's own fixed Campaign.is_80g default.
+    receipt_type = (payload.get("receipt_type") or "").strip().lower()
+    if receipt_type == "80g":
+        is_80g_requested = True
+    elif receipt_type == "non80g":
+        is_80g_requested = False
+    else:
+        is_80g_requested = None
+
+    effective_is_80g = is_80g_requested if is_80g_requested is not None else campaign.is_80g
+    if effective_is_80g and not pan:
+        return None, ({"error": "A PAN is required to issue an 80G tax receipt for this donation."}, 400)
+
+    # Same REG-001 backstop as create_order(): a PAN that arrived despite
+    # not being legally required here (not 80G, not above the high-value
+    # threshold) is spurious and must not be written to the donor's shared
+    # profile.
+    donor_data = dict(payload)
+    if not (effective_is_80g or amount > HIGH_VALUE_PAN_THRESHOLD):
+        donor_data["pan"] = ""
+
+    donor = find_or_create_donor(donor_data)
+
+    donation = Donation(
+        donor_id=donor.id,
+        campaign_id=campaign.id,
+        amount=amount,
+        payment_mode="online",
+        status="pending",
+        recorded_by="zoho_form",
+        razorpay_payment_id=transaction_id,
+        razorpay_order_id=order_id,
+        is_80g_requested=is_80g_requested,
+        remarks=(payload.get("remarks") or "").strip()[:300] or f"Collected via Zoho Form ({campaign.name})",
+    )
+    db.session.add(donation)
+    db.session.commit()
+
+    _finalize_success(donation)
+    return donation, None
 
 
 @bp.route("/internal/zoho-form-donation", methods=["POST"])
@@ -1615,7 +2100,18 @@ def zoho_form_donation_webhook():
             return jsonify({
                 "error": "Missing or unrecognised payment_transaction_id for a completed payment"
             }), 400
-        return jsonify({"skipped": "no payment transaction id yet", "status": payment_status}), 200
+        # NOT a dead end any more. This is the call Zoho reliably sends and
+        # the one it frequently never follows up on, so throwing it away
+        # was exactly what made those donations vanish: the donor had
+        # already told us everything except the payment ID, and we dropped
+        # it. Recorded instead, for reconcile_zoho_submissions() to match
+        # against Razorpay's own record of captured payments once the money
+        # actually lands -- with or without Zoho ever calling again.
+        pending = _record_pending_zoho_submission(payload, campaign, campaign_name)
+        return jsonify({
+            "pending": "awaiting payment confirmation", "status": payment_status,
+            "pending_submission_id": pending.id,
+        }), 200
     transaction_id = payment_id_match.group()
 
     existing = Donation.query.filter_by(razorpay_payment_id=transaction_id).first()
@@ -1646,75 +2142,23 @@ def zoho_form_donation_webhook():
     if not captured:
         return jsonify({"skipped": "payment not yet captured", "transaction_id": transaction_id}), 200
 
-    try:
-        amount = float(payload.get("amount"))
-        if amount <= 0:
-            raise ValueError("amount must be greater than 0")
-    except (TypeError, ValueError):
-        return jsonify({"error": f"Invalid amount '{payload.get('amount')}'"}), 400
+    donation, create_error = _create_zoho_donation(payload, campaign, transaction_id, order_id)
+    if create_error:
+        body, status = create_error
+        return jsonify(body), status
+    donor = donation.donor
 
-    pan = (payload.get("pan") or "").strip().upper()
-    if pan and not is_valid_pan(pan):
-        return jsonify({"error": f"Invalid PAN '{pan}'"}), 400
-    if not is_valid_phone(payload.get("phone")):
-        return jsonify({"error": f"Invalid phone '{payload.get('phone')}'"}), 400
-    if payload.get("whatsapp_number") and not is_valid_phone(payload.get("whatsapp_number")):
-        return jsonify({"error": f"Invalid whatsapp_number '{payload.get('whatsapp_number')}'"}), 400
-
-    high_value_error = high_value_pan_address_error(amount, pan, payload.get("address"))
-    if high_value_error:
-        return jsonify({"error": high_value_error}), 400
-
-    # Same three-way choice as create_order()'s receipt_type: the Zoho
-    # Form can pass "80g"/"non80g" explicitly (a payload parameter mapped
-    # to a field on that form), or leave it blank to fall back to the
-    # campaign's own fixed Campaign.is_80g default.
-    receipt_type = (payload.get("receipt_type") or "").strip().lower()
-    if receipt_type == "80g":
-        is_80g_requested = True
-    elif receipt_type == "non80g":
-        is_80g_requested = False
-    else:
-        is_80g_requested = None
-
-    effective_is_80g = is_80g_requested if is_80g_requested is not None else campaign.is_80g
-    if effective_is_80g and not pan:
-        return jsonify({
-            "error": "A PAN is required to issue an 80G tax receipt for this donation."
-        }), 400
-
-    # Same REG-001 backstop as create_order(): a PAN that arrived despite
-    # not being legally required here (not 80G, not above the high-value
-    # threshold) is spurious and must not be written to the donor's shared
-    # profile.
-    donor_data = dict(payload)
-    if not (effective_is_80g or amount > HIGH_VALUE_PAN_THRESHOLD):
-        donor_data["pan"] = ""
-
-    donor = find_or_create_donor(donor_data)
-
-    donation = Donation(
-        donor_id=donor.id,
-        campaign_id=campaign.id,
-        amount=amount,
-        payment_mode="online",
-        status="pending",
-        recorded_by="zoho_form",
-        razorpay_payment_id=transaction_id,
-        razorpay_order_id=order_id,
-        is_80g_requested=is_80g_requested,
-        remarks=(payload.get("remarks") or "").strip()[:300] or f"Collected via Zoho Form ({campaign.name})",
-    )
-    db.session.add(donation)
-    db.session.commit()
-
-    _finalize_success(donation)
+    # Zoho's follow-up call did arrive for this one after all, so close out
+    # any pending record this submission left behind on its earlier call --
+    # otherwise reconciliation would keep chasing a payment that's already
+    # been turned into a receipt right here.
+    _close_pending_for_donation(donation, resolution="webhook")
 
     db.session.add(AdminActivityLog(
         admin_username="system", action="zoho_form_donation_received", target_type="donation",
         target_id=donation.id,
         details=(
-            f"campaign={campaign.name} amount={amount} transaction_id={transaction_id}"
+            f"campaign={campaign.name} amount={donation.amount} transaction_id={transaction_id}"
             + (f" order_id={order_id}" if order_id else "")
         )[:500],
     ))

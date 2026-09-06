@@ -743,6 +743,80 @@ class DonorLoginOTP(db.Model):
         return check_password_hash(self.otp_hash, otp)
 
 
+class PendingZohoSubmission(db.Model):
+    """A Zoho Forms submission whose donor details have arrived but whose
+    payment hasn't been confirmed to us yet.
+
+    Zoho fires its webhook once, at submission time -- *before* the donor
+    finishes paying -- so that call carries the whole form (name, phone,
+    amount) but no transaction ID. Zoho's docs say a second call follows
+    with the final payment result. On this live account it frequently
+    doesn't: repeatedly, a submission's own Zoho record went on to show
+    "Payment Status: Completed" with a real Razorpay transaction ID, while
+    the only call this app ever received was the first one, and the money
+    arrived with nothing here to show for it.
+
+    Rather than discard that first call as unusable (which is what left
+    those donations invisible to this app entirely -- no donor, no
+    donation, no trace, discovered only when someone eventually noticed a
+    stale "Webhook Status" cell in Zoho's Reports grid), it's recorded
+    here. The full payload is kept verbatim in `payload_json` so
+    reconciliation can replay it through the exact same code path the
+    webhook itself uses, and the few fields reconciliation actually
+    matches on are pulled out as their own indexed columns.
+
+    See public.reconcile_zoho_submissions() for how these get resolved
+    against Razorpay -- which, unlike Zoho, is never wrong about whether
+    money was captured.
+    """
+
+    __tablename__ = "pending_zoho_submissions"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Resolved at receive time from the ?campaign= URL parameter, so a
+    # campaign renamed between submission and reconciliation can't strand
+    # the record. campaign_param keeps the raw value for diagnosing a
+    # mis-configured form's webhook URL.
+    campaign_id = db.Column(db.Integer, db.ForeignKey("campaigns.id"), nullable=True)
+    campaign_param = db.Column(db.String(150))
+
+    full_name = db.Column(db.String(150))
+    # Normalised (last 10 digits) at write time -- Zoho sends "+919873287387"
+    # while Razorpay's own contact field commonly comes back "9873287387"
+    # for the same person, and matching has to survive that.
+    phone_normalized = db.Column(db.String(20), index=True)
+    amount = db.Column(db.Float)
+
+    payload_json = db.Column(db.Text)
+
+    received_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False, index=True)
+
+    # NULL while still awaiting a payment. Set (with `resolution`) once
+    # this submission has been accounted for one way or another.
+    resolved_at = db.Column(db.DateTime, nullable=True)
+    donation_id = db.Column(db.Integer, db.ForeignKey("donations.id"), nullable=True)
+    # reconciled -- matched to a captured Razorpay payment and turned into
+    #   a real donation + receipt by reconcile_zoho_submissions().
+    # webhook -- Zoho's own follow-up call did arrive after all and the
+    #   webhook route created the donation itself; this record is just
+    #   closed out so it stops being chased.
+    # ambiguous -- more than one captured payment (or more than one pending
+    #   submission) fits, so it was deliberately left for a human rather
+    #   than guessed at. Surfaced in the daily report.
+    # unpaid -- aged out past the reconciliation window with no matching
+    #   payment ever appearing, i.e. the donor most likely abandoned
+    #   checkout. Not an error.
+    resolution = db.Column(db.String(20), nullable=True)
+    note = db.Column(db.String(300), nullable=True)
+
+    campaign = db.relationship("Campaign")
+    donation = db.relationship("Donation")
+
+    def __repr__(self):
+        return f"<PendingZohoSubmission {self.id} {self.full_name} {self.amount}>"
+
+
 class AdminActivityLog(db.Model):
     """Audit trail of mutating admin actions -- who did what, to which
     record, and when. Covers the actions most likely to matter for

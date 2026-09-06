@@ -676,6 +676,72 @@ ID, so a duplicate or a rejected submission (check the Zoho Form's own
 **Webhooks - Failed Entries** view for the latter — Zoho shows this
 route's error response there) is easy to trace back.
 
+### When Zoho never sends a payment call at all
+
+Everything above only helps when Zoho calls us with a transaction ID.
+Often it doesn't. Zoho fires its webhook once, at submission time —
+*before* the donor pays — so that call carries the whole form but no
+transaction ID, and on this account the promised follow-up frequently
+never arrives. Confirmed cases:
+
+| Date | Donor | Form | Zoho's own record | What we received |
+|---|---|---|---|---|
+| 03 Sep 2026 | Nandani Kumari | Me, You & The Ego | Completed, `pay_TXZJ0OU6EtNogX` | one call, no transaction ID |
+| 04 Sep 2026 | shivam raj | Essence of Bhagavad Gita | Completed, `pay_TY1ckLpy6lUDMr` | one call, no transaction ID |
+
+The money arrived, and nothing in this app knew: no donor, no donation, no
+receipt, and no indication anything was missing. They were found only
+because someone noticed a stale **Webhook Status** cell in Zoho's Reports
+grid days later.
+
+No change to the webhook route can fix this — by the time the payment
+exists, nothing is calling us. So the app no longer depends on that second
+call:
+
+1. **The first call is kept, not discarded.** It's stored as a
+   `PendingZohoSubmission` (donor details, amount, campaign, and the full
+   payload verbatim) instead of being answered with `{"skipped": ...}`.
+2. **A scheduled job joins the two halves itself.**
+   `public.reconcile_zoho_submissions()` matches those pending
+   submissions against the payments **Razorpay** confirms it captured, and
+   issues the receipt — through the same `_create_zoho_donation()` the
+   webhook uses, so both paths apply identical PAN/80G/validation rules.
+
+Matching is deliberately strict, because these produce 80G tax receipts
+and a wrong match is worse than no match: exact amount, same phone
+(normalised — Zoho sends `+919873287387` where Razorpay returns
+`9873287387`), payment captured *after* the form was submitted and within
+48 hours of it, payment not already attached to a donation, and **exactly
+one** payment fitting **exactly one** submission. Anything ambiguous is
+flagged for a person rather than guessed at. A submission that ages out
+with no matching payment is closed as `unpaid` (an abandoned checkout).
+
+It runs **hourly** via the `temple-zoho-reconcile` Cron Job
+(`zoho_reconcile.py` → `POST /internal/zoho-reconcile`), and **again from
+the daily report** as a fallback, since this project's cron jobs have
+silently failed for days at a time before (see the daily-report notes
+above). Worst case is a receipt issued the next morning rather than a
+payment lost indefinitely.
+
+Anything it can't resolve on its own — ambiguous matches, and captured
+payments with nothing in this app to explain them — is listed in the
+**daily report email** under "Payment Reconciliation", so it reaches a
+person the same day instead of sitting unnoticed in Zoho. Staff finish
+those by hand via **Offline Donation → Single Entry**. A clean run adds
+nothing to the email.
+
+To run it manually:
+
+```bash
+python zoho_reconcile.py                  # last 3 days
+python zoho_reconcile.py --lookback-days 7
+```
+
+Receipts it issues are logged to the Activity Log as
+`zoho_donation_reconciled`, distinct from `zoho_form_donation_received`,
+so you can tell which donations arrived normally and which had to be
+recovered.
+
 ## Running the tests
 
 ```bash

@@ -153,6 +153,9 @@ class TestExistingDatabase:
             "        # own create_table doesn't collide with one create_all()\n"
             "        # already built.\n"
             "        conn.execute(sa.text('DROP TABLE daily_report_recipients'))\n"
+            "        # pending_zoho_submissions (c7e39b5a1d84) -- newest of the\n"
+            "        # post-baseline tables, same reasoning again.\n"
+            "        conn.execute(sa.text('DROP TABLE pending_zoho_submissions'))\n"
             f"    stamp(revision='{revision}')\n"
         )
         env = dict(os.environ)

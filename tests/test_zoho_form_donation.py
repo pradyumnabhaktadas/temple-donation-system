@@ -131,15 +131,25 @@ class TestPaymentStatusGate:
     all. Whether a donation actually gets created is covered by
     TestRazorpayVerification below."""
 
-    def test_no_transaction_id_and_a_non_success_status_is_skipped(self, client, app):
+    def test_no_transaction_id_yet_is_held_as_pending_not_discarded(self, client, app):
         """The normal shape of Zoho's early async call: no payment id has
-        arrived yet, nothing to verify against Razorpay, no donation."""
-        from models import Donation
+        arrived yet, so there's still nothing to verify against Razorpay
+        and no donation to create.
+
+        This used to return {"skipped": ...} and drop the call entirely,
+        which is what let real donations disappear: for a good number of
+        submissions this is the *only* call Zoho ever makes, and the donor
+        had already told us everything except the payment ID. It's now
+        held as a PendingZohoSubmission for reconciliation to match
+        against Razorpay later -- see test_zoho_reconciliation.py, which
+        replays two of the real payments this lost."""
+        from models import Donation, PendingZohoSubmission
         app.config["ZOHO_FORMS_WEBHOOK_TOKEN"] = TOKEN
         resp = _post(client, app, payment_status="pending", payment_transaction_id="")
         assert resp.status_code == 200
-        assert resp.get_json()["skipped"] == "no payment transaction id yet"
+        assert resp.get_json()["pending"] == "awaiting payment confirmation"
         assert Donation.query.count() == 0
+        assert PendingZohoSubmission.query.count() == 1
 
     def test_real_zoho_processing_not_needed_with_no_id_is_skipped(self, client, app):
         """"Processing not needed" (confirmed from a live account) is

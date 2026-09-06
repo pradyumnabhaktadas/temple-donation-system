@@ -121,10 +121,72 @@ def _render_email_html(data, org_name):
         </table>
         """
 
+    def reconciliation_html(rec):
+        """The part of this email that exists because payments were being
+        lost. Only rendered when there's something to say -- a clean run
+        with nothing stranded stays quiet rather than training people to
+        scroll past a box that always says "0"."""
+        if not rec:
+            return ""
+
+        blocks = []
+
+        if rec.get("error"):
+            blocks.append(
+                '<p style="margin:0 0 8px;"><strong>The payment reconciliation check could not run:</strong> '
+                f'{rec["error"]}<br><span style="color:#555;">Zoho Forms payments may be unreceipted until '
+                'this succeeds. It retries automatically every hour.</span></p>'
+            )
+
+        if rec.get("created"):
+            rows = "".join(
+                f'<li>Rs. {format_inr(float(d.amount))} -- receipt {d.receipt_number}</li>'
+                for d in rec["created"]
+            )
+            blocks.append(
+                f'<p style="margin:0 0 4px;"><strong>{len(rec["created"])} receipt(s) issued for Zoho Forms '
+                'payments Zoho never confirmed to us.</strong> These were real, captured payments matched '
+                f'against Razorpay directly:</p><ul style="margin:0 0 10px;">{rows}</ul>'
+            )
+
+        if rec.get("ambiguous"):
+            rows = "".join(
+                f'<li>{s.full_name or "(no name)"} -- Rs. {format_inr(float(s.amount or 0))}: {s.note}</li>'
+                for s in rec["ambiguous"]
+            )
+            blocks.append(
+                f'<p style="margin:0 0 4px;"><strong>{len(rec["ambiguous"])} submission(s) need a person to '
+                'decide.</strong> A payment matched, but not unambiguously enough to issue a tax receipt '
+                f'automatically:</p><ul style="margin:0 0 10px;">{rows}</ul>'
+            )
+
+        if rec.get("orphan_payments"):
+            rows = "".join(
+                f'<li>{p["payment_id"]} -- Rs. {format_inr(p["amount"])} '
+                f'({p["contact"] or "no contact number"})</li>'
+                for p in rec["orphan_payments"]
+            )
+            blocks.append(
+                f'<p style="margin:0 0 4px;"><strong>{len(rec["orphan_payments"])} captured payment(s) with '
+                'nothing in this system to match them to.</strong> Money Razorpay received that no donation '
+                f'accounts for -- worth checking:</p><ul style="margin:0 0 10px;">{rows}</ul>'
+            )
+
+        if not blocks:
+            return ""
+
+        return f"""
+        <div style="margin:22px 0 0;padding:12px 14px;background:#fff8e6;border-left:4px solid #d19b2f;">
+          <h3 style="margin:0 0 8px;color:#7a1f1f;">Payment Reconciliation</h3>
+          <div style="font-size:14px;">{"".join(blocks)}</div>
+        </div>
+        """
+
     return f"""
     <div style="font-family:Georgia,'Times New Roman',serif;color:#222;max-width:600px;">
       <h2 style="color:#7a1f1f;margin-bottom:4px;">{org_name} -- Daily Collection Report</h2>
       <p style="color:#555;margin-top:0;">For {data['report_date'].strftime('%d %b %Y')}</p>
+      {reconciliation_html(data.get('reconciliation'))}
       {section_html("Today's Collection", data['today'])}
       {section_html(f"This Week's Collection (since {data['week_start'].strftime('%d %b')})", data['week'])}
       {section_html(f"This Month's Collection ({data['month_start'].strftime('%B %Y')})", data['month'])}
@@ -158,6 +220,33 @@ def _recipient_is_due(recipient, report_date):
     return True  # unknown frequency value -- fail open rather than silently drop
 
 
+def run_reconciliation_safely(app):
+    """Runs the Zoho/Razorpay reconciliation as part of the daily report,
+    and returns its summary for the report to display.
+
+    Belt and braces: reconciliation has its own hourly Cron Job
+    (render.yaml's "temple-zoho-reconcile"), but Cron Jobs need a Render
+    plan that supports them, and this project's *other* cron job spent
+    three consecutive days silently failing to do its work (see this
+    module's docstring and daily_report.py's). Hanging reconciliation off
+    the daily report as well means the worst case is a receipt issued the
+    next morning instead of within the hour -- not a payment lost
+    indefinitely, which is the failure this whole feature exists to end.
+
+    Never raises: the daily report must still go out even if Razorpay is
+    unreachable or reconciliation hits something unexpected. A failure
+    here is reported inside the email rather than taking the email down."""
+    try:
+        from public import reconcile_zoho_submissions
+        return reconcile_zoho_submissions(app.config)
+    except Exception as exc:
+        app.logger.exception("Zoho reconciliation from the daily report failed")
+        return {
+            "created": [], "ambiguous": [], "unpaid": 0, "still_waiting": 0,
+            "orphan_payments": [], "error": str(exc),
+        }
+
+
 def send_report(app, report_date=None, force=False):
     """Computes the report and delivers it to every active recipient.
     Returns a result dict (used by daily_report.py's printed summary and by
@@ -171,7 +260,13 @@ def send_report(app, report_date=None, force=False):
     because this runs from a CLI script with only an app context, no
     request context -- log_activity() reads Flask-Login's current_user,
     which raises outside a request rather than resolving to "system"."""
+    # Before computing totals, not after: a receipt issued by
+    # reconciliation right now is a real donation that belongs in today's
+    # numbers, so sweeping first means the report and the ledger agree.
+    reconciliation = run_reconciliation_safely(app)
+
     data = compute_report(report_date)
+    data["reconciliation"] = reconciliation
     date_key = int(data["report_date"].strftime("%Y%m%d"))
 
     if not force:
