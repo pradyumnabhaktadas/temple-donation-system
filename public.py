@@ -52,9 +52,14 @@ from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email
 from whatsapp_utils import send_receipt_whatsapp
 from utils import (
-    HIGH_VALUE_PAN_THRESHOLD, is_valid_pan, is_valid_phone, normalize_phone, now_ist, receipt_access_token, retry,
+    HIGH_VALUE_PAN_THRESHOLD, is_valid_pan, is_valid_phone, normalize_phone, receipt_access_token, retry,
     to_ist,
 )
+# now_ist deliberately NOT imported here: the one place in this module that
+# reached for it (the Razorpay scan window) needed an absolute UTC instant,
+# and now_ist()'s naive-IST return silently shortened that window by 5h30m
+# in production. Leaving it in the import list invites the same mistake
+# back. See unreconciled_razorpay_payments().
 
 bp = Blueprint("public", __name__)
 
@@ -1652,10 +1657,13 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
     follow-up call (when it does work) should get the chance to handle it
     first.
 
-    max_per_run bounds the work one run does, because each match costs a
-    Razorpay confirmation call and this executes inside an HTTP request
-    under gunicorn's worker timeout -- the failure mode this codebase has
-    already been bitten by twice. The remainder is picked up next run.
+    max_per_run bounds the work one run does, counted in Razorpay
+    confirmation calls attempted (not donations created -- a confirmation
+    that fails is the most expensive call here, and counting successes
+    would leave the all-failing case unbounded). This executes inside an
+    HTTP request under gunicorn's worker timeout, the failure mode this
+    codebase has already been bitten by twice. The remainder is picked up
+    next run.
 
     Submissions older than lookback_days + 1 are out of scope entirely
     (there'd be no payment left in the scan window to match them to). If
@@ -1750,6 +1758,8 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
         for candidate in candidates:
             claims_per_payment[candidate["payment_id"]] = claims_per_payment.get(candidate["payment_id"], 0) + 1
 
+    confirmations_made = 0
+
     for submission in eligible:
         age = now - submission.received_at
         candidates = candidates_by_submission[submission.id]
@@ -1784,14 +1794,21 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
             summary["ambiguous"].append(submission)
             continue
 
-        if len(summary["created"]) >= max_per_run:
-            # Bounded work per run. Each match below costs a Razorpay
-            # confirmation call, and this runs inside an HTTP request with
+        if confirmations_made >= max_per_run:
+            # Bounded work per run. This runs inside an HTTP request with
             # gunicorn's worker timeout over it -- the failure mode this
             # codebase has already been bitten by twice (slow synchronous
             # work blowing past the timeout, worker killed mid-response,
-            # nothing in the log). Anything over the cap is simply picked
-            # up by the next hourly run.
+            # nothing in the log). Anything over the cap is picked up by
+            # the next hourly run.
+            #
+            # Counted on confirmation calls attempted, NOT on donations
+            # created: the confirmation is the expensive part, and a
+            # failing one is the *most* expensive of all (three attempts,
+            # two seconds apart, via retry()). Capping on creations
+            # instead left the pathological case uncapped -- 25 payments
+            # that all fail to confirm would spend ~150 seconds here while
+            # a creation-based counter sat at zero and never intervened.
             summary["still_waiting"] += 1
             continue
 
@@ -1800,6 +1817,7 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
         # was a list read; this is the same single-payment confirmation
         # the webhook path makes, and it costs one API call to be certain
         # the thing we're about to issue a tax receipt for is real.
+        confirmations_made += 1
         captured, verify_error = _zoho_payment_is_captured(payment["payment_id"])
         if verify_error or not captured:
             summary["still_waiting"] += 1

@@ -46,6 +46,21 @@ def campaign_id(app):
         return campaign.id
 
 
+def _donation_date():
+    """Today, in IST -- the same clock the exports themselves bucket by
+    (admin.export_monthly_report uses now_ist()).
+
+    This used to be hardcoded to 2026-08-01, which made
+    test_monthly_report_export a time bomb: that export defaults to the
+    *current* month, so the test passed all through August 2026 and began
+    failing on 1 September, when the month rolled over and the export it
+    asked for no longer contained the donation. The export was never
+    broken -- the test was asking the wrong question, and did so
+    convincingly enough to be written off as a flake for days."""
+    from utils import now_ist
+    return now_ist().date()
+
+
 def _log_donation(client, campaign_id, **overrides):
     data = {
         "campaign_id": campaign_id,
@@ -54,7 +69,7 @@ def _log_donation(client, campaign_id, **overrides):
         "amount": "1100",
         "payment_mode": "cash",
         "remarks": PAYLOAD,
-        "donation_date": "2026-08-01",
+        "donation_date": _donation_date().isoformat(),
     }
     data.update(overrides)
     return client.post("/admin/donations/manual", data=data, follow_redirects=True)
@@ -100,7 +115,13 @@ class TestExportsNeutralizeInjection:
     def test_monthly_report_export(self, app, client, campaign_id):
         login(client)
         _log_donation(client, campaign_id)
-        cells = _cells(client.get("/admin/export/monthly").data.decode())
+        # Explicit month, matching the donation's own date. This export
+        # defaults to the current month, so relying on that default is
+        # what made this test rot the moment the calendar turned over.
+        d = _donation_date()
+        cells = _cells(
+            client.get(f"/admin/export/monthly?year={d.year}&month={d.month}").data.decode()
+        )
         assert PAYLOAD not in cells
         assert f"'{PAYLOAD}" in cells
 

@@ -38,8 +38,6 @@ import sys
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 TOKEN = "test-zoho-token"
@@ -358,12 +356,17 @@ class TestItRefusesToGuess:
 
     def test_an_uncaptured_payment_is_not_a_match(self, client, app):
         """Authorized-but-not-captured is not money received."""
-        from models import Donation
+        from models import Donation, PendingZohoSubmission
 
         _submit_form(client, app, phone="9625901202")
         summary = _reconcile(app, [_payment("pay_Auth1", 100, "9625901202", status="authorized")])
 
         assert Donation.query.count() == 0
+        assert summary["still_waiting"] == 1
+        assert summary["orphan_payments"] == [], \
+            "an uncaptured payment is not money received, so it isn't an unexplained receipt either"
+        assert PendingZohoSubmission.query.one().resolved_at is None, \
+            "the submission stays open -- the donor may yet complete the payment"
 
     def test_an_80g_campaign_with_no_pan_is_flagged_not_receipted(self, client, app):
         """Reconciliation runs every rule the webhook runs, because it
@@ -818,6 +821,46 @@ class TestResilience:
 
         assert len(summary["created"]) == 2
         assert Donation.query.count() == 2
+
+    def test_the_cap_also_bounds_payments_that_fail_to_confirm(self, client, app):
+        """The pathological case, and the one a creation-based cap missed
+        entirely: every confirmation fails. A failing confirmation is the
+        most expensive call in the loop -- three attempts, two seconds
+        apart, via retry() -- so capping on donations *created* left this
+        completely unbounded. Twenty-five of these would spend ~150
+        seconds inside a request that gunicorn kills at 30.
+
+        The cap counts confirmation calls attempted, so it engages here
+        even though nothing is ever created."""
+        from extensions import db
+        from models import Campaign, Donation, PendingZohoSubmission
+        import public
+
+        for i in range(6):
+            db.session.add(Campaign(name=f"Camp {i}", is_80g=False))
+        db.session.commit()
+        for i in range(6):
+            _submit_form(client, app, phone=f"90000200{i:02d}", campaign=f"Camp {i}")
+        _age_submissions(minutes=60)
+
+        submitted_at = min(s.received_at for s in PendingZohoSubmission.query.all())
+        payments = [
+            _payment(f"pay_Fail{i}", 100, f"90000200{i:02d}", submitted_at=submitted_at)
+            for i in range(6)
+        ]
+
+        calls = []
+
+        def _never_confirms(payment_id):
+            calls.append(payment_id)
+            return False, "razorpay timed out"
+
+        with patch.object(public, "_zoho_payment_is_captured", side_effect=_never_confirms):
+            summary = _reconcile(app, payments, max_per_run=2)
+
+        assert Donation.query.count() == 0
+        assert len(calls) == 2, f"cap must bound confirmation calls, made {len(calls)}"
+        assert summary["created"] == []
 
 
 class TestDailyReportSafetyNet:
