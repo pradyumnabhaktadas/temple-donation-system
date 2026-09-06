@@ -989,6 +989,146 @@ class TestIgnoredTestForms:
         assert payments[0]["ignored"] is False
 
 
+SUBMISSIONS_SHEET = """Added Time,Name,Phone,Mode of Payment,Payment Amount,Payment Status
+04-Sep-2026 21:55:22,"shivam, raj",919319880507,Online (UPI),100,Completed
+06-Sep-2026 17:33:15,"Jatin, saini",919650150283,Online (UPI),100,Completed
+04-Sep-2026 16:06:00,"Kshitij, Kansal",919023555958,Online (UPI),1100,Completed
+"""
+
+
+class TestAutomaticReceiptsFromTheSubmissionsSheet:
+    """The end state: nobody uploads anything, nobody configures a webhook
+    per form, and a donation that Zoho never told us about still becomes a
+    receipt on its own.
+
+    Razorpay supplies the payment -- id, amount, phone, and the form name
+    in its notes. The Google Sheet that Zoho writes every submission into
+    supplies the one thing Razorpay lacks, the donor's name. Neither
+    source is asked a question it can't answer."""
+
+    def _sheet(self, text=SUBMISSIONS_SHEET, status=200):
+        return patch("zoho_sheet.requests.get", return_value=MagicMock(status_code=status, text=text))
+
+    def _configure(self, app, mapping="EssenceofBhagavadGitaOnlyForBOYSP=BACE Contribution"):
+        app.config["RAZORPAY_ENABLED"] = True
+        app.config["ZOHO_SHEET_CSV_URL"] = "https://docs.google.com/spreadsheets/d/x/pub?output=csv"
+        app.config["ZOHO_FORM_CAMPAIGNS"] = mapping
+
+    def _zoho_payment(self, payment_id, amount, contact,
+                      form="EssenceofBhagavadGitaOnlyForBOYSP"):
+        """A captured payment carrying the Zoho form name in its notes,
+        exactly as production does."""
+        pay = _payment(payment_id, amount, contact)
+        pay["notes"] = {"zform_custom": f"iskcondwarka,{form},tok"}
+        return pay
+
+    def test_a_payment_zoho_never_reported_becomes_a_receipt_by_itself(self, client, app):
+        from models import Donation
+        from public import reconcile_zoho_submissions
+
+        self._configure(app)
+        with self._sheet(), _razorpay([self._zoho_payment("pay_TY1ckLpy6lUDMr", 100, "+919319880507")]):
+            summary = reconcile_zoho_submissions(app.config, min_age_minutes=0)
+
+        assert len(summary["created"]) == 1
+        donation = Donation.query.one()
+        assert donation.donor.full_name == "Shivam Raj"
+        assert donation.razorpay_payment_id == "pay_TY1ckLpy6lUDMr"
+        assert donation.receipt_number
+        assert float(donation.amount) == 100.0
+        assert summary["orphan_payments"] == [], "nothing left needing a human"
+
+    def test_the_amount_comes_from_razorpay_not_the_sheet(self, client, app):
+        """Razorpay is what actually moved the money, and the receipt has
+        to state what was received."""
+        from models import Donation
+        from public import reconcile_zoho_submissions
+
+        self._configure(app)
+        with self._sheet(), _razorpay([self._zoho_payment("pay_Big1", 1100, "+919023555958")]):
+            reconcile_zoho_submissions(app.config, min_age_minutes=0)
+
+        assert float(Donation.query.one().amount) == 1100.0
+
+    def test_an_unmapped_form_is_reported_never_filed_somewhere_arbitrary(self, client, app):
+        """Filing a donation under the wrong campaign quietly corrupts
+        every report built on those figures."""
+        from models import Donation
+        from public import reconcile_zoho_submissions
+
+        self._configure(app, mapping="SomeOtherForm=BACE Contribution")
+        with self._sheet(), _razorpay([self._zoho_payment("pay_Unmapped1", 100, "+919319880507")]):
+            summary = reconcile_zoho_submissions(app.config, min_age_minutes=0)
+
+        assert Donation.query.count() == 0
+        assert "ZOHO_FORM_CAMPAIGNS" in summary["orphan_payments"][0]["why_not_receipted"]
+
+    def test_a_payer_the_sheet_does_not_know_is_reported_with_the_reason(self, client, app):
+        from models import Donation
+        from public import reconcile_zoho_submissions
+
+        self._configure(app)
+        with self._sheet(), _razorpay([self._zoho_payment("pay_Stranger1", 100, "+919999999999")]):
+            summary = reconcile_zoho_submissions(app.config, min_age_minutes=0)
+
+        assert Donation.query.count() == 0
+        assert "no submission" in summary["orphan_payments"][0]["why_not_receipted"]
+
+    def test_an_unreadable_sheet_reports_and_receipts_nothing(self, client, app):
+        """A failed fetch must never be read as "no submissions" -- that
+        would silently stop every automatic receipt while looking healthy."""
+        from models import Donation
+        from public import reconcile_zoho_submissions
+
+        self._configure(app)
+        with self._sheet(text="<html>Sign in</html>"), \
+             _razorpay([self._zoho_payment("pay_Sheet1", 100, "+919319880507")]):
+            summary = reconcile_zoho_submissions(app.config, min_age_minutes=0)
+
+        assert Donation.query.count() == 0
+        assert summary["sheet_error"]
+        assert len(summary["orphan_payments"]) == 1
+
+    def test_nothing_changes_when_the_sheet_is_not_configured(self, client, app):
+        """Existing behaviour has to survive: report, don't receipt."""
+        from models import Donation
+        from public import reconcile_zoho_submissions
+
+        app.config["RAZORPAY_ENABLED"] = True
+        app.config["ZOHO_SHEET_CSV_URL"] = ""
+        with _razorpay([self._zoho_payment("pay_NoSheet1", 100, "+919319880507")]):
+            summary = reconcile_zoho_submissions(app.config, min_age_minutes=0)
+
+        assert Donation.query.count() == 0
+        assert len(summary["orphan_payments"]) == 1
+
+    def test_an_already_receipted_payment_is_not_receipted_again(self, client, app):
+        from models import Donation
+        from public import reconcile_zoho_submissions
+
+        self._configure(app)
+        payment = self._zoho_payment("pay_Twice1", 100, "+919319880507")
+        with self._sheet(), _razorpay([payment]):
+            reconcile_zoho_submissions(app.config, min_age_minutes=0)
+        with self._sheet(), _razorpay([payment]):
+            reconcile_zoho_submissions(app.config, min_age_minutes=0)
+
+        assert Donation.query.count() == 1
+
+    def test_a_test_form_is_still_never_receipted(self, client, app):
+        from models import Donation
+        from public import reconcile_zoho_submissions
+
+        self._configure(app, mapping="TestingWebsitewithFormsintergration=BACE Contribution")
+        app.config["RECONCILE_IGNORED_ZOHO_FORMS"] = "TestingWebsitewithFormsintergration"
+        pay = self._zoho_payment("pay_TestForm2", 10, "+919650150283",
+                            form="TestingWebsitewithFormsintergration")
+        with self._sheet(), _razorpay([pay]):
+            reconcile_zoho_submissions(app.config, min_age_minutes=0)
+
+        assert Donation.query.count() == 0
+
+
 class TestHistoricalScan:
     """A fixed date range is for auditing an old period. It must report
     and change nothing -- pending submissions only exist from the day this

@@ -338,6 +338,32 @@ class Config:
     # e.g. RECONCILE_IGNORED_ZOHO_FORMS=TestingWebsitewithFormsintergration
     RECONCILE_IGNORED_ZOHO_FORMS = os.environ.get("RECONCILE_IGNORED_ZOHO_FORMS", "")
 
+    # CSV export URL of the Google Sheet that Zoho Forms writes each
+    # submission into ("publish to web" -> CSV). Used to put a name on a
+    # payment Razorpay has already confirmed -- see zoho_sheet.py for why
+    # that direction round is the safe one.
+    #
+    # Leave blank and reconciliation behaves exactly as before: it reports
+    # unexplained payments rather than receipting them.
+    #
+    # NOTE: a published link is readable by anyone who has it, and this
+    # sheet holds donor names and phone numbers. A private sheet behind a
+    # read-only service account is the better arrangement if this becomes
+    # permanent.
+    ZOHO_SHEET_CSV_URL = os.environ.get("ZOHO_SHEET_CSV_URL", "")
+
+    # Per-form campaign mapping for automatic receipts, as
+    # "<form name>=<campaign name>" pairs separated by semicolons. The form
+    # name is the one Razorpay carries in the payment notes -- exactly what
+    # the reconciliation report prints, so it can be copied from there.
+    #
+    # A payment from a form that isn't mapped is reported, never guessed
+    # at: filing a donation under the wrong campaign quietly corrupts the
+    # figures every report in this app is built on.
+    #
+    # e.g. EssenceofBhagavadGitaOnlyForBOYSP=EBG_Registration;IGFForm=Retreats and Event Registrations
+    ZOHO_FORM_CAMPAIGNS = os.environ.get("ZOHO_FORM_CAMPAIGNS", "")
+
     # --- Zoho Forms API (pull, rather than waiting to be pushed to) ---
     #
     # Why this exists at all: Zoho's *webhook* fires once, at submission

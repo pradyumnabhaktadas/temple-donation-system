@@ -802,7 +802,7 @@ def _send_receipt_notifications_background(app, donation_id, pdf_bytes):
                 app.logger.exception("Background receipt WhatsApp send failed for donation %s", donation_id)
 
 
-def _finalize_success(donation):
+def _finalize_success(donation, send_notifications=True):
     """Marks a donation successful, issues its receipt number, generates
     and stores the receipt PDF, and emails it. Called from all three
     confirmation paths described in the module docstring above.
@@ -915,6 +915,15 @@ def _finalize_success(donation):
     #
     # Synchronous under TESTING so the test suite can assert on the send
     # deterministically instead of racing a background thread.
+    #
+    # send_notifications=False is for backfills: importing a Zoho report
+    # from six weeks ago shouldn't make a donor's phone buzz with a
+    # receipt that reads as if the donation just happened. The receipt
+    # itself is still issued and stored -- only the proactive send is
+    # suppressed, and it can be sent later from the donor's record.
+    if not send_notifications:
+        return True
+
     app = current_app._get_current_object()
     try:
         if app.config.get("TESTING"):
@@ -1987,7 +1996,7 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
     summary = {
         "created": [], "ambiguous": [], "unpaid": 0, "still_waiting": 0,
         "orphan_payments": [], "ignored_payments": [], "failed": [], "pruned": 0, "expired": 0,
-        "report_only": False, "error": None,
+        "report_only": False, "sheet_error": None, "error": None,
     }
 
     def _mark(submission, resolution, note=None, donation_id=None):
@@ -2250,9 +2259,148 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
         for submission in summary["ambiguous"]
         for candidate in candidates_by_submission.get(submission.id, [])
     }
-    summary["orphan_payments"] = [p for p in payments if p["payment_id"] not in spoken_for]
+    remaining = [p for p in payments if p["payment_id"] not in spoken_for]
+
+    # Last stage, and the one that makes this automatic: a payment nothing
+    # in this app accounts for is still a real donation someone made. The
+    # only thing missing is the donor's name, and the Google Sheet that
+    # Zoho writes every submission into has it. Razorpay has already
+    # established that this payment happened, for this amount, from this
+    # phone -- so the sheet is only ever asked "what is this payer
+    # called", never "does this deserve a receipt".
+    #
+    # Skipped entirely when the sheet or the form->campaign mapping isn't
+    # configured, in which case these stay reported exactly as before.
+    remaining = _receipt_from_submissions_sheet(config, remaining, summary, max_per_run)
+
+    summary["orphan_payments"] = remaining
     summary["pruned"] = _prune_resolved_pending_submissions(retain_days=retain_resolved_days)
     return summary
+
+
+def _form_campaign_map(config):
+    """{form name (lowercased): Campaign} from ZOHO_FORM_CAMPAIGNS.
+
+    Campaigns are resolved by name here rather than id so the setting
+    stays readable, and an entry naming a campaign that doesn't exist is
+    left out -- the payment is then reported as unmapped rather than filed
+    somewhere arbitrary."""
+    mapping = {}
+    for pair in (config.get("ZOHO_FORM_CAMPAIGNS") or "").split(";"):
+        if "=" not in pair:
+            continue
+        form, _, campaign_name = pair.partition("=")
+        form, campaign_name = form.strip(), campaign_name.strip()
+        if not form or not campaign_name:
+            continue
+        campaign = Campaign.query.filter(
+            db.func.lower(Campaign.name) == campaign_name.lower()
+        ).first()
+        if campaign:
+            mapping[form.lower()] = campaign
+    return mapping
+
+
+def _receipt_from_submissions_sheet(config, payments, summary, max_per_run):
+    """Issues receipts for payments whose donor can be named from the
+    submissions sheet. Returns whatever is left unreceipted.
+
+    Everything here fails towards reporting rather than guessing. A
+    payment is only turned into a donation when all of these hold:
+
+      * the sheet was fetched successfully (a failed fetch is reported,
+        never read as "no submissions"),
+      * the payment names a Zoho form in its Razorpay notes,
+      * that form is mapped to a campaign in ZOHO_FORM_CAMPAIGNS,
+      * exactly one name matches the payer's phone (and amount, where the
+        sheet records one),
+      * the donation validates -- PAN/80G and the rest, via the same
+        _create_zoho_donation everything else uses.
+
+    Any of those failing leaves the payment on the report with the reason
+    attached, which is where a human can act on it."""
+    if not payments:
+        return payments
+
+    import zoho_sheet
+
+    rows, sheet_error = zoho_sheet.fetch_rows(config)
+    if sheet_error:
+        summary["sheet_error"] = sheet_error
+        return payments
+    if not rows:
+        return payments
+
+    campaigns = _form_campaign_map(config)
+    if not campaigns:
+        return payments
+
+    index = zoho_sheet.index_by_phone(rows)
+    still_unreceipted = []
+
+    for payment in payments:
+        if len(summary["created"]) >= max_per_run:
+            still_unreceipted.append(payment)
+            continue
+
+        campaign = campaigns.get((payment.get("source_ref") or "").lower())
+        if payment.get("source") != "zoho" or campaign is None:
+            payment["why_not_receipted"] = (
+                "no campaign mapped for this form -- add it to ZOHO_FORM_CAMPAIGNS"
+                if payment.get("source") == "zoho" else
+                "not a Zoho form payment"
+            )
+            still_unreceipted.append(payment)
+            continue
+
+        name, reason = zoho_sheet.resolve_name(index, payment.get("contact"), payment.get("amount"))
+        if not name:
+            payment["why_not_receipted"] = reason
+            still_unreceipted.append(payment)
+            continue
+
+        payload = {
+            "full_name": name,
+            "phone": payment.get("contact") or "",
+            "amount": payment["amount"],
+        }
+        row = zoho_sheet.row_for(index, payment.get("contact"), payment.get("amount"))
+        if row:
+            payload.update(zoho_sheet.extras(row))
+
+        try:
+            donation, create_error = _create_zoho_donation(
+                payload, campaign, payment["payment_id"], payment.get("order_id"),
+            )
+        except Exception as exc:
+            db.session.rollback()
+            current_app.logger.exception(
+                "Sheet-matched receipt failed for payment %s", payment["payment_id"]
+            )
+            payment["why_not_receipted"] = f"couldn't be created: {exc}"
+            still_unreceipted.append(payment)
+            continue
+
+        if create_error:
+            body, _status = create_error
+            payment["why_not_receipted"] = body.get("error")
+            still_unreceipted.append(payment)
+            continue
+
+        summary["created"].append(donation)
+        db.session.add(AdminActivityLog(
+            admin_username="system", action="zoho_donation_reconciled", target_type="donation",
+            target_id=donation.id,
+            details=(
+                f"campaign={campaign.name} amount={donation.amount} "
+                f"transaction_id={payment['payment_id']} receipt={donation.receipt_number} "
+                f"(Razorpay confirmed the payment; donor named from the {payment.get('source_ref')} "
+                f"submissions sheet)"
+            )[:500],
+        ))
+        db.session.commit()
+
+    return still_unreceipted
 
 
 def _prune_resolved_pending_submissions(retain_days=90):
@@ -2400,7 +2548,7 @@ def _close_pending_for_donation(donation, resolution):
     db.session.commit()
 
 
-def _create_zoho_donation(payload, campaign, transaction_id, order_id):
+def _create_zoho_donation(payload, campaign, transaction_id, order_id, send_notifications=True):
     """Turns a validated Zoho Forms payload plus a *confirmed-captured*
     Razorpay payment into a real donation with a real receipt. Returns
     (donation, error) -- error is (dict, status_code) ready to jsonify, and
@@ -2478,7 +2626,7 @@ def _create_zoho_donation(payload, campaign, transaction_id, order_id):
     db.session.add(donation)
     db.session.commit()
 
-    _finalize_success(donation)
+    _finalize_success(donation, send_notifications=send_notifications)
     return donation, None
 
 

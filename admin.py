@@ -2454,6 +2454,171 @@ def _lookup_by_name(items_by_lower_name, raw_name, label, row_errors):
     return match.id
 
 
+@bp.route("/donations/import-zoho", methods=["GET", "POST"])
+@login_required
+@admin_role_required
+def import_zoho_report():
+    """Turns a Zoho Forms report export into donations and receipts.
+
+    Why this exists, given there is already a Zoho webhook: the webhook
+    fires once, at submission time, before the donor pays, so it carries
+    no transaction ID -- and the follow-up call Zoho promises frequently
+    never arrives. It also has to be configured per form, and four of the
+    six forms taking money in September 2026 never were, so their
+    donations were invisible here entirely.
+
+    A Zoho *report export* has none of those problems. It carries the
+    Payment Transaction ID alongside the donor's details, covers every
+    form whether or not anyone configured a webhook, and reaches back
+    through history rather than only forward. Export the report, drop it
+    here, and the rows that represent real captured payments become real
+    receipts.
+
+    The rules are the ones every earlier failure put in place, and they
+    are deliberately unchanged:
+
+      * Razorpay decides whether money arrived. Zoho's own Payment Status
+        is ignored for that purpose -- production had entries reading
+        "Completed" for payments that were not captured, and "Processing"
+        for payments that were.
+      * A row needs a genuine pay_... id AND Razorpay confirming capture.
+        Rows with neither (a cash registration, an abandoned form) are
+        skipped as ordinary, not flagged as errors.
+      * Already-recorded payments are matched on razorpay_payment_id and
+        bank_transaction_id both, so re-uploading an overlapping export --
+        which is the normal way to use this -- cannot produce a second
+        receipt for one payment. Uploading the same file twice is safe.
+      * One bad row is reported and skipped; it never aborts the file.
+
+    Preview first. It validates and reports row by row while writing
+    nothing, the same dry run the offline bulk import offers, because
+    importing issues real receipt numbers from a shared sequence and can
+    email donors -- neither easily taken back.
+    """
+    campaigns = Campaign.query.order_by(Campaign.name).all()
+
+    if request.method == "GET":
+        return render_template(
+            "admin/import_zoho_report.html", campaigns=campaigns, results=None,
+        )
+
+    file = request.files.get("report_file")
+    if not file or not file.filename:
+        flash("Please choose the Zoho report export to upload.")
+        return redirect(url_for("admin.import_zoho_report"))
+
+    campaign_id, error = _validated_id_from_form(request.form, "campaign_id", Campaign, "campaign")
+    if error or not campaign_id:
+        flash(error or "Please choose which campaign these registrations belong to.")
+        return redirect(url_for("admin.import_zoho_report"))
+    campaign = Campaign.query.get(campaign_id)
+
+    preview = request.form.get("action") == "preview"
+    send_notifications = request.form.get("send_notifications") == "yes"
+
+    try:
+        rows = _table_from_upload(file)
+    except Exception as exc:
+        flash(f"Couldn't read that file: {exc}")
+        return redirect(url_for("admin.import_zoho_report"))
+
+    if not rows:
+        flash("That file has no rows in it.")
+        return redirect(url_for("admin.import_zoho_report"))
+
+    from public import _create_zoho_donation, _zoho_payment_is_captured
+    import zoho_sync
+
+    results = []
+    created = skipped = 0
+
+    for index, row in enumerate(rows, start=2):  # 2 = first row under the header
+        name = zoho_sync.donor_name(row) or "(no name)"
+        payment_id, order_id = zoho_sync.payment_ids(row)
+
+        if not payment_id:
+            # A cash registration, or someone who filled the form and never
+            # paid. Ordinary, and the commonest kind of row in these
+            # exports -- reported so the counts add up, not as a problem.
+            results.append((index, name, "No payment on this row -- skipped"))
+            skipped += 1
+            continue
+
+        existing = Donation.query.filter(db.or_(
+            Donation.razorpay_payment_id == payment_id,
+            Donation.bank_transaction_id == payment_id,
+        )).first()
+        if existing:
+            results.append((
+                index, name,
+                f"Already recorded -- receipt {existing.receipt_number or '(none)'}",
+            ))
+            skipped += 1
+            continue
+
+        captured, verify_error = _zoho_payment_is_captured(payment_id)
+        if verify_error:
+            results.append((index, name, f"Couldn't check {payment_id} with Razorpay: {verify_error}"))
+            skipped += 1
+            continue
+        if not captured:
+            results.append((index, name, f"Razorpay doesn't report {payment_id} as captured -- skipped"))
+            skipped += 1
+            continue
+
+        payload = zoho_sync.entry_payload(row)
+        try:
+            float(payload.get("amount"))
+        except (TypeError, ValueError):
+            results.append((index, name, f"{payment_id} is captured but the row has no usable amount"))
+            skipped += 1
+            continue
+
+        if preview:
+            results.append((
+                index, name,
+                f"Would import Rs. {float(payload['amount']):,.2f} · {campaign.name} · {payment_id}",
+            ))
+            created += 1
+            continue
+
+        try:
+            donation, create_error = _create_zoho_donation(
+                payload, campaign, payment_id, order_id,
+                send_notifications=send_notifications,
+            )
+        except Exception as exc:
+            db.session.rollback()
+            current_app.logger.exception("Zoho report import failed on row %s", index)
+            results.append((index, name, f"Failed: {exc}"))
+            skipped += 1
+            continue
+
+        if create_error:
+            body, _status = create_error
+            results.append((index, name, f"Skipped: {body.get('error')}"))
+            skipped += 1
+            continue
+
+        results.append((index, name, f"Imported · receipt {donation.receipt_number}"))
+        created += 1
+
+    if preview:
+        flash(f"Preview only -- nothing has been saved. {created} row(s) would be imported, {skipped} skipped.")
+    else:
+        log_activity(
+            "zoho_report_imported", "campaign", campaign.id,
+            f"{created} donation(s) imported from a Zoho report export for {campaign.name}, {skipped} skipped",
+        )
+        db.session.commit()
+        flash(f"Zoho report import finished: {created} donation(s) created, {skipped} skipped.")
+
+    return render_template(
+        "admin/import_zoho_report.html", campaigns=campaigns, results=results,
+        created=created, skipped=skipped, preview=preview, campaign=campaign,
+    )
+
+
 @bp.route("/donations/bulk-import", methods=["GET", "POST"])
 @login_required
 @admin_role_required

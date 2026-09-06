@@ -1,0 +1,91 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Import Zoho Report{% endblock %}
+{% block content %}
+<h3 class="mb-3">📥 Import Zoho Report</h3>
+
+<p class="text-muted small mb-4" style="max-width:760px">
+  For donations taken through a Zoho Form where no receipt was issued. Export the form's
+  report from Zoho (it must include the <strong>Payment Transaction ID</strong> column) and
+  upload it here. Every row with a real payment is checked against Razorpay, and the ones
+  Razorpay confirms as captured become donations with real receipt numbers.
+  <br><br>
+  Rows without a payment — cash registrations, forms someone filled in and never paid for —
+  are skipped and counted, not treated as errors. Payments already recorded are skipped too,
+  so <strong>re-uploading an overlapping export is safe</strong> and cannot produce a second
+  receipt for the same payment.
+</p>
+
+<form method="post" enctype="multipart/form-data" class="card card-body shadow-sm p-4 mb-4"
+      style="max-width:760px">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <div class="mb-3">
+    <label class="form-label" for="report_file">Zoho report export (.csv or .xlsx)</label>
+    <input type="file" class="form-control" name="report_file" id="report_file"
+           accept=".csv,.xlsx" required>
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label" for="campaign_id">Campaign / Purpose</label>
+    <select class="form-select" name="campaign_id" id="campaign_id" required>
+      <option value="">-- choose --</option>
+      {% for c in campaigns %}
+      <option value="{{ c.id }}" {% if campaign and campaign.id == c.id %}selected{% endif %}>
+        {{ c.name }}{% if not c.is_80g %} (Non-80G){% endif %}
+      </option>
+      {% endfor %}
+    </select>
+    <div class="form-text">
+      One Zoho form's export at a time — every row in the file is filed under this campaign.
+    </div>
+  </div>
+
+  <div class="form-check mb-3">
+    <input class="form-check-input" type="checkbox" name="send_notifications" id="send_notifications"
+           value="yes">
+    <label class="form-check-label" for="send_notifications">
+      Send the receipt to each donor by email/WhatsApp
+    </label>
+    <div class="form-text">
+      Off by default. A donor who gave six weeks ago usually shouldn't get a receipt that reads
+      as though it just happened — the receipt is still issued and stored either way, and can be
+      sent later from their record.
+    </div>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button type="submit" class="btn btn-outline-secondary" name="action" value="preview">Preview</button>
+    <button type="submit" class="btn btn-primary" name="action" value="import">Upload &amp; Import</button>
+  </div>
+  <div class="form-text mt-2">
+    Preview checks the whole file and shows what would happen, row by row, without saving
+    anything. Worth doing first: importing issues real receipt numbers and can message donors,
+    and neither is easy to take back.
+  </div>
+</form>
+
+{% if results %}
+<div class="card card-body shadow-sm" style="max-width:900px">
+  <h5 class="mb-3">
+    {% if preview %}Preview: {{ created }} would import, {{ skipped }} skipped
+    {% else %}Results: {{ created }} created, {{ skipped }} skipped{% endif %}
+  </h5>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr><th style="width:70px">ROW</th><th style="width:220px">NAME</th><th>OUTCOME</th></tr>
+      </thead>
+      <tbody>
+        {% for row, name, outcome in results %}
+        <tr>
+          <td class="text-muted">{{ row }}</td>
+          <td>{{ name }}</td>
+          <td class="small">{{ outcome }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

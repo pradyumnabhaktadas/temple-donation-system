@@ -21,6 +21,7 @@
         <a class="nav-link {% if request.endpoint in iyf_camp_endpoints %}active{% endif %}" href="{{ url_for('admin.iyf_camps') }}">IYF Camps</a>
         {% if current_user.is_authenticated and current_user.role == 'admin' %}
         <a class="nav-link {% if request.endpoint == 'admin.import_legacy_donations' %}active{% endif %}" href="{{ url_for('admin.import_legacy_donations') }}">Import Historical Data</a>
+        <a class="nav-link {% if request.endpoint == 'admin.import_zoho_report' %}active{% endif %}" href="{{ url_for('admin.import_zoho_report') }}">Import Zoho Report</a>
         {% endif %}
 
         <div class="nav-item dropdown">
