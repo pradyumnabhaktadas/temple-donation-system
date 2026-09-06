@@ -1883,7 +1883,19 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
     # Whatever's left is money Razorpay captured that this app still can't
     # account for from any source -- not just Zoho. Reported, never
     # guessed at, since there's no donor or campaign data behind it.
-    summary["orphan_payments"] = payments
+    #
+    # Payments already named in an ambiguous decision are excluded: they
+    # are accounted for, by a line in the same report that says a
+    # submission matches them and a person needs to pick. Leaving them in
+    # here too listed the same payment twice in the daily report, the
+    # second time under a heading asserting nothing in this system matches
+    # it -- which contradicted the line directly above it.
+    spoken_for = {
+        candidate["payment_id"]
+        for submission in summary["ambiguous"]
+        for candidate in candidates_by_submission.get(submission.id, [])
+    }
+    summary["orphan_payments"] = [p for p in payments if p["payment_id"] not in spoken_for]
     return summary
 
 

@@ -634,6 +634,29 @@ class TestLifecycle:
         assert pending.resolution == "webhook"
         assert pending.donation_id == donation.id
 
+    def test_an_ambiguous_payment_is_not_also_reported_as_unexplained(self, client, app):
+        """A payment named in an ambiguous decision is accounted for -- by
+        the line in the same report saying a submission matches it and
+        someone needs to pick. Listing it again under "nothing in this
+        system matches this" contradicted the line directly above it in
+        the daily report email."""
+        from models import PendingZohoSubmission
+
+        _submit_form(client, app, phone="9625901202")
+        _age_submissions(minutes=60)
+        submitted_at = PendingZohoSubmission.query.one().received_at
+
+        summary = _reconcile(app, [
+            _payment("pay_AmbX", 100, "9625901202", submitted_at=submitted_at),
+            _payment("pay_AmbY", 100, "9625901202", submitted_at=submitted_at, minutes_after_submission=6),
+            _payment("pay_TrulyOrphan", 999, "9000009999", submitted_at=submitted_at),
+        ])
+
+        assert len(summary["ambiguous"]) == 1
+        reported = [p["payment_id"] for p in summary["orphan_payments"]]
+        assert reported == ["pay_TrulyOrphan"], \
+            "only payments nothing accounts for at all belong in the orphan list"
+
     def test_a_captured_payment_nothing_can_explain_is_reported(self, client, app):
         """Money Razorpay received that no donation in this app accounts
         for -- from any source, not just Zoho. Never guessed at, always
