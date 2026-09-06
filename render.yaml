@@ -65,6 +65,15 @@ services:
       # dashboard, since which forms are test forms changes over time.
       - key: RECONCILE_IGNORED_ZOHO_FORMS
         sync: false
+      # CSV export URL of the Google Sheet Zoho writes each submission
+      # into ("publish to web" -> CSV), and the form->campaign mapping.
+      # Together these let reconciliation issue receipts on its own rather
+      # than only reporting unexplained payments. Both blank = report only.
+      # See config.py and the README's Zoho section.
+      - key: ZOHO_SHEET_CSV_URL
+        sync: false
+      - key: ZOHO_FORM_CAMPAIGNS
+        sync: false
       - key: DATABASE_URL
         fromDatabase:
           name: temple-donation-db

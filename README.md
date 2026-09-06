@@ -680,91 +680,100 @@ route's error response there) is easy to trace back.
 
 Everything above only helps when Zoho calls us with a transaction ID.
 Often it doesn't. Zoho fires its webhook once, at submission time —
-*before* the donor pays — so that call carries the whole form but no
-transaction ID, and on this account the promised follow-up frequently
-never arrives. Confirmed cases:
+*before* the donor pays — so that call carries the form but no transaction
+ID, and the promised follow-up frequently never arrives. It also has to be
+configured per form: of the six forms taking money in September 2026, four
+never were, so their donations were invisible to this app entirely.
 
 | Date | Donor | Form | Zoho's own record | What we received |
 |---|---|---|---|---|
 | 03 Sep 2026 | Nandani Kumari | Me, You & The Ego | Completed, `pay_TXZJ0OU6EtNogX` | one call, no transaction ID |
 | 04 Sep 2026 | shivam raj | Essence of Bhagavad Gita | Completed, `pay_TY1ckLpy6lUDMr` | one call, no transaction ID |
 
-The money arrived, and nothing in this app knew: no donor, no donation, no
-receipt, and no indication anything was missing. They were found only
+The money arrived and nothing here knew: no donor, no donation, no
+receipt, and no indication anything was missing. Both were found only
 because someone noticed a stale **Webhook Status** cell in Zoho's Reports
 grid days later.
 
-No change to the webhook route can fix this — by the time the payment
-exists, nothing is calling us. So the app no longer depends on that second
-call:
+**The app no longer depends on that call.** Two sources cover it between
+them, and neither is asked a question it can't answer:
 
-1. **The first call is kept, not discarded.** It's stored as a
-   `PendingZohoSubmission` (donor details, amount, campaign, and the full
-   payload verbatim) instead of being answered with `{"skipped": ...}`.
-2. **A scheduled job joins the two halves itself.**
-   `public.reconcile_zoho_submissions()` matches those pending
-   submissions against the payments **Razorpay** confirms it captured, and
-   issues the receipt — through the same `_create_zoho_donation()` the
-   webhook uses, so both paths apply identical PAN/80G/validation rules.
+- **Razorpay** knows which payments it captured and which have no donation
+  behind them. It is the authority on whether a receipt is owed.
+- **The Google Sheet** that Zoho writes every submission into knows the
+  donor's name — the one thing Razorpay lacks.
 
-Matching is deliberately strict, because these produce 80G tax receipts
-and a wrong match is worse than no match: same phone (normalised — Zoho
-sends `+919873287387` where Razorpay returns `9873287387`), payment
-captured *after* the form was submitted and within 48 hours of it, same
-amount where the submission carries one, payment not already attached to
-a donation, and **exactly one** payment fitting **exactly one**
-submission. Anything ambiguous is flagged for a person rather than
-guessed at. A submission that ages out with no matching payment is closed
-as `unpaid` (an abandoned checkout).
+`public.reconcile_zoho_submissions()` joins the two, hourly. The direction
+matters: letting the sheet decide whether a receipt is owed cannot work
+(it has no payment ID, and its own Payment Status column has been wrong in
+both directions), so the sheet is only ever asked *what the payer is
+called*.
 
-Amount is treated as optional on purpose: Zoho's pre-payment call fires
-before the gateway is involved and doesn't reliably carry one, and which
-field a given form maps to the `amount` payload parameter is per-form
-configuration. Requiring it would mean any form that omits it silently
-never matches — the same invisible failure, one level in. When it's
-missing, the receipt uses the amount **Razorpay** actually received,
-which is the figure a receipt has to state anyway. Phone is the one field
-matching can't do without; a submission without one is never matched, and
-its payment surfaces as an orphan instead.
+That also disposes of a case the previous design could not resolve.
+Matching payments to submissions by phone and amount was unsafe because
+two submissions from one donor are indistinguishable from one submission
+paid for twice — and those need opposite handling (two receipts, versus
+one receipt and a refund). Asking only for a name has no such problem:
+when several rows match they are the same person and agree. Rows that
+genuinely disagree are refused with a reason.
 
-It runs **hourly** via the `temple-zoho-reconcile` Cron Job
-(`zoho_reconcile.py` → `POST /internal/zoho-reconcile`), and **again from
-the daily report** as a fallback, since this project's cron jobs have
-silently failed for days at a time before (see the daily-report notes
-above). Worst case is a receipt issued the next morning rather than a
-payment lost indefinitely.
+Two settings, both blank by default — and blank means the previous
+behaviour exactly, reporting rather than receipting:
 
-Anything it can't resolve on its own — ambiguous matches, and captured
-payments with nothing in this app to explain them — is listed in the
-**daily report email** under "Payment Reconciliation", so it reaches a
-person the same day instead of sitting unnoticed in Zoho. Staff finish
-those by hand via **Offline Donation → Single Entry**. A clean run adds
-nothing to the email.
-
-To run it manually:
-
-```bash
-python zoho_reconcile.py                  # last 3 days
-python zoho_reconcile.py --lookback-days 7
+```
+ZOHO_SHEET_CSV_URL=https://docs.google.com/spreadsheets/d/…/pub?output=csv
+ZOHO_FORM_CAMPAIGNS=EssenceofBhagavadGitaOnlyForBOYSP=EBG_Registration;IGFForm=Retreats and Event Registrations
 ```
 
-**What's kept, and for how long.** These pending records hold whatever the
-form collected — name, phone, and possibly address — including for people
-who filled in a form and never paid. They're scaffolding, not records:
-once a row is resolved, the donation (or the deliberate absence of one) is
-the thing worth keeping, so resolved rows are deleted after 90 days. Rows
-too old for any Razorpay scan to still cover are closed off as `expired`
-rather than left dangling unresolved forever, which also brings them under
-that retention window. A PAN that isn't legally required — Non-80G and
-below the high-value threshold, which is what these registration forms
-are — is stripped before the payload is stored, the same REG-001 rule
-`_create_zoho_donation` applies before a PAN can reach a donor profile.
-Without that, this table would be a way around it.
+Form names are the ones Razorpay carries in the payment notes — exactly
+what the reconciliation report prints, so they can be copied from it. A
+payment from an unmapped form is **reported, never guessed at**: filing a
+donation under the wrong campaign quietly corrupts every figure this app
+reports on.
 
-Receipts it issues are logged to the Activity Log as
-`zoho_donation_reconciled`, distinct from `zoho_form_donation_received`,
-so you can tell which donations arrived normally and which had to be
-recovered.
+> **Privacy.** A "publish to web" link is readable by anyone who has it,
+> and that sheet holds donor names and phone numbers. A private sheet
+> behind a read-only service account is the better arrangement if this
+> becomes permanent; only `zoho_sheet.fetch_rows()` would change.
+
+Everything fails towards reporting. A receipt is issued only when the
+sheet was read successfully, the payment names a Zoho form, that form is
+mapped, exactly one name matches, and the donation validates. Any of those
+failing leaves the payment on the report with the reason attached. In
+particular a failed sheet fetch is **reported, never read as "no
+submissions"** — that reading is what let donations go missing for weeks.
+
+It runs hourly (`temple-zoho-reconcile`), and again from the daily report
+as a fallback, since this project's cron jobs have silently failed for
+days at a time before.
+
+```bash
+python zoho_reconcile.py                    # act on the last 3 days
+python zoho_reconcile.py --from 2026-08-01  # report only, changes nothing
+```
+
+Receipts it issues appear in the Activity Log as `zoho_donation_reconciled`,
+distinct from `zoho_form_donation_received`, so you can tell which arrived
+normally and which had to be recovered.
+
+### Importing a Zoho report by hand
+
+**Admin → Import Zoho Report** is the manual counterpart, for history and
+for forms whose submissions never reached a sheet. Export the form's
+report from Zoho — it must include the **Payment Transaction ID** column —
+choose the campaign, and Preview first.
+
+Every row is checked against Razorpay; only payments it confirms as
+captured become receipts. Rows without a payment (cash registrations,
+abandoned forms) are skipped and counted, not treated as errors.
+Re-uploading an overlapping export is safe: already-recorded payments are
+matched on `razorpay_payment_id` *and* `bank_transaction_id`, so
+hand-entered backfills are recognised rather than duplicated.
+
+Receipt notifications are off by default here — a donor who gave six weeks
+ago shouldn't get a receipt reading as though it just happened. The
+receipt is still issued and stored either way.
+
 
 ## Running the tests
 

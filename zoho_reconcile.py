@@ -9,7 +9,7 @@ only call this app ever received was the first one. The money arrives and
 nothing in the app knows about it -- no donor, no donation, no receipt.
 
 This job closes that gap without needing Zoho to behave: it takes the
-donor details from that first call (stored as PendingZohoSubmission) and
+donor details from the Google Sheet Zoho writes each submission into, and
 matches them against the payments Razorpay itself confirms it captured,
 then creates the donation and issues the receipt exactly as the webhook
 would have. See public.reconcile_zoho_submissions() for the matching rules
@@ -171,22 +171,24 @@ def main():
     else:
         print("No new receipts to issue.")
 
-    if result["ambiguous"]:
-        print(f"\n{len(result['ambiguous'])} submission(s) need a human -- couldn't be matched safely:")
-        for s in result["ambiguous"]:
-            print(f"  #{s['pending_id']} {s['name']} Rs. {s['amount']}: {s['note']}")
+    if result.get("sheet_error"):
+        print(f"\nThe submissions sheet could not be read: {result['sheet_error']}")
+        print("Nothing was named from it this run -- payments below are unreceipted, not lost.")
 
     if result.get("failed"):
-        print(f"\n{len(result['failed'])} submission(s) errored while being written -- retried next run:")
+        print(f"\n{len(result['failed'])} entry(ies) errored while being written -- retried next run:")
         for f in result["failed"]:
-            print(f"  pending #{f['pending_id']}: {f['error']}")
+            print(f"  {f}")
 
-    if result["orphan_payments"]:
-        print(f"\n{len(result['orphan_payments'])} captured payment(s) with nothing in this app to match them to:")
-        for p in result["orphan_payments"]:
-            print(f"  {p['payment_id']} Rs. {p['amount']:,.2f} ({p['contact'] or 'no contact'})")
+    orphans = result.get("orphan_payments") or []
+    if orphans:
+        total = sum(p["amount"] for p in orphans)
+        print(f"\n{len(orphans)} captured payment(s) still without a receipt, Rs. {total:,.2f}:")
+        for p in orphans:
+            why = p.get("why_not_receipted")
+            print(f"  {p['payment_id']} Rs. {p['amount']:>10,.2f} ({p['contact'] or 'no contact'})"
+                  + (f" -- {why}" if why else ""))
 
-    print(f"\nStill awaiting payment: {result['still_waiting']}. Closed as unpaid: {result['unpaid']}.")
     return 0
 
 
