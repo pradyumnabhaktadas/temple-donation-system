@@ -1332,6 +1332,126 @@ def razorpay_webhook():
     return jsonify({"ok": True, "ignored": event_type}), 200
 
 
+def _issue_receipt_for_pending_submission(payment_entity):
+    """Turns a just-captured Razorpay payment into a receipt, if exactly
+    one waiting Zoho submission accounts for it. Returns a Flask response
+    when it acted, or None to let the caller carry on.
+
+    Called from the Razorpay webhook, so a Zoho donation is receipted
+    seconds after the payment rather than waiting for the hourly job. The
+    reconciler still runs and still catches anything this misses -- a
+    webhook Razorpay never delivered, a submission that arrives after its
+    own payment, an ambiguity that later resolves. This is the fast path,
+    not a replacement for the safety net.
+
+    No Razorpay API call here, deliberately, unlike the Zoho webhook's
+    _zoho_payment_is_captured: this event's HMAC signature has already
+    been verified against RAZORPAY_WEBHOOK_SECRET by the caller, and the
+    event itself is Razorpay stating the payment is captured. Re-asking
+    Razorpay what it just told us would add a network round trip to the
+    one path where latency is the entire point.
+
+    Refuses to guess on exactly the same terms as the reconciler: more
+    than one waiting submission matching this payment means a person has
+    to decide, and it is left for the report rather than resolved on a
+    coin flip."""
+    payment_id = payment_entity.get("id")
+    if not payment_id:
+        return None
+
+    try:
+        created_at = datetime.datetime.utcfromtimestamp(payment_entity["created_at"])
+    except (KeyError, TypeError, ValueError):
+        created_at = datetime.datetime.utcnow()
+
+    payment = {
+        "payment_id": payment_id,
+        "order_id": payment_entity.get("order_id"),
+        "amount": (payment_entity.get("amount") or 0) / 100,
+        "contact": payment_entity.get("contact"),
+        "created_at_utc": created_at,
+        "notes": payment_entity.get("notes") or {},
+    }
+
+    # A form listed as a test form must not produce a real receipt here
+    # any more than it does in the reconciler.
+    _source, source_ref = _payment_source(payment["notes"])
+    ignored_forms = {
+        name.strip().lower()
+        for name in (current_app.config.get("RECONCILE_IGNORED_ZOHO_FORMS") or "").split(",")
+        if name.strip()
+    }
+    if source_ref and source_ref.strip().lower() in ignored_forms:
+        return None
+
+    # Already recorded (a redelivered webhook, or the reconciler got there
+    # first) -- never a second receipt for one payment.
+    if Donation.query.filter(db.or_(
+        Donation.razorpay_payment_id == payment_id,
+        Donation.bank_transaction_id == payment_id,
+    )).first():
+        return None
+
+    matches = [
+        s for s in PendingZohoSubmission.query.filter(
+            PendingZohoSubmission.resolved_at.is_(None)
+        ).all()
+        if _submission_matches_payment(s, payment)
+    ]
+    if len(matches) != 1:
+        return None
+
+    submission = matches[0]
+    campaign = submission.campaign
+    if campaign is None:
+        return None
+
+    payload = json.loads(submission.payload_json or "{}")
+    try:
+        float(payload.get("amount"))
+    except (TypeError, ValueError):
+        # Razorpay's figure is the money actually received, which is what
+        # the receipt has to state.
+        payload["amount"] = payment["amount"]
+
+    try:
+        donation, create_error = _create_zoho_donation(
+            payload, campaign, payment_id, payment.get("order_id"),
+        )
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Immediate receipt failed for pending submission %s (payment %s)",
+            submission.id, payment_id,
+        )
+        return None
+
+    if create_error:
+        # Left open on purpose: the reconciler will retry it and, if it
+        # still can't be created, surface the reason in the daily report
+        # rather than it dying quietly inside a webhook.
+        return None
+
+    submission.resolution = "reconciled"
+    submission.resolved_at = datetime.datetime.utcnow()
+    submission.donation_id = donation.id
+    db.session.add(AdminActivityLog(
+        admin_username="system", action="zoho_donation_reconciled", target_type="donation",
+        target_id=donation.id,
+        details=(
+            f"campaign={campaign.name} amount={donation.amount} transaction_id={payment_id} "
+            f"receipt={donation.receipt_number} (matched to a waiting Zoho submission "
+            f"the moment Razorpay reported the capture)"
+        )[:500],
+    ))
+    db.session.commit()
+
+    return jsonify({
+        "ok": True, "matched": "zoho_pending_submission",
+        "donation_id": donation.id, "receipt_number": donation.receipt_number,
+    }), 200
+
+
 def _handle_payment_captured(event):
     payment_entity = event.get("payload", {}).get("payment", {}).get("entity", {})
     order_id = payment_entity.get("order_id")
@@ -1342,9 +1462,25 @@ def _handle_payment_captured(event):
 
     donation = Donation.query.filter_by(razorpay_order_id=order_id).first()
     if donation is None:
-        # No matching donation on our side (e.g. a stray event from a
-        # different Razorpay account/test mode) -- acknowledge so Razorpay
-        # stops retrying, but there's nothing to finalize.
+        # Not one of this site's own checkouts. Before shrugging, check
+        # whether a Zoho Forms submission has been sitting here waiting for
+        # exactly this payment.
+        #
+        # This is what makes a Zoho receipt immediate. Zoho's own webhook
+        # fires *before* the donor pays and often never calls again, so it
+        # can't tell us the payment succeeded -- but Razorpay can, and
+        # does, within seconds, over a channel that is already configured
+        # and whose signature we have already verified above. Without this
+        # the donor waits for the hourly reconciler; with it the receipt
+        # lands while they are still looking at the confirmation screen.
+        issued = _issue_receipt_for_pending_submission(payment_entity)
+        if issued is not None:
+            return issued
+
+        # Genuinely nothing to do (a stray event from another account or
+        # test mode, or a payment no submission matches -- the latter is
+        # picked up by the hourly reconciler and the daily report, which
+        # is where an ambiguous or unexplained payment belongs).
         return jsonify({"ok": True, "matched": False}), 200
 
     if payment_id:
@@ -1538,6 +1674,42 @@ def _zoho_payment_is_captured(payment_id):
         return False, str(exc)
 
     return payment.get("status") == "captured", None
+
+
+def _submission_matches_payment(submission, payment, max_age_hours=48):
+    """Whether this pending Zoho submission could be the one that produced
+    this Razorpay payment.
+
+    The single definition of "match", used by both paths that can issue a
+    receipt: the Razorpay webhook (immediately, as the payment lands) and
+    the hourly reconciler (the safety net, for anything the webhook
+    missed). Two copies of these rules would drift, and the one that ran
+    less often would be the one nobody reviewed -- the same reason
+    _create_zoho_donation is shared.
+
+    Phone and the time window are required. Amount is used when we have it
+    and skipped when we don't: Zoho's pre-payment call is not guaranteed
+    to carry an amount, and requiring one would mean any form that omits
+    it silently never matches -- the same invisible failure this feature
+    exists to end, one level in.
+
+    `payment` is the normalised dict shape used throughout this module:
+    amount in rupees, created_at_utc naive UTC, contact as Razorpay
+    recorded it."""
+    if not submission.phone_normalized:
+        return False
+    if normalize_phone(payment.get("contact") or "") != submission.phone_normalized:
+        return False
+    if submission.amount is not None and abs(payment["amount"] - submission.amount) >= 0.01:
+        return False
+    # Both sides naive UTC: received_at is stored that way like every other
+    # timestamp in this codebase, and created_at_utc is carried alongside
+    # the IST created_at precisely so this comparison never straddles two
+    # frames.
+    return (
+        submission.received_at <= payment["created_at_utc"]
+        <= submission.received_at + datetime.timedelta(hours=max_age_hours)
+    )
 
 
 def _payment_source(notes):
@@ -1897,33 +2069,7 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
     )
 
     def _candidates(submission):
-        """Payments that could plausibly belong to this submission.
-
-        Phone and the time window are required. Amount is used when we
-        have it, and skipped when we don't: Zoho's pre-payment call is not
-        guaranteed to carry an amount (it fires before the gateway is
-        involved, and which field a given form maps to the `amount`
-        payload parameter is per-form configuration we don't control).
-        Requiring it outright would mean any form that omits it silently
-        never matches anything -- the same shape of invisible failure this
-        whole feature exists to end, just one level further in.
-
-        Dropping to phone + window is still a narrow match, and the
-        one-payment-to-one-submission check downstream refuses anything
-        ambiguous, so the weaker case fails safe rather than guessing."""
-        if not submission.phone_normalized:
-            return []
-        return [
-            p for p in payments
-            if normalize_phone(p["contact"] or "") == submission.phone_normalized
-            and (submission.amount is None or abs(p["amount"] - submission.amount) < 0.01)
-            # Both sides naive UTC: received_at is stored that way like
-            # every other timestamp in this codebase, and created_at_utc is
-            # carried alongside the IST created_at precisely so this
-            # comparison never has to straddle two frames.
-            and submission.received_at <= p["created_at_utc"]
-            <= submission.received_at + datetime.timedelta(hours=max_age_hours)
-        ]
+        return [p for p in payments if _submission_matches_payment(submission, p, max_age_hours)]
 
     # Ambiguity is worked out across the whole set *before* anything is
     # resolved, deliberately. Deciding it as the loop went was subtly

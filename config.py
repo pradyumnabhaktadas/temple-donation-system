@@ -338,6 +338,33 @@ class Config:
     # e.g. RECONCILE_IGNORED_ZOHO_FORMS=TestingWebsitewithFormsintergration
     RECONCILE_IGNORED_ZOHO_FORMS = os.environ.get("RECONCILE_IGNORED_ZOHO_FORMS", "")
 
+    # --- Zoho Forms API (pull, rather than waiting to be pushed to) ---
+    #
+    # Why this exists at all: Zoho's *webhook* fires once, at submission
+    # time, before the donor has paid -- so it carries no transaction ID --
+    # and on this account it frequently never calls again. Worse, it has to
+    # be configured by hand on every single form, and four of the six forms
+    # taking money in September had never been configured at all, so those
+    # donations were invisible to this app entirely.
+    #
+    # A Zoho *entry*, by contrast, already holds everything needed: donor
+    # details, amount, payment status, and the Razorpay transaction ID.
+    # Reading entries directly removes the per-form setup, covers forms
+    # added later without anyone remembering to wire them up, and doesn't
+    # depend on Zoho's webhook working at all.
+    #
+    # OAuth 2.0 with a long-lived refresh token (Zoho API Console ->
+    # Self Client). The refresh token is the credential that matters; the
+    # short-lived access token is fetched from it as needed and never
+    # stored. ZOHO_ACCOUNTS_BASE / ZOHO_API_BASE are configurable because
+    # Zoho serves different data-centre domains (.com, .in, .eu) and the
+    # wrong one fails in a way that looks like bad credentials.
+    ZOHO_CLIENT_ID = os.environ.get("ZOHO_CLIENT_ID", "")
+    ZOHO_CLIENT_SECRET = os.environ.get("ZOHO_CLIENT_SECRET", "")
+    ZOHO_REFRESH_TOKEN = os.environ.get("ZOHO_REFRESH_TOKEN", "")
+    ZOHO_ACCOUNTS_BASE = os.environ.get("ZOHO_ACCOUNTS_BASE", "https://accounts.zoho.in")
+    ZOHO_API_BASE = os.environ.get("ZOHO_API_BASE", "https://forms.zoho.in")
+
     # --- Donor OTP login ---
     # No SMS provider is wired up yet (see sms_utils.py) -- OTPs are shown
     # directly on the verify page instead of texted, clearly marked "Demo

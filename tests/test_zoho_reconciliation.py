@@ -625,6 +625,160 @@ class TestItDoesNotHoardDonorData:
             "a just-resolved row stays available for auditing the receipt it produced"
 
 
+class TestImmediateReceiptOnRazorpayWebhook:
+    """The receipt should land while the donor is still looking at the
+    confirmation screen, not up to an hour later.
+
+    Zoho's own webhook fires *before* the donor pays, so it can never tell
+    us the payment succeeded. Razorpay can, and does, within seconds -- on
+    a channel already configured and already signature-verified. Before
+    this, a captured payment matching no donation was answered with
+    {"matched": false} and dropped, which is every Zoho payment there is."""
+
+    SECRET = "wh-secret"
+
+    def _post_captured(self, client, app, payment_id, amount, contact, created_at=None, notes=None):
+        import hashlib
+        import hmac as hmac_mod
+        import json as json_mod
+
+        app.config["RAZORPAY_WEBHOOK_SECRET"] = self.SECRET
+        created = created_at or datetime.datetime.utcnow()
+        body = json_mod.dumps({
+            "event": "payment.captured",
+            "payload": {"payment": {"entity": {
+                "id": payment_id,
+                "order_id": payment_id.replace("pay_", "order_"),
+                "amount": int(round(amount * 100)),
+                "status": "captured",
+                "contact": contact,
+                "email": None,
+                "created_at": int(created.replace(tzinfo=datetime.timezone.utc).timestamp()),
+                "notes": notes if notes is not None else {},
+            }}},
+        })
+        sig = hmac_mod.new(self.SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
+        return client.post(
+            "/webhooks/razorpay", data=body,
+            headers={"Content-Type": "application/json", "X-Razorpay-Signature": sig},
+        )
+
+    def test_a_waiting_submission_is_receipted_the_moment_the_payment_lands(self, client, app):
+        from models import Donation, PendingZohoSubmission
+
+        _submit_form(client, app, full_name="Jatin Saini", phone="9650150283", amount="100")
+        pending = PendingZohoSubmission.query.one()
+
+        resp = self._post_captured(
+            client, app, "pay_TYkDaxITUonK1O", 100, "+919650150283",
+            created_at=pending.received_at + datetime.timedelta(minutes=2),
+        )
+
+        assert resp.status_code == 200
+        assert resp.get_json()["matched"] == "zoho_pending_submission"
+
+        donation = Donation.query.one()
+        assert donation.status == "success"
+        assert donation.receipt_number, "the receipt must exist immediately, not after the hourly job"
+        assert donation.razorpay_payment_id == "pay_TYkDaxITUonK1O"
+        assert donation.donor.full_name == "Jatin Saini"
+        assert PendingZohoSubmission.query.one().resolution == "reconciled"
+
+    def test_no_grace_period_applies_on_this_path(self, client, app):
+        """The reconciler waits 15 minutes before touching a submission,
+        because a donor may still be mid-checkout. Here the payment has
+        already happened -- Razorpay is telling us so -- and waiting would
+        defeat the entire point."""
+        from models import Donation, PendingZohoSubmission
+
+        _submit_form(client, app, phone="9650150283", amount="100")
+        pending = PendingZohoSubmission.query.one()
+
+        self._post_captured(
+            client, app, "pay_Instant1", 100, "9650150283",
+            created_at=pending.received_at + datetime.timedelta(seconds=20),
+        )
+
+        assert Donation.query.count() == 1
+
+    def test_two_waiting_submissions_are_not_guessed_between(self, client, app):
+        """Same refusal as the reconciler. Speed must not buy laxity."""
+        from extensions import db
+        from models import Campaign, Donation
+
+        db.session.add(Campaign(name="Seminar Fees", is_80g=False))
+        db.session.commit()
+        _submit_form(client, app, full_name="One", phone="9650150283", amount="100")
+        _submit_form(client, app, full_name="Two", phone="9650150283", amount="100",
+                     campaign="Seminar Fees")
+
+        resp = self._post_captured(client, app, "pay_Amb9", 100, "9650150283")
+
+        assert resp.get_json()["matched"] is False
+        assert Donation.query.count() == 0
+
+    def test_a_payment_nothing_is_waiting_for_is_left_alone(self, client, app):
+        from models import Donation
+
+        resp = self._post_captured(client, app, "pay_Nobody1", 100, "9000000000")
+
+        assert resp.status_code == 200
+        assert resp.get_json()["matched"] is False
+        assert Donation.query.count() == 0
+
+    def test_a_redelivered_webhook_does_not_receipt_twice(self, client, app):
+        from models import Donation, PendingZohoSubmission
+
+        _submit_form(client, app, phone="9650150283", amount="100")
+        pending = PendingZohoSubmission.query.one()
+        when = pending.received_at + datetime.timedelta(minutes=1)
+
+        self._post_captured(client, app, "pay_Redeliver1", 100, "9650150283", created_at=when)
+        self._post_captured(client, app, "pay_Redeliver1", 100, "9650150283", created_at=when)
+
+        assert Donation.query.count() == 1
+
+    def test_a_test_form_never_gets_an_instant_receipt_either(self, client, app):
+        from models import Donation
+
+        app.config["RECONCILE_IGNORED_ZOHO_FORMS"] = "TestingWebsitewithFormsintergration"
+        _submit_form(client, app, phone="9650150283", amount="10")
+
+        self._post_captured(
+            client, app, "pay_TestForm1", 10, "9650150283",
+            notes={"zform_custom": "iskcondwarka,TestingWebsitewithFormsintergration,tok"},
+        )
+
+        assert Donation.query.count() == 0
+
+    def test_this_sites_own_checkout_is_unaffected(self, client, app):
+        """The pre-existing path must still win: a payment whose order
+        matches a donation is finalised as before, never diverted into the
+        Zoho matcher."""
+        from extensions import db
+        from models import Campaign, Donation, Donor
+
+        donor = Donor(full_name="Site Donor", phone="9650150283")
+        db.session.add(donor)
+        db.session.flush()
+        d = Donation(
+            donor_id=donor.id, campaign_id=Campaign.query.first().id, amount=100,
+            status="pending", payment_mode="online",
+            razorpay_order_id="order_SiteFlow1",
+        )
+        db.session.add(d)
+        db.session.commit()
+
+        _submit_form(client, app, phone="9650150283", amount="100")
+
+        resp = self._post_captured(client, app, "pay_SiteFlow1", 100, "9650150283")
+
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body.get("receipt_number") and body.get("matched") != "zoho_pending_submission"
+        assert Donation.query.count() == 1
+
+
 class TestPaymentOrigin:
     """Razorpay's notes say where a payment came from, and the two sources
     need opposite handling. Without this every unexplained payment looked
