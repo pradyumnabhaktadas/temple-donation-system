@@ -1593,10 +1593,26 @@ def unreconciled_razorpay_payments(config, lookback_days=3):
         current_app.logger.exception("Razorpay reconciliation scan failed")
         return [], str(exc)
 
+    # Both columns, deliberately. razorpay_payment_id is where this site's
+    # own checkout and the Zoho webhook record a payment. But a donation
+    # entered by hand through Offline Donation -> Single Entry puts the
+    # payment reference in bank_transaction_id instead -- that's the field
+    # the form offers -- and staff backfilling a flagged payment will type
+    # the "pay_..." id straight into it.
+    #
+    # Checking only razorpay_payment_id meant exactly the payments staff
+    # had just finished fixing kept reappearing in the daily report as
+    # unexplained, permanently. A safety net that keeps flagging resolved
+    # items is one people stop reading, which costs more than it saves.
     known_ids = {
-        pid for (pid,) in db.session.query(Donation.razorpay_payment_id)
+        value for (value,) in db.session.query(Donation.razorpay_payment_id)
         .filter(Donation.razorpay_payment_id.isnot(None)).all()
     }
+    known_ids |= {
+        (value or "").strip() for (value,) in db.session.query(Donation.bank_transaction_id)
+        .filter(Donation.bank_transaction_id.isnot(None)).all()
+    }
+    known_ids.discard("")
 
     unreconciled = [
         {
@@ -1860,7 +1876,10 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
         # guarding against may well appear *during* the confirmation call
         # just above. Checking before that call (where this originally
         # sat) leaves exactly that window open.
-        if Donation.query.filter_by(razorpay_payment_id=payment["payment_id"]).first():
+        if Donation.query.filter(db.or_(
+            Donation.razorpay_payment_id == payment["payment_id"],
+            Donation.bank_transaction_id == payment["payment_id"],
+        )).first():
             summary["still_waiting"] += 1
             continue
 

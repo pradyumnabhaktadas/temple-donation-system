@@ -812,6 +812,59 @@ class TestLifecycle:
 
         assert [p["payment_id"] for p in summary["orphan_payments"]] == ["pay_Orphan1"]
 
+    def test_a_hand_entered_backfill_stops_being_flagged(self, client, app):
+        """The workflow this feature actually creates: the report flags a
+        payment, staff enter it through Offline Donation -> Single Entry,
+        and it must then go quiet.
+
+        That form stores the payment reference in bank_transaction_id, not
+        razorpay_payment_id, so matching only the latter meant the very
+        payments staff had just finished fixing kept reappearing as
+        unexplained, every day, forever. A safety net that keeps flagging
+        resolved items is one people stop reading."""
+        from extensions import db
+        from models import Campaign, Donation, Donor
+
+        donor = Donor(full_name="Backfilled By Hand", phone="9319880507")
+        db.session.add(donor)
+        db.session.flush()
+        db.session.add(Donation(
+            donor_id=donor.id, campaign_id=Campaign.query.first().id, amount=100,
+            status="success", payment_mode="online",
+            bank_transaction_id="pay_TY1ckLpy6lUDMr",   # a real one from production
+        ))
+        db.session.commit()
+
+        app.config["RAZORPAY_ENABLED"] = True
+        summary = _reconcile(app, [_payment("pay_TY1ckLpy6lUDMr", 100, "9319880507")])
+
+        assert summary["orphan_payments"] == [], \
+            "a payment already entered by hand is accounted for, not unexplained"
+
+    def test_a_hand_entered_backfill_is_never_receipted_twice(self, client, app):
+        """The other half: a pending submission must not produce a second
+        receipt for a payment staff already entered manually."""
+        from extensions import db
+        from models import Campaign, Donation, Donor, PendingZohoSubmission
+
+        _submit_form(client, app, phone="9319880507", amount="100")
+        _age_submissions(minutes=60)
+        submitted_at = PendingZohoSubmission.query.one().received_at
+
+        donor = Donor(full_name="Backfilled By Hand", phone="9319880507")
+        db.session.add(donor)
+        db.session.flush()
+        db.session.add(Donation(
+            donor_id=donor.id, campaign_id=Campaign.query.first().id, amount=100,
+            status="success", payment_mode="online",
+            bank_transaction_id="pay_Manual1",
+        ))
+        db.session.commit()
+
+        _reconcile(app, [_payment("pay_Manual1", 100, "9319880507", submitted_at=submitted_at)])
+
+        assert Donation.query.count() == 1
+
     def test_donations_this_app_already_knows_about_are_not_orphans(self, client, app):
         """A payment already attached to a donation (this site's own
         checkout, or an earlier reconciliation) must not be re-flagged."""
