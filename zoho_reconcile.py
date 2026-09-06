@@ -86,6 +86,11 @@ def main():
         for s in result["ambiguous"]:
             print(f"  #{s['pending_id']} {s['name']} Rs. {s['amount']}: {s['note']}")
 
+    if result.get("failed"):
+        print(f"\n{len(result['failed'])} submission(s) errored while being written -- retried next run:")
+        for f in result["failed"]:
+            print(f"  pending #{f['pending_id']}: {f['error']}")
+
     if result["orphan_payments"]:
         print(f"\n{len(result['orphan_payments'])} captured payment(s) with nothing in this app to match them to:")
         for p in result["orphan_payments"]:

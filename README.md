@@ -708,13 +708,24 @@ call:
    webhook uses, so both paths apply identical PAN/80G/validation rules.
 
 Matching is deliberately strict, because these produce 80G tax receipts
-and a wrong match is worse than no match: exact amount, same phone
-(normalised — Zoho sends `+919873287387` where Razorpay returns
-`9873287387`), payment captured *after* the form was submitted and within
-48 hours of it, payment not already attached to a donation, and **exactly
-one** payment fitting **exactly one** submission. Anything ambiguous is
-flagged for a person rather than guessed at. A submission that ages out
-with no matching payment is closed as `unpaid` (an abandoned checkout).
+and a wrong match is worse than no match: same phone (normalised — Zoho
+sends `+919873287387` where Razorpay returns `9873287387`), payment
+captured *after* the form was submitted and within 48 hours of it, same
+amount where the submission carries one, payment not already attached to
+a donation, and **exactly one** payment fitting **exactly one**
+submission. Anything ambiguous is flagged for a person rather than
+guessed at. A submission that ages out with no matching payment is closed
+as `unpaid` (an abandoned checkout).
+
+Amount is treated as optional on purpose: Zoho's pre-payment call fires
+before the gateway is involved and doesn't reliably carry one, and which
+field a given form maps to the `amount` payload parameter is per-form
+configuration. Requiring it would mean any form that omits it silently
+never matches — the same invisible failure, one level in. When it's
+missing, the receipt uses the amount **Razorpay** actually received,
+which is the figure a receipt has to state anyway. Phone is the one field
+matching can't do without; a submission without one is never matched, and
+its payment surfaces as an orphan instead.
 
 It runs **hourly** via the `temple-zoho-reconcile` Cron Job
 (`zoho_reconcile.py` → `POST /internal/zoho-reconcile`), and **again from

@@ -35,6 +35,7 @@ TestTheProductionFailures below replays both real cases end to end.
 import datetime
 import os
 import sys
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -410,6 +411,173 @@ class TestItRefusesToGuess:
             "an unreachable Razorpay must not close anything out"
 
 
+class TestWhenZohoSendsNoAmount:
+    """Zoho's pre-payment call is not guaranteed to carry an amount -- it
+    fires before the gateway is involved, and which field a form maps to
+    the `amount` payload parameter is per-form configuration. If that
+    means no match can ever be made, the fix silently does nothing for
+    those forms, which is the original failure one level further in."""
+
+    def test_a_submission_with_no_amount_still_matches_on_phone(self, client, app):
+        from models import Donation, PendingZohoSubmission
+
+        _submit_form(client, app, full_name="No Amount", phone="9625901202", amount="")
+        _age_submissions(minutes=60)
+        pending = PendingZohoSubmission.query.one()
+        assert pending.amount is None, "precondition: nothing to match on but phone and time"
+
+        _reconcile(app, [_payment("pay_NoAmt1", 250, "9625901202", submitted_at=pending.received_at)])
+
+        donation = Donation.query.one()
+        assert donation.razorpay_payment_id == "pay_NoAmt1"
+        assert donation.receipt_number
+
+    def test_the_receipt_uses_the_amount_razorpay_actually_received(self, client, app):
+        """The figure on a receipt has to be the money that actually
+        arrived, not a form field that may be blank or stale."""
+        from models import Donation, PendingZohoSubmission
+
+        _submit_form(client, app, phone="9625901202", amount="")
+        _age_submissions(minutes=60)
+        pending = PendingZohoSubmission.query.one()
+
+        _reconcile(app, [_payment("pay_NoAmt2", 250, "9625901202", submitted_at=pending.received_at)])
+
+        assert float(Donation.query.one().amount) == 250.0
+
+    def test_it_still_refuses_to_guess_between_two_payments(self, client, app):
+        """Matching on less information must not mean matching more
+        loosely -- two payments from the same donor in the window is still
+        a human's call."""
+        from models import Donation, PendingZohoSubmission
+
+        _submit_form(client, app, phone="9625901202", amount="")
+        _age_submissions(minutes=60)
+        pending = PendingZohoSubmission.query.one()
+
+        summary = _reconcile(app, [
+            _payment("pay_NoAmtA", 250, "9625901202", submitted_at=pending.received_at),
+            _payment("pay_NoAmtB", 900, "9625901202", submitted_at=pending.received_at,
+                     minutes_after_submission=6),
+        ])
+
+        assert Donation.query.count() == 0
+        assert len(summary["ambiguous"]) == 1
+
+    def test_a_submission_with_no_phone_is_never_matched(self, client, app):
+        """Phone is the one field matching genuinely cannot do without.
+        Without it, anything is a "match" -- so match nothing, and let it
+        surface as an orphan payment for a person instead."""
+        from models import Donation, PendingZohoSubmission
+
+        _submit_form(client, app, phone="", amount="100")
+        _age_submissions(minutes=60)
+
+        summary = _reconcile(app, [_payment("pay_NoPhone1", 100, "9625901202")])
+
+        assert Donation.query.count() == 0
+        assert [p["payment_id"] for p in summary["orphan_payments"]] == ["pay_NoPhone1"]
+
+
+class TestScanWindow:
+    """The Razorpay scan window itself -- bugs here are invisible (the job
+    reports a clean run) but mean payments are never looked at."""
+
+    def test_the_lookback_window_is_a_real_utc_window(self, client, app):
+        """Regression: this was computed with now_ist(), which returns a
+        *naive* datetime holding IST wall-clock. .timestamp() on a naive
+        datetime reads it as the host's local zone, so on Render (UTC) the
+        window silently started 5h30m late -- a "3 day" scan that actually
+        covered 2 days 18.5 hours. Payments in that gap were never
+        examined, and nothing anywhere would have said so.
+
+        Pinned to TZ=UTC for the duration, deliberately: on a machine
+        already set to IST the two errors cancel out and this passes with
+        the bug still present. That is exactly how the bug survived its
+        first test -- the sandbox this was written in runs
+        TZ=Asia/Calcutta, while production runs UTC. Asserting under the
+        timezone production actually uses is the only version of this test
+        that means anything."""
+        from public import unreconciled_razorpay_payments
+
+        app.config["RAZORPAY_ENABLED"] = True
+        captured_args = {}
+
+        client_mock = MagicMock()
+
+        def _record(params):
+            captured_args.update(params)
+            return {"items": [], "count": 0}
+
+        client_mock.payment.all.side_effect = _record
+
+        original_tz = os.environ.get("TZ")
+        os.environ["TZ"] = "UTC"
+        time.tzset()
+        try:
+            with patch("razorpay.Client", return_value=client_mock):
+                unreconciled_razorpay_payments(app.config, lookback_days=3)
+
+            expected = (datetime.datetime.utcnow() - datetime.timedelta(days=3)) \
+                .replace(tzinfo=datetime.timezone.utc).timestamp()
+            # Within a minute of a true 3-days-ago UTC instant. The old bug
+            # was off by 19,800 seconds, so this catches it with room to spare.
+            assert abs(captured_args["from"] - expected) < 60
+        finally:
+            if original_tz is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = original_tz
+            time.tzset()
+
+    def test_it_pages_through_more_than_one_hundred_payments(self, client, app):
+        """Razorpay caps a page at 100. A busy festival day can exceed
+        that, and stopping at the first page would silently ignore
+        everything past it."""
+        from public import unreconciled_razorpay_payments
+
+        app.config["RAZORPAY_ENABLED"] = True
+        page1 = [_payment(f"pay_p{i}", 10, "9000000000") for i in range(100)]
+        page2 = [_payment("pay_last", 10, "9000000000")]
+
+        client_mock = MagicMock()
+        client_mock.payment.all.side_effect = [
+            {"items": page1, "count": 100},
+            {"items": page2, "count": 1},
+        ]
+
+        with patch("razorpay.Client", return_value=client_mock):
+            payments, error = unreconciled_razorpay_payments(app.config)
+
+        assert error is None
+        assert len(payments) == 101
+        assert "pay_last" in [p["payment_id"] for p in payments]
+
+    def test_uncaptured_payments_are_excluded_from_the_scan(self, client, app):
+        from public import unreconciled_razorpay_payments
+
+        app.config["RAZORPAY_ENABLED"] = True
+        with _razorpay([
+            _payment("pay_ok", 10, "9000000000"),
+            _payment("pay_failed", 10, "9000000000", status="failed"),
+            _payment("pay_auth", 10, "9000000000", status="authorized"),
+        ]):
+            payments, _ = unreconciled_razorpay_payments(app.config)
+
+        assert [p["payment_id"] for p in payments] == ["pay_ok"]
+
+    def test_no_razorpay_configured_is_not_an_error(self, client, app):
+        """Demo/local deployments have no Razorpay at all. Nothing to
+        reconcile against isn't a failure to report."""
+        from public import unreconciled_razorpay_payments
+
+        app.config["RAZORPAY_ENABLED"] = False
+        payments, error = unreconciled_razorpay_payments(app.config)
+
+        assert payments == []
+        assert error is None
+
+
 class TestLifecycle:
     def test_a_very_recent_submission_is_left_alone(self, client, app):
         """The donor may still be mid-checkout, and Zoho's own follow-up
@@ -493,6 +661,140 @@ class TestLifecycle:
         summary = _reconcile(app, [_payment("pay_Known1", 750, "9000000002")])
 
         assert summary["orphan_payments"] == []
+
+
+class TestResilience:
+    """One bad row must not cost every other donor their receipt, and the
+    job must stay safe when two copies of it overlap."""
+
+    def test_one_failing_submission_does_not_strand_the_others(self, client, app):
+        from extensions import db
+        from models import Campaign, Donation, PendingZohoSubmission
+
+        db.session.add(Campaign(name="Seminar Fees", is_80g=False))
+        db.session.commit()
+
+        _submit_form(client, app, full_name="Breaks", phone="9000000001")
+        _submit_form(client, app, full_name="Fine", phone="9000000002", campaign="Seminar Fees")
+        _age_submissions(minutes=60)
+        submitted_at = min(s.received_at for s in PendingZohoSubmission.query.all())
+
+        payments = [
+            _payment("pay_Bad1", 100, "9000000001", submitted_at=submitted_at),
+            _payment("pay_Good1", 100, "9000000002", submitted_at=submitted_at),
+        ]
+
+        import public
+        real = public._create_zoho_donation
+
+        def _boom(payload, campaign, transaction_id, order_id):
+            if transaction_id == "pay_Bad1":
+                raise RuntimeError("something unexpected in the stored payload")
+            return real(payload, campaign, transaction_id, order_id)
+
+        with patch.object(public, "_create_zoho_donation", side_effect=_boom):
+            summary = _reconcile(app, payments)
+
+        assert len(summary["created"]) == 1, "the healthy submission must still be receipted"
+        assert Donation.query.one().razorpay_payment_id == "pay_Good1"
+        assert len(summary["failed"]) == 1
+
+        # The failed one stays open so the next hourly run retries it,
+        # rather than being closed out and forgotten.
+        failed = PendingZohoSubmission.query.filter_by(full_name="Breaks").one()
+        assert failed.resolved_at is None
+
+    def test_decisions_already_taken_survive_a_later_failure(self, client, app):
+        """A creation failure rolls the session back. Decisions made
+        earlier in the same run must already be committed, or the run
+        forgets what it had ruled on."""
+        from extensions import db
+        from models import Campaign, PendingZohoSubmission
+
+        db.session.add(Campaign(name="Seminar Fees", is_80g=False))
+        db.session.commit()
+
+        # One that will be closed as unpaid, one that will blow up.
+        _submit_form(client, app, full_name="Abandoned", phone="9000000003")
+        _submit_form(client, app, full_name="Breaks", phone="9000000001", campaign="Seminar Fees")
+        _age_submissions(minutes=60 * 72)
+        submitted_at = min(s.received_at for s in PendingZohoSubmission.query.all())
+
+        import public
+        with patch.object(public, "_create_zoho_donation", side_effect=RuntimeError("boom")):
+            _reconcile(app, [_payment("pay_Bad2", 100, "9000000001", submitted_at=submitted_at)],
+                       max_age_hours=48)
+
+        db.session.expire_all()
+        assert PendingZohoSubmission.query.filter_by(full_name="Abandoned").one().resolution == "unpaid"
+
+    def test_a_payment_receipted_mid_run_is_not_receipted_again(self, client, app):
+        """The real overlap case between the hourly cron and the daily
+        report's own run.
+
+        The scan already excludes payments attached to a donation, so a
+        donation that exists *before* the run is filtered out and never
+        reaches the guard -- which is why an earlier version of this test
+        passed with the guard deleted and proved nothing. The case that
+        matters is a donation appearing in the window *between* the scan
+        and the write, which is what a concurrent run does. Simulated here
+        by creating it during the per-payment confirmation call, the last
+        step before the write."""
+        from extensions import db
+        from models import Campaign, Donation, Donor, PendingZohoSubmission
+        import public
+
+        _submit_form(client, app, phone="9000000004")
+        _age_submissions(minutes=60)
+        submitted_at = PendingZohoSubmission.query.one().received_at
+
+        def _concurrent_run_wins(payment_id):
+            """Stands in for another worker finishing this same payment
+            first, after our snapshot was taken."""
+            if not Donation.query.filter_by(razorpay_payment_id=payment_id).first():
+                donor = Donor(full_name="Already There", phone="9000000004")
+                db.session.add(donor)
+                db.session.flush()
+                db.session.add(Donation(
+                    donor_id=donor.id, campaign_id=Campaign.query.first().id, amount=100,
+                    status="success", payment_mode="online", razorpay_payment_id=payment_id,
+                ))
+                db.session.commit()
+            return True, None
+
+        with patch.object(public, "_zoho_payment_is_captured", side_effect=_concurrent_run_wins):
+            _reconcile(app, [_payment("pay_Dup1", 100, "9000000004", submitted_at=submitted_at)])
+
+        assert Donation.query.filter_by(razorpay_payment_id="pay_Dup1").count() == 1, \
+            "a concurrent run's donation must not be duplicated"
+
+    def test_work_per_run_is_bounded(self, client, app):
+        """Each match costs a Razorpay confirmation call inside an HTTP
+        request. Unbounded, a large backlog would run past gunicorn's
+        worker timeout and be killed mid-run -- the failure mode this
+        codebase has already hit twice. The remainder rolls to the next
+        hourly run."""
+        from extensions import db
+        from models import Campaign, Donation
+
+        for i in range(6):
+            db.session.add(Campaign(name=f"Camp {i}", is_80g=False))
+        db.session.commit()
+
+        payments = []
+        for i in range(6):
+            _submit_form(client, app, phone=f"90000100{i:02d}", campaign=f"Camp {i}")
+        _age_submissions(minutes=60)
+
+        from models import PendingZohoSubmission
+        submitted_at = min(s.received_at for s in PendingZohoSubmission.query.all())
+        for i in range(6):
+            payments.append(_payment(f"pay_Cap{i}", 100, f"90000100{i:02d}", submitted_at=submitted_at))
+
+        summary = _reconcile(app, payments, max_per_run=2)
+
+        assert len(summary["created"]) == 2
+        assert Donation.query.count() == 2
 
 
 class TestDailyReportSafetyNet:

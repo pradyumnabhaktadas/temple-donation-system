@@ -1402,6 +1402,7 @@ def internal_zoho_reconcile():
         ],
         "unpaid": summary["unpaid"],
         "still_waiting": summary["still_waiting"],
+        "failed": summary["failed"],
         "orphan_payments": [
             {"payment_id": p["payment_id"], "amount": p["amount"], "contact": p["contact"]}
             for p in summary["orphan_payments"]
@@ -1553,7 +1554,18 @@ def unreconciled_razorpay_payments(config, lookback_days=3):
         import razorpay
 
         client = razorpay.Client(auth=(config["RAZORPAY_KEY_ID"], config["RAZORPAY_KEY_SECRET"]))
-        from_ts = int((now_ist() - datetime.timedelta(days=lookback_days)).timestamp())
+        # Deliberately utcnow(), not now_ist(): now_ist() returns a *naive*
+        # datetime holding IST wall-clock time, and .timestamp() on a naive
+        # datetime makes Python interpret it as the host's local zone (UTC
+        # on Render). Feeding now_ist() in here therefore reads as an
+        # instant 5h30m in the future and quietly shortens the scan window
+        # to 2 days 18.5 hours -- payments just outside it would never be
+        # looked at. Razorpay's from/to are absolute unix timestamps, so
+        # the right input is an absolute UTC now.
+        from_ts = int(
+            (datetime.datetime.utcnow() - datetime.timedelta(days=lookback_days))
+            .replace(tzinfo=datetime.timezone.utc).timestamp()
+        )
 
         captured = []
         skip = 0
@@ -1602,7 +1614,8 @@ def unreconciled_razorpay_payments(config, lookback_days=3):
     return unreconciled, None
 
 
-def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_age_hours=48):
+def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_age_hours=48,
+                               max_per_run=25):
     """Issues the receipts Zoho never told us to issue.
 
     This is the fix for the failure that kept recurring: Zoho Forms fires
@@ -1619,11 +1632,13 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
 
     Matching, deliberately conservative -- these produce 80G tax receipts,
     so a wrong match is worse than no match:
-      - exact amount, and
       - same phone number, normalised (Zoho sends "+919873287387" where
         Razorpay commonly returns "9873287387" for the same donor), and
       - the payment was captured *after* the form was submitted and within
         max_age_hours of it, and
+      - the same amount, when the submission carries one at all (see
+        _candidates -- Zoho's pre-payment call doesn't always include it),
+        and
       - the payment isn't already attached to some other donation, and
       - exactly one payment fits this submission and exactly one
         submission fits that payment.
@@ -1637,14 +1652,40 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
     follow-up call (when it does work) should get the chance to handle it
     first.
 
-    Returns a summary dict: created/ambiguous/unpaid/still_waiting counts,
-    the created donations' receipt numbers, and `error` if the Razorpay
+    max_per_run bounds the work one run does, because each match costs a
+    Razorpay confirmation call and this executes inside an HTTP request
+    under gunicorn's worker timeout -- the failure mode this codebase has
+    already been bitten by twice. The remainder is picked up next run.
+
+    Submissions older than lookback_days + 1 are out of scope entirely
+    (there'd be no payment left in the scan window to match them to). If
+    the job is ever off for longer than that, those rows stay unresolved
+    rather than being wrongly closed -- they're inert, and the money they
+    represent still surfaces via orphan_payments below.
+
+    Returns a summary dict: created/ambiguous/unpaid/still_waiting/failed,
+    the orphan payments nothing could explain, and `error` if the Razorpay
     scan itself failed (in which case nothing was resolved -- an
     unreachable Razorpay must never be read as "no payments exist")."""
     summary = {
         "created": [], "ambiguous": [], "unpaid": 0, "still_waiting": 0,
-        "orphan_payments": [], "error": None,
+        "orphan_payments": [], "failed": [], "error": None,
     }
+
+    def _mark(submission, resolution, note=None, donation_id=None):
+        """Records a decision about one submission and commits it there and
+        then, rather than batching every decision into a single commit at
+        the end. A creation failure further down the loop rolls the session
+        back, and a batched commit would take every decision made since the
+        last one with it -- so a run that hit one bad payload would quietly
+        forget which submissions it had already ruled on."""
+        submission.resolution = resolution
+        submission.resolved_at = datetime.datetime.utcnow()
+        if note is not None:
+            submission.note = note[:300]
+        if donation_id is not None:
+            submission.donation_id = donation_id
+        db.session.commit()
 
     payments, error = unreconciled_razorpay_payments(config, lookback_days=lookback_days)
     if error:
@@ -1660,13 +1701,26 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
     )
 
     def _candidates(submission):
-        """Payments that could plausibly belong to this submission."""
-        if not submission.phone_normalized or submission.amount is None:
+        """Payments that could plausibly belong to this submission.
+
+        Phone and the time window are required. Amount is used when we
+        have it, and skipped when we don't: Zoho's pre-payment call is not
+        guaranteed to carry an amount (it fires before the gateway is
+        involved, and which field a given form maps to the `amount`
+        payload parameter is per-form configuration we don't control).
+        Requiring it outright would mean any form that omits it silently
+        never matches anything -- the same shape of invisible failure this
+        whole feature exists to end, just one level further in.
+
+        Dropping to phone + window is still a narrow match, and the
+        one-payment-to-one-submission check downstream refuses anything
+        ambiguous, so the weaker case fails safe rather than guessing."""
+        if not submission.phone_normalized:
             return []
         return [
             p for p in payments
-            if abs(p["amount"] - submission.amount) < 0.01
-            and normalize_phone(p["contact"] or "") == submission.phone_normalized
+            if normalize_phone(p["contact"] or "") == submission.phone_normalized
+            and (submission.amount is None or abs(p["amount"] - submission.amount) < 0.01)
             # Both sides naive UTC: received_at is stored that way like
             # every other timestamp in this codebase, and created_at_utc is
             # carried alongside the IST created_at precisely so this
@@ -1701,20 +1755,17 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
         candidates = candidates_by_submission[submission.id]
 
         if len(candidates) > 1:
-            submission.resolution = "ambiguous"
-            submission.resolved_at = now
-            submission.note = (
+            _mark(submission, "ambiguous", (
                 f"{len(candidates)} captured payments match this submission "
                 f"({', '.join(c['payment_id'] for c in candidates)}) -- resolve by hand."
-            )[:300]
+            ))
             summary["ambiguous"].append(submission)
             continue
 
         if not candidates:
             if age > datetime.timedelta(hours=max_age_hours):
-                submission.resolution = "unpaid"
-                submission.resolved_at = now
-                submission.note = "No captured payment ever matched -- most likely an abandoned checkout."
+                _mark(submission, "unpaid",
+                      "No captured payment ever matched -- most likely an abandoned checkout.")
                 summary["unpaid"] += 1
             else:
                 summary["still_waiting"] += 1
@@ -1725,14 +1776,23 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
         # The mirror of the check above: if this one payment also fits some
         # *other* submission, neither can be resolved safely.
         if claims_per_payment.get(payment["payment_id"], 0) > 1:
-            submission.resolution = "ambiguous"
-            submission.resolved_at = now
-            submission.note = (
+            _mark(submission, "ambiguous", (
                 f"Payment {payment['payment_id']} matches this and "
                 f"{claims_per_payment[payment['payment_id']] - 1} other submission(s) "
                 "equally well -- resolve by hand."
-            )[:300]
+            ))
             summary["ambiguous"].append(submission)
+            continue
+
+        if len(summary["created"]) >= max_per_run:
+            # Bounded work per run. Each match below costs a Razorpay
+            # confirmation call, and this runs inside an HTTP request with
+            # gunicorn's worker timeout over it -- the failure mode this
+            # codebase has already been bitten by twice (slow synchronous
+            # work blowing past the timeout, worker killed mid-response,
+            # nothing in the log). Anything over the cap is simply picked
+            # up by the next hourly run.
+            summary["still_waiting"] += 1
             continue
 
         # Re-verify against Razorpay by ID before writing a receipt. The
@@ -1745,29 +1805,64 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
             summary["still_waiting"] += 1
             continue
 
+        # Last line of defence against two receipts for one payment,
+        # checked here rather than earlier in the loop: as late as
+        # possible, immediately before the write. The scan already
+        # excludes payments attached to a donation, but that snapshot was
+        # taken before this loop began, and the hourly cron can overlap
+        # with the daily report's own run -- so the donation this is
+        # guarding against may well appear *during* the confirmation call
+        # just above. Checking before that call (where this originally
+        # sat) leaves exactly that window open.
+        if Donation.query.filter_by(razorpay_payment_id=payment["payment_id"]).first():
+            summary["still_waiting"] += 1
+            continue
+
         payload = json.loads(submission.payload_json or "{}")
+
+        # If Zoho's pre-payment call carried no usable amount (see
+        # _candidates above), take it from Razorpay. That's the amount of
+        # money actually received, which is the figure a receipt has to
+        # state regardless of what any form field said -- without this,
+        # a matched payment would go on to fail _create_zoho_donation's
+        # amount validation and be filed as "needs a human" for a value
+        # we already have in hand.
+        try:
+            float(payload.get("amount"))
+        except (TypeError, ValueError):
+            payload["amount"] = payment["amount"]
+
         campaign = submission.campaign
         if campaign is None:
-            submission.resolution = "ambiguous"
-            submission.resolved_at = now
-            submission.note = f"Campaign '{submission.campaign_param}' no longer exists -- resolve by hand."[:300]
+            _mark(submission, "ambiguous",
+                  f"Campaign '{submission.campaign_param}' no longer exists -- resolve by hand.")
             summary["ambiguous"].append(submission)
             continue
 
-        donation, create_error = _create_zoho_donation(
-            payload, campaign, payment["payment_id"], payment.get("order_id"),
-        )
+        try:
+            donation, create_error = _create_zoho_donation(
+                payload, campaign, payment["payment_id"], payment.get("order_id"),
+            )
+        except Exception as exc:
+            # One malformed stored payload must not abort the whole run
+            # and strand every other donor's receipt behind it. Rolled
+            # back so the session is usable for the submissions after this
+            # one, and left unresolved so the next run retries it.
+            db.session.rollback()
+            current_app.logger.exception(
+                "Reconciliation failed to create a donation for pending submission %s", submission.id,
+            )
+            summary["failed"].append({"pending_id": submission.id, "error": str(exc)})
+            continue
+
         if create_error:
             body, _status = create_error
-            submission.resolution = "ambiguous"
-            submission.resolved_at = now
-            submission.note = f"Payment {payment['payment_id']} matched, but: {body.get('error')}"[:300]
+            _mark(submission, "ambiguous",
+                  f"Payment {payment['payment_id']} matched, but: {body.get('error')}")
             summary["ambiguous"].append(submission)
             continue
 
-        submission.resolution = "reconciled"
-        submission.resolved_at = now
-        submission.donation_id = donation.id
+        _mark(submission, "reconciled", donation_id=donation.id)
         summary["created"].append(donation)
 
         # Keeps a payment from being matched twice within one run.

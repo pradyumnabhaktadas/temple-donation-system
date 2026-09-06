@@ -160,6 +160,18 @@ def _render_email_html(data, org_name):
                 f'automatically:</p><ul style="margin:0 0 10px;">{rows}</ul>'
             )
 
+        if rec.get("failed"):
+            rows = "".join(
+                f'<li>Pending submission #{f["pending_id"]}: {f["error"]}</li>'
+                for f in rec["failed"]
+            )
+            blocks.append(
+                f'<p style="margin:0 0 4px;"><strong>{len(rec["failed"])} submission(s) errored while '
+                'being turned into a receipt.</strong> The payment matched, but writing the donation '
+                f'failed -- these are retried automatically, but worth a look:</p>'
+                f'<ul style="margin:0 0 10px;">{rows}</ul>'
+            )
+
         if rec.get("orphan_payments"):
             rows = "".join(
                 f'<li>{p["payment_id"]} -- Rs. {format_inr(p["amount"])} '
@@ -243,7 +255,7 @@ def run_reconciliation_safely(app):
         app.logger.exception("Zoho reconciliation from the daily report failed")
         return {
             "created": [], "ambiguous": [], "unpaid": 0, "still_waiting": 0,
-            "orphan_payments": [], "error": str(exc),
+            "orphan_payments": [], "failed": [], "error": str(exc),
         }
 
 
