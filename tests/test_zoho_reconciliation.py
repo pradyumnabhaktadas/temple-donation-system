@@ -482,6 +482,149 @@ class TestWhenZohoSendsNoAmount:
         assert [p["payment_id"] for p in summary["orphan_payments"]] == ["pay_NoPhone1"]
 
 
+class TestItDoesNotHoardDonorData:
+    """This table newly persists whole donor payloads. That has to obey
+    the same rules the rest of the app does, and not become a quiet
+    permanent copy of the donor list."""
+
+    def test_a_spurious_pan_is_not_stored(self, client, app):
+        """REG-001: a PAN on a Non-80G donation below the high-value
+        threshold isn't required, so it must not be persisted.
+        _create_zoho_donation already strips it before it can reach a
+        donor profile -- without the same rule here, this table is a way
+        around that, and these Zoho forms are Non-80G registrations, so
+        every PAN typed into one is spurious by definition."""
+        import json
+        from models import PendingZohoSubmission
+
+        _submit_form(client, app, phone="9625901202", amount="100", pan="ABCDE1234F")
+
+        stored = json.loads(PendingZohoSubmission.query.one().payload_json)
+        assert stored.get("pan") == "", "a PAN with no legal basis must not be kept"
+
+    def test_a_pan_that_is_needed_is_kept(self, client, app):
+        """The 80G case: the PAN is required to issue the receipt, so
+        stripping it would break the donation this feature exists to
+        rescue."""
+        import json
+        from models import PendingZohoSubmission
+
+        _submit_form(client, app, campaign="Annadan", phone="9625901202",
+                     amount="100", pan="ABCDE1234F")  # Annadan is 80G
+
+        stored = json.loads(PendingZohoSubmission.query.one().payload_json)
+        assert stored.get("pan") == "ABCDE1234F"
+
+    def test_a_pan_is_kept_when_the_amount_is_unknown(self, client, app):
+        """Zoho's pre-payment call doesn't always carry an amount, and a
+        high-value donation can't be ruled out without one. Dropping the
+        PAN there would fail the high-value check at creation and turn a
+        recoverable donation into manual work -- so it's kept unless we
+        can positively establish it isn't needed."""
+        import json
+        from models import PendingZohoSubmission
+
+        _submit_form(client, app, phone="9625901202", amount="", pan="ABCDE1234F")
+
+        stored = json.loads(PendingZohoSubmission.query.one().payload_json)
+        assert stored.get("pan") == "ABCDE1234F"
+
+    def test_a_high_value_pan_is_kept(self, client, app):
+        import json
+        from models import PendingZohoSubmission
+        from utils import HIGH_VALUE_PAN_THRESHOLD
+
+        _submit_form(client, app, phone="9625901202",
+                     amount=str(HIGH_VALUE_PAN_THRESHOLD + 1000), pan="ABCDE1234F")
+
+        stored = json.loads(PendingZohoSubmission.query.one().payload_json)
+        assert stored.get("pan") == "ABCDE1234F"
+
+    def test_resolved_rows_are_eventually_deleted(self, client, app):
+        """Once resolved, this row's job is done -- the donation record
+        (or the deliberate absence of one) is what's worth keeping.
+        Holding a name, phone and address indefinitely because someone
+        once opened a registration form isn't something to do quietly,
+        and nothing else here would ever have cleaned them up."""
+        from extensions import db
+        from models import PendingZohoSubmission
+
+        _submit_form(client, app, phone="9625901202")
+        # 3 days: past max_age_hours (48h) so it closes as unpaid, but
+        # still inside the scan horizon (lookback_days + 1 = 4 days), so
+        # it's evaluated rather than expired.
+        _age_submissions(minutes=60 * 24 * 3)
+
+        _reconcile(app, [], max_age_hours=48, retain_resolved_days=90)
+        db.session.expire_all()
+        row = PendingZohoSubmission.query.one()
+        assert row.resolution == "unpaid"
+
+        # Backdate the resolution itself past the retention window.
+        row.resolved_at = datetime.datetime.utcnow() - datetime.timedelta(days=120)
+        db.session.commit()
+
+        summary = _reconcile(app, [], retain_resolved_days=90)
+
+        assert summary["pruned"] == 1
+        assert PendingZohoSubmission.query.count() == 0
+
+    def test_a_row_too_old_to_ever_match_is_closed_off_not_left_dangling(self, client, app):
+        """Past the scan horizon nothing can match it any more. Left
+        unresolved it would sit there forever -- never retried, never
+        reported, and never pruned either, since pruning only touches
+        resolved rows. That's donor data accumulating with no path out.
+
+        Rare in normal running; it means the job was down for days, which
+        is exactly what has happened to this project's cron jobs before."""
+        from extensions import db
+        from models import PendingZohoSubmission
+
+        _submit_form(client, app, phone="9625901202")
+        _age_submissions(minutes=60 * 24 * 30)   # far beyond lookback + 1
+
+        summary = _reconcile(app, [], retain_resolved_days=90)
+
+        assert summary["expired"] == 1
+        row = PendingZohoSubmission.query.one()
+        assert row.resolution == "expired"
+        assert row.resolved_at is not None, "must be closed off so retention can reach it"
+
+        # And having been closed off, it is now prunable like anything else.
+        row.resolved_at = datetime.datetime.utcnow() - datetime.timedelta(days=120)
+        db.session.commit()
+        assert _reconcile(app, [], retain_resolved_days=90)["pruned"] == 1
+        assert PendingZohoSubmission.query.count() == 0
+
+    def test_a_row_still_within_the_window_is_left_open(self, client, app):
+        """Unfinished business, not history -- a recent unresolved row
+        still represents a donor who may be owed a receipt."""
+        from models import PendingZohoSubmission
+
+        _submit_form(client, app, phone="9625901202")
+        _age_submissions(minutes=60)
+
+        summary = _reconcile(app, [], retain_resolved_days=1)
+
+        assert summary["pruned"] == 0 and summary["expired"] == 0
+        assert PendingZohoSubmission.query.one().resolved_at is None
+
+    def test_a_recently_resolved_row_is_kept_for_auditing(self, client, app):
+        from extensions import db
+        from models import Donation, PendingZohoSubmission
+
+        _submit_form(client, app, phone="9625901202")
+        _age_submissions(minutes=60)
+        submitted_at = PendingZohoSubmission.query.one().received_at
+
+        _reconcile(app, [_payment("pay_Keep1", 100, "9625901202", submitted_at=submitted_at)],
+                   retain_resolved_days=90)
+
+        assert Donation.query.count() == 1
+        assert PendingZohoSubmission.query.count() == 1, \
+            "a just-resolved row stays available for auditing the receipt it produced"
+
+
 class TestScanWindow:
     """The Razorpay scan window itself -- bugs here are invisible (the job
     reports a clean run) but mean payments are never looked at."""

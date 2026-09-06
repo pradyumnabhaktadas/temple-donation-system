@@ -255,7 +255,7 @@ def run_reconciliation_safely(app):
         app.logger.exception("Zoho reconciliation from the daily report failed")
         return {
             "created": [], "ambiguous": [], "unpaid": 0, "still_waiting": 0,
-            "orphan_payments": [], "failed": [], "error": str(exc),
+            "orphan_payments": [], "failed": [], "pruned": 0, "expired": 0, "error": str(exc),
         }
 
 

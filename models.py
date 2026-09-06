@@ -807,6 +807,10 @@ class PendingZohoSubmission(db.Model):
     # unpaid -- aged out past the reconciliation window with no matching
     #   payment ever appearing, i.e. the donor most likely abandoned
     #   checkout. Not an error.
+    # expired -- older than any Razorpay scan can still cover, so it can
+    #   never be matched now. Closed off rather than left dangling
+    #   forever, which also brings it under the retention window. Should
+    #   be rare: it means the job didn't run for days.
     resolution = db.Column(db.String(20), nullable=True)
     note = db.Column(db.String(300), nullable=True)
 

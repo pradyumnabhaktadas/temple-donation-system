@@ -748,6 +748,19 @@ python zoho_reconcile.py                  # last 3 days
 python zoho_reconcile.py --lookback-days 7
 ```
 
+**What's kept, and for how long.** These pending records hold whatever the
+form collected — name, phone, and possibly address — including for people
+who filled in a form and never paid. They're scaffolding, not records:
+once a row is resolved, the donation (or the deliberate absence of one) is
+the thing worth keeping, so resolved rows are deleted after 90 days. Rows
+too old for any Razorpay scan to still cover are closed off as `expired`
+rather than left dangling unresolved forever, which also brings them under
+that retention window. A PAN that isn't legally required — Non-80G and
+below the high-value threshold, which is what these registration forms
+are — is stripped before the payload is stored, the same REG-001 rule
+`_create_zoho_donation` applies before a PAN can reach a donor profile.
+Without that, this table would be a way around it.
+
 Receipts it issues are logged to the Activity Log as
 `zoho_donation_reconciled`, distinct from `zoho_form_donation_received`,
 so you can tell which donations arrived normally and which had to be

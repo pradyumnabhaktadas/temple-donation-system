@@ -1620,7 +1620,7 @@ def unreconciled_razorpay_payments(config, lookback_days=3):
 
 
 def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_age_hours=48,
-                               max_per_run=25):
+                               max_per_run=25, retain_resolved_days=90):
     """Issues the receipts Zoho never told us to issue.
 
     This is the fix for the failure that kept recurring: Zoho Forms fires
@@ -1677,7 +1677,7 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
     unreachable Razorpay must never be read as "no payments exist")."""
     summary = {
         "created": [], "ambiguous": [], "unpaid": 0, "still_waiting": 0,
-        "orphan_payments": [], "failed": [], "error": None,
+        "orphan_payments": [], "failed": [], "pruned": 0, "expired": 0, "error": None,
     }
 
     def _mark(submission, resolution, note=None, donation_id=None):
@@ -1701,10 +1701,38 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
         return summary
 
     now = datetime.datetime.utcnow()
+    scan_horizon = now - datetime.timedelta(days=lookback_days + 1)
+
+    # Anything older than the scan horizon can never be matched again --
+    # no Razorpay scan will ever cover its payment window. Left alone,
+    # those rows sit unresolved forever: invisible to the report, never
+    # retried, and never pruned either (pruning only touches resolved
+    # rows), quietly accumulating donor names and phone numbers. Closed
+    # off explicitly instead, so they're accounted for and become subject
+    # to the retention window like anything else. Normally this finds
+    # nothing; it matters when the job has been down for days, which is
+    # exactly when this project's cron jobs have failed before.
+    for stranded in (
+        PendingZohoSubmission.query
+        .filter(PendingZohoSubmission.resolved_at.is_(None))
+        .filter(PendingZohoSubmission.received_at < scan_horizon)
+        .all()
+    ):
+        stranded.resolution = "expired"
+        stranded.resolved_at = now
+        stranded.note = (
+            f"Never matched within {lookback_days + 1} days of submission -- past the window "
+            "any Razorpay scan can still cover. If this donor did pay, the payment shows up "
+            "under the report's unexplained-payments list."
+        )[:300]
+        summary["expired"] += 1
+    if summary["expired"]:
+        db.session.commit()
+
     open_submissions = (
         PendingZohoSubmission.query
         .filter(PendingZohoSubmission.resolved_at.is_(None))
-        .filter(PendingZohoSubmission.received_at >= now - datetime.timedelta(days=lookback_days + 1))
+        .filter(PendingZohoSubmission.received_at >= scan_horizon)
         .all()
     )
 
@@ -1914,7 +1942,85 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
         for candidate in candidates_by_submission.get(submission.id, [])
     }
     summary["orphan_payments"] = [p for p in payments if p["payment_id"] not in spoken_for]
+    summary["pruned"] = _prune_resolved_pending_submissions(retain_days=retain_resolved_days)
     return summary
+
+
+def _prune_resolved_pending_submissions(retain_days=90):
+    """Deletes pending submissions that were resolved more than
+    `retain_days` ago. Returns how many went.
+
+    These rows hold a donor's name, phone, and whatever else the form
+    collected -- including, for the ones resolved as "unpaid", people who
+    filled in a form and never paid at all. This table is scaffolding: its
+    job is to hold those details until a payment can be matched to them.
+    Once a row is resolved that job is done, and the donation record (or
+    the deliberate absence of one) is the thing worth keeping. Holding
+    someone's contact details indefinitely because they once opened a
+    registration form isn't something this app should do quietly, and
+    nothing else in the codebase would ever have cleaned them up.
+
+    90 days leaves a wide margin for auditing a disputed receipt or
+    debugging a reconciliation that went wrong, while keeping the table
+    from becoming a permanent shadow copy of the donor list. Rows still
+    unresolved are never touched, however old -- those are unfinished
+    business, not history."""
+    cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=retain_days)
+    stale = PendingZohoSubmission.query.filter(
+        PendingZohoSubmission.resolved_at.isnot(None),
+        PendingZohoSubmission.resolved_at < cutoff,
+    ).all()
+    for row in stale:
+        db.session.delete(row)
+    if stale:
+        db.session.commit()
+    return len(stale)
+
+
+def _pending_payload_without_spurious_pan(payload, campaign, amount):
+    """Strips a PAN this donation has no legal basis to keep, before the
+    payload is written to pending_zoho_submissions.
+
+    REG-001: a PAN that arrives despite not being required -- the donation
+    isn't 80G and isn't above the high-value threshold -- is spurious and
+    must not be persisted. _create_zoho_donation applies exactly this rule
+    before find_or_create_donor, so it never reaches the donor's profile.
+
+    Without the same rule here, this table would be a way around it: these
+    Zoho forms are Non-80G event registrations (EBG_Registration, the
+    seminar), so any PAN a donor types into one is spurious by definition,
+    and it would otherwise sit in payload_json indefinitely -- collected
+    with no basis, in a place nobody would think to look for it.
+
+    Kept only when we can positively establish it isn't needed. If the
+    amount is unknown at this point (Zoho's pre-payment call doesn't
+    always carry one) a high-value donation can't be ruled out, so the PAN
+    stays: dropping it there would fail the high-value check later and
+    turn a recoverable donation into manual work."""
+    pan = (payload.get("pan") or "").strip()
+    if not pan:
+        return payload
+
+    receipt_type = (payload.get("receipt_type") or "").strip().lower()
+    if receipt_type == "80g":
+        is_80g_requested = True
+    elif receipt_type == "non80g":
+        is_80g_requested = False
+    else:
+        is_80g_requested = None
+    effective_is_80g = is_80g_requested if is_80g_requested is not None else campaign.is_80g
+
+    definitely_not_needed = (
+        not effective_is_80g
+        and amount is not None
+        and amount <= HIGH_VALUE_PAN_THRESHOLD
+    )
+    if not definitely_not_needed:
+        return payload
+
+    stripped = dict(payload)
+    stripped["pan"] = ""
+    return stripped
 
 
 def _record_pending_zoho_submission(payload, campaign, campaign_param):
@@ -1935,6 +2041,8 @@ def _record_pending_zoho_submission(payload, campaign, campaign_param):
         amount = float(payload.get("amount"))
     except (TypeError, ValueError):
         amount = None
+
+    payload = _pending_payload_without_spurious_pan(payload, campaign, amount)
 
     existing = PendingZohoSubmission.query.filter_by(
         campaign_id=campaign.id, phone_normalized=phone_normalized,
