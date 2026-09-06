@@ -1384,9 +1384,22 @@ def internal_zoho_reconcile():
         return jsonify({"error": "Unauthorized"}), 401
 
     payload = request.get_json(silent=True) or {}
+
+    def _date(key):
+        raw = (payload.get(key) or "").strip()
+        if not raw:
+            return None
+        return datetime.datetime.strptime(raw, "%Y-%m-%d").date()
+
+    try:
+        from_date, to_date = _date("from_date"), _date("to_date")
+    except ValueError:
+        return jsonify({"error": "Invalid from_date/to_date, expected YYYY-MM-DD"}), 400
+
     summary = reconcile_zoho_submissions(
         current_app.config,
         lookback_days=int(payload.get("lookback_days") or 3),
+        from_date=from_date, to_date=to_date,
     )
 
     if summary["error"]:
@@ -1408,6 +1421,7 @@ def internal_zoho_reconcile():
         "unpaid": summary["unpaid"],
         "still_waiting": summary["still_waiting"],
         "failed": summary["failed"],
+        "report_only": summary["report_only"],
         "orphan_payments": [
             {"payment_id": p["payment_id"], "amount": p["amount"], "contact": p["contact"]}
             for p in summary["orphan_payments"]
@@ -1516,7 +1530,7 @@ def _zoho_payment_is_captured(payment_id):
     return payment.get("status") == "captured", None
 
 
-def unreconciled_razorpay_payments(config, lookback_days=3):
+def unreconciled_razorpay_payments(config, lookback_days=3, from_date=None, to_date=None):
     """Returns (payments, error) -- every Razorpay payment captured in the
     trailing `lookback_days` that has no matching Donation anywhere in this
     app, neither via this site's own checkout flow nor the Zoho Forms
@@ -1567,28 +1581,52 @@ def unreconciled_razorpay_payments(config, lookback_days=3):
         # to 2 days 18.5 hours -- payments just outside it would never be
         # looked at. Razorpay's from/to are absolute unix timestamps, so
         # the right input is an absolute UTC now.
-        from_ts = int(
-            (datetime.datetime.utcnow() - datetime.timedelta(days=lookback_days))
-            .replace(tzinfo=datetime.timezone.utc).timestamp()
-        )
+        def _epoch(dt):
+            return int(dt.replace(tzinfo=datetime.timezone.utc).timestamp())
+
+        if from_date is not None:
+            from_ts = _epoch(datetime.datetime.combine(from_date, datetime.time.min))
+        else:
+            from_ts = _epoch(datetime.datetime.utcnow() - datetime.timedelta(days=lookback_days))
+        window = {"from": from_ts}
+        if to_date is not None:
+            # Inclusive of the whole end day.
+            window["to"] = _epoch(
+                datetime.datetime.combine(to_date, datetime.time.min) + datetime.timedelta(days=1)
+            )
 
         captured = []
         skip = 0
         page_size = 100
-        # Safety cap: 10 pages (1000 payments) is far beyond what a few
-        # days of a single temple's traffic could ever produce -- a bug in
-        # the pagination below then fails loud (an incomplete scan next to
-        # a suspiciously round 1000) rather than looping forever.
-        for _ in range(10):
+        # 200 pages = 20,000 payments. Generous for any window this is
+        # sensibly asked for, while still bounding a pagination bug.
+        max_pages = 200
+        truncated = True
+        for _ in range(max_pages):
             page = retry(
-                lambda: client.payment.all({"from": from_ts, "count": page_size, "skip": skip}),
+                lambda: client.payment.all(dict(window, count=page_size, skip=skip)),
                 attempts=3, delay_seconds=2,
             ) or {}
             items = page.get("items", [])
             captured.extend(item for item in items if item.get("status") == "captured")
             if len(items) < page_size:
+                truncated = False
                 break
             skip += page_size
+
+        if truncated:
+            # Deliberately an error, not a shorter list. The old cap simply
+            # stopped, which made a truncated scan indistinguishable from a
+            # complete one -- and everything downstream treats "not in this
+            # list" as "no such payment", so unseen payments would be read
+            # as receipted and unseen submissions closed as unpaid. A
+            # partial scan reported as complete is the exact failure this
+            # whole feature exists to eliminate, so it refuses instead.
+            return [], (
+                f"More than {max_pages * page_size:,} payments in this window -- the scan was "
+                "cut short, and a partial result must not be reported as a complete one. "
+                "Re-run over a narrower date range."
+            )
     except Exception as exc:
         current_app.logger.exception("Razorpay reconciliation scan failed")
         return [], str(exc)
@@ -1636,7 +1674,8 @@ def unreconciled_razorpay_payments(config, lookback_days=3):
 
 
 def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_age_hours=48,
-                               max_per_run=25, retain_resolved_days=90):
+                               max_per_run=25, retain_resolved_days=90,
+                               from_date=None, to_date=None):
     """Issues the receipts Zoho never told us to issue.
 
     This is the fix for the failure that kept recurring: Zoho Forms fires
@@ -1693,7 +1732,8 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
     unreachable Razorpay must never be read as "no payments exist")."""
     summary = {
         "created": [], "ambiguous": [], "unpaid": 0, "still_waiting": 0,
-        "orphan_payments": [], "failed": [], "pruned": 0, "expired": 0, "error": None,
+        "orphan_payments": [], "failed": [], "pruned": 0, "expired": 0,
+        "report_only": False, "error": None,
     }
 
     def _mark(submission, resolution, note=None, donation_id=None):
@@ -1711,9 +1751,24 @@ def reconcile_zoho_submissions(config, lookback_days=3, min_age_minutes=15, max_
             submission.donation_id = donation_id
         db.session.commit()
 
-    payments, error = unreconciled_razorpay_payments(config, lookback_days=lookback_days)
+    payments, error = unreconciled_razorpay_payments(
+        config, lookback_days=lookback_days, from_date=from_date, to_date=to_date,
+    )
     if error:
         summary["error"] = error
+        return summary
+
+    if from_date is not None or to_date is not None:
+        # Report-only. An explicit date range means someone is auditing a
+        # historical period, and the matching half of this job has no
+        # business running against it: pending submissions only exist from
+        # the day this feature was deployed, so a scan of (say) August
+        # contains no payments that could match any of them -- and every
+        # currently-open submission would therefore find no candidate and
+        # be closed as "unpaid", which is both wrong and irreversible.
+        # The orphan list is the whole point of a historical scan anyway.
+        summary["orphan_payments"] = payments
+        summary["report_only"] = True
         return summary
 
     now = datetime.datetime.utcnow()

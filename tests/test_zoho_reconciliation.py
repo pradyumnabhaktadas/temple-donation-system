@@ -625,6 +625,69 @@ class TestItDoesNotHoardDonorData:
             "a just-resolved row stays available for auditing the receipt it produced"
 
 
+class TestHistoricalScan:
+    """A fixed date range is for auditing an old period. It must report
+    and change nothing -- pending submissions only exist from the day this
+    was deployed, so matching them against, say, August would find no
+    candidates for any of them and close every open one as unpaid."""
+
+    def test_a_historical_scan_changes_nothing(self, client, app):
+        from models import Donation, PendingZohoSubmission
+        from public import reconcile_zoho_submissions
+
+        _submit_form(client, app, phone="9625901202")
+        _age_submissions(minutes=60 * 24 * 5)   # would otherwise be closed
+        app.config["RAZORPAY_ENABLED"] = True
+
+        with _razorpay([_payment("pay_Hist1", 100, "9000000001")]):
+            summary = reconcile_zoho_submissions(
+                app.config, min_age_minutes=0,
+                from_date=datetime.date(2026, 8, 1), to_date=datetime.date(2026, 8, 31),
+            )
+
+        assert summary["report_only"] is True
+        assert summary["created"] == [] and summary["unpaid"] == 0 and summary["expired"] == 0
+        assert Donation.query.count() == 0
+        assert PendingZohoSubmission.query.one().resolved_at is None, \
+            "a historical audit must not close a submission that belongs to the present"
+
+    def test_it_still_reports_the_payments_it_found(self, client, app):
+        from public import reconcile_zoho_submissions
+
+        app.config["RAZORPAY_ENABLED"] = True
+        with _razorpay([_payment("pay_Hist2", 501, "9758517155")]):
+            summary = reconcile_zoho_submissions(
+                app.config, from_date=datetime.date(2026, 8, 1),
+            )
+
+        assert [p["payment_id"] for p in summary["orphan_payments"]] == ["pay_Hist2"]
+
+    def test_the_route_accepts_a_date_range(self, client, app):
+        app.config["INTERNAL_TASK_TOKEN"] = "secret-token"
+        app.config["RAZORPAY_ENABLED"] = True
+
+        with _razorpay([_payment("pay_Hist3", 100, "9000000002")]):
+            resp = client.post(
+                "/internal/zoho-reconcile",
+                json={"from_date": "2026-08-01", "to_date": "2026-08-31"},
+                headers={"X-Internal-Token": "secret-token"},
+            )
+
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["report_only"] is True
+        assert body["created"] == []
+        assert [p["payment_id"] for p in body["orphan_payments"]] == ["pay_Hist3"]
+
+    def test_a_malformed_date_is_rejected(self, client, app):
+        app.config["INTERNAL_TASK_TOKEN"] = "secret-token"
+        resp = client.post(
+            "/internal/zoho-reconcile", json={"from_date": "01-08-2026"},
+            headers={"X-Internal-Token": "secret-token"},
+        )
+        assert resp.status_code == 400
+
+
 class TestScanWindow:
     """The Razorpay scan window itself -- bugs here are invisible (the job
     reports a clean run) but mean payments are never looked at."""
@@ -711,6 +774,60 @@ class TestScanWindow:
             payments, _ = unreconciled_razorpay_payments(app.config)
 
         assert [p["payment_id"] for p in payments] == ["pay_ok"]
+
+    def test_a_truncated_scan_is_an_error_not_a_short_list(self, client, app):
+        """The old cap simply stopped at 1,000 payments, which made a
+        truncated scan indistinguishable from a complete one. Everything
+        downstream reads "not in this list" as "no such payment", so
+        unseen payments would look receipted and unseen submissions would
+        be closed as unpaid. Reporting a partial scan as complete is the
+        exact failure this feature exists to eliminate."""
+        from public import unreconciled_razorpay_payments
+
+        app.config["RAZORPAY_ENABLED"] = True
+        full_page = [_payment(f"pay_bulk{i}", 10, "9000000000") for i in range(100)]
+
+        client_mock = MagicMock()
+        client_mock.payment.all.return_value = {"items": full_page, "count": 100}
+
+        with patch("razorpay.Client", return_value=client_mock):
+            payments, error = unreconciled_razorpay_payments(app.config)
+
+        assert payments == []
+        assert error and "cut short" in error
+
+    def test_a_fixed_date_window_is_passed_to_razorpay(self, client, app):
+        from public import unreconciled_razorpay_payments
+
+        app.config["RAZORPAY_ENABLED"] = True
+        seen = {}
+        client_mock = MagicMock()
+
+        def _record(params):
+            seen.update(params)
+            return {"items": [], "count": 0}
+
+        client_mock.payment.all.side_effect = _record
+
+        original_tz = os.environ.get("TZ")
+        os.environ["TZ"] = "UTC"
+        time.tzset()
+        try:
+            with patch("razorpay.Client", return_value=client_mock):
+                unreconciled_razorpay_payments(
+                    app.config,
+                    from_date=datetime.date(2026, 8, 1),
+                    to_date=datetime.date(2026, 8, 31),
+                )
+            assert seen["from"] == datetime.datetime(2026, 8, 1, tzinfo=datetime.timezone.utc).timestamp()
+            # `to` covers the whole of the final day, not midnight at its start.
+            assert seen["to"] == datetime.datetime(2026, 9, 1, tzinfo=datetime.timezone.utc).timestamp()
+        finally:
+            if original_tz is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = original_tz
+            time.tzset()
 
     def test_no_razorpay_configured_is_not_an_error(self, client, app):
         """Demo/local deployments have no Razorpay at all. Nothing to

@@ -32,6 +32,7 @@ Job. Hourly rather than daily because a donor who paid should get their
 receipt while they still remember donating, not the next morning.
 """
 import argparse
+import datetime
 import os
 import sys
 
@@ -44,7 +45,32 @@ def main():
         "--lookback-days", type=int, default=3,
         help="How many days of Razorpay payments to scan (default 3).",
     )
+    parser.add_argument(
+        "--from", dest="from_date", default=None, metavar="YYYY-MM-DD",
+        help=(
+            "Scan a fixed historical window instead of the last N days. "
+            "REPORT ONLY: it lists payments with no donation behind them and "
+            "changes nothing, because pending submissions only exist from the "
+            "day this feature was deployed -- matching them against an older "
+            "window would close today's open ones as unpaid."
+        ),
+    )
+    parser.add_argument(
+        "--to", dest="to_date", default=None, metavar="YYYY-MM-DD",
+        help="End of the window, inclusive. Defaults to today. Use with --from.",
+    )
     args = parser.parse_args()
+
+    for value in (args.from_date, args.to_date):
+        if value:
+            try:
+                datetime.datetime.strptime(value, "%Y-%m-%d")
+            except ValueError:
+                print(f"Invalid date {value!r}, expected YYYY-MM-DD", file=sys.stderr)
+                return 1
+    if args.to_date and not args.from_date:
+        print("--to needs --from as well.", file=sys.stderr)
+        return 1
 
     base_url = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
     token = os.environ.get("INTERNAL_TASK_TOKEN") or ""
@@ -59,9 +85,15 @@ def main():
     try:
         resp = requests.post(
             f"{base_url}/internal/zoho-reconcile",
-            json={"lookback_days": args.lookback_days},
+            json={
+                "lookback_days": args.lookback_days,
+                "from_date": args.from_date,
+                "to_date": args.to_date,
+            },
             headers={"X-Internal-Token": token},
-            timeout=120,
+            # Generous: a wide historical window pages through a lot of
+            # Razorpay history before it answers.
+            timeout=600,
         )
     except requests.RequestException as exc:
         print(f"Could not reach {base_url}: {exc}", file=sys.stderr)
@@ -72,6 +104,19 @@ def main():
         return 1
 
     result = resp.json()
+
+    if result.get("report_only"):
+        payments = result["orphan_payments"]
+        window = f"{args.from_date} to {args.to_date or 'today'}"
+        print(f"REPORT ONLY ({window}) -- nothing was created or changed.\n")
+        if not payments:
+            print("No captured payments in this window are missing a donation.")
+            return 0
+        total = sum(p["amount"] for p in payments)
+        print(f"{len(payments)} captured payment(s) with no donation behind them, Rs. {total:,.2f}:")
+        for p in payments:
+            print(f"  {p['payment_id']} Rs. {p['amount']:>10,.2f} ({p['contact'] or 'no contact'})")
+        return 0
 
     created = result["created"]
     if created:
