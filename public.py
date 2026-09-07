@@ -1723,7 +1723,7 @@ def unreconciled_razorpay_payments(config, lookback_days=3, from_date=None, to_d
     trailing `lookback_days` that has no matching Donation anywhere in this
     app, neither via this site's own checkout flow nor the Zoho Forms
     webhook. This is the actual safety net behind
-    zoho_form_donation_webhook()/_zoho_payment_is_captured: those only ever
+    _zoho_payment_is_captured(): that only ever
     run when Zoho's webhook calls this app at all, carrying a transaction
     ID for this route to check. On this live account, a submission's first
     (and often only) call routinely carries no transaction ID yet -- the
