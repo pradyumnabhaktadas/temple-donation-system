@@ -244,7 +244,7 @@ def run_reconciliation_safely(app):
         # "still_waiting", "expired") from a queue that no longer exists.
         return {
             "created": [], "orphan_payments": [], "ignored_payments": [],
-            "report_only": False, "pruned": 0, "error": str(exc),
+            "report_only": False, "error": str(exc),
         }
 
 

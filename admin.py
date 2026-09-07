@@ -2495,6 +2495,7 @@ def zoho_forms():
         entry = ZohoForm(
             form_key=form_key[:150],
             display_name=(request.form.get("display_name") or "").strip()[:200] or None,
+            link_name=(request.form.get("link_name") or "").strip()[:150] or None,
             campaign_id=campaign_id,
             is_test=request.form.get("is_test") == "yes",
         )
@@ -2524,6 +2525,7 @@ def update_zoho_form(form_id):
         return redirect(url_for("admin.zoho_forms"))
 
     entry.display_name = (request.form.get("display_name") or "").strip()[:200] or None
+    entry.link_name = (request.form.get("link_name") or "").strip()[:150] or None
     entry.campaign_id = campaign_id
     entry.is_test = request.form.get("is_test") == "yes"
     entry.is_active = request.form.get("is_active") == "yes"

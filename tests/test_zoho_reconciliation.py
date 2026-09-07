@@ -28,6 +28,8 @@ import sys
 import time
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 TOKEN = "test-zoho-token"
@@ -68,30 +70,6 @@ def _payment(payment_id, amount_rupees, contact, minutes_after_submission=3,
     }
 
 
-def _submit_form(client, app, campaign="BACE Contribution", **overrides):
-    """Zoho's pre-payment call: the whole form, no transaction ID.
-
-    Recorded rather than discarded -- that record is what lets a later
-    call carrying the transaction ID be matched to its donor.
-
-    Defaults to a Non-80G campaign because that is what these forms are:
-    event registrations collecting a fee and no PAN."""
-    app.config["ZOHO_FORMS_WEBHOOK_TOKEN"] = TOKEN
-    app.config["RAZORPAY_ENABLED"] = True
-    payload = {
-        "full_name": "Zoho Donor",
-        "phone": "9811100011",
-        "amount": "100",
-        "payment_status": "processing",
-        "payment_transaction_id": "",
-    }
-    payload.update(overrides)
-    return client.post(
-        f"{URL}?campaign={campaign}", json=payload,
-        headers={"X-Zoho-Webhook-Token": TOKEN},
-    )
-
-
 def _setup_form(app, form_key="EBG", campaign_name="BACE Contribution", is_test=False):
     """A configured Zoho form, as Admin -> Zoho Forms would create it."""
     from extensions import db
@@ -114,20 +92,70 @@ def _reconcile(app, payments, **kwargs):
 
 
 
-def _record(form, transaction_id, full_name, phone, amount, payment_status="Completed"):
-    """One recorded Zoho call, as _record_zoho_submission would write it."""
-    import json as _json
-    from extensions import db
-    from models import ZohoSubmission
-    entry = ZohoSubmission(
-        campaign_id=form.campaign_id, full_name=full_name,
-        phone_normalized=phone, amount=amount, transaction_id=transaction_id,
-        payment_status=payment_status,
-        payload_json=_json.dumps({"full_name": full_name, "phone": phone}),
+_ZOHO_ENTRIES = {}
+
+
+@pytest.fixture(autouse=True)
+def _zoho_api(app):
+    """Serves whatever the test registered with _record(), in the shape
+    Zoho's own API returns. Autouse so no test can accidentally reach the
+    real API, and cleared per test so entries never leak between them."""
+    _ZOHO_ENTRIES.clear()
+    app.config.update(
+        ZOHO_CLIENT_ID="cid", ZOHO_CLIENT_SECRET="csec", ZOHO_REFRESH_TOKEN="rtok",
     )
-    db.session.add(entry)
-    db.session.commit()
-    return entry
+
+    def _entries(config, link_name, start_index=1, limit=200):
+        return (list(_ZOHO_ENTRIES.values()) if start_index == 1 else []), "records"
+
+    with patch("zoho_api.entries", side_effect=_entries):
+        yield
+
+
+def _record(form, transaction_id, full_name, phone, amount, payment_status="Completed"):
+    """One entry as Zoho's API returns it for this account: the composite
+    Name control, and the transaction as the combined
+    "Txn ID : pay_X Order ID : order_Y" string production actually sends."""
+    _ZOHO_ENTRIES[transaction_id] = {
+        "Name": full_name,
+        "Phone": phone,
+        "Payment Amount": str(amount),
+        "Payment Status": payment_status,
+        "Payment Transaction ID": (
+            f"Txn ID : {transaction_id} "
+            f"Order ID : {transaction_id.replace('pay_', 'order_')}"
+        ),
+        "Added Time": "04-Sep-2026 21:55:22",
+    }
+    return _ZOHO_ENTRIES[transaction_id]
+
+
+def _post_captured(client, app, payment_id, amount, contact, notes=None):
+    """A signed payment.captured event, as Razorpay sends it."""
+    import hashlib
+    import hmac as hmac_mod
+    import json as json_mod
+
+    app.config["RAZORPAY_WEBHOOK_SECRET"] = "wh-secret"
+    body = json_mod.dumps({
+        "event": "payment.captured",
+        "payload": {"payment": {"entity": {
+            "id": payment_id,
+            "order_id": payment_id.replace("pay_", "order_"),
+            "amount": int(round(amount * 100)),
+            "status": "captured",
+            "contact": contact,
+            "created_at": int(datetime.datetime.utcnow()
+                              .replace(tzinfo=datetime.timezone.utc).timestamp()),
+            "notes": notes if notes is not None else
+                     {"zform_custom": "iskcondwarka,EBG,tok"},
+        }}},
+    })
+    sig = hmac_mod.new(b"wh-secret", body.encode(), hashlib.sha256).hexdigest()
+    return client.post(
+        "/webhooks/razorpay", data=body,
+        headers={"Content-Type": "application/json", "X-Razorpay-Signature": sig},
+    )
 
 
 def _render_daily_email(summary):
@@ -497,7 +525,7 @@ class TestDailyReportSafetyNet:
         from daily_report_utils import run_reconciliation_safely
 
         form = _setup_form(app, form_key="EBG")
-        _record(form, "pay_Daily1", "shivam raj", "9319880507", 100)
+        _record(form, "pay_Daily1", "Shivam Raj", "9319880507", 100)
         pay = _payment("pay_Daily1", 100, "9319880507")
         pay["notes"] = {"zform_custom": "iskcondwarka,EBG,tok"}
 
@@ -522,7 +550,7 @@ class TestDailyReportSafetyNet:
         # report builder -- taking down the email as well as the sweep.
         assert set(summary) == {
             "created", "orphan_payments", "ignored_payments",
-            "report_only", "pruned", "error",
+            "report_only", "error",
         }
         _render_daily_email(summary)
 
@@ -552,17 +580,9 @@ class TestInternalRoute:
         assert resp.status_code == 502
 
     def test_it_reports_what_it_issued(self, client, app):
-        from models import ZohoSubmission
-        from extensions import db
-
         app.config["INTERNAL_TASK_TOKEN"] = "secret-token"
         form = _setup_form(app, form_key="EBG")
-        db.session.add(ZohoSubmission(
-            campaign_id=form.campaign_id, full_name="shivam raj",
-            phone_normalized="9319880507", amount=100,
-            transaction_id="pay_Route9", payload_json='{"phone": "9319880507"}',
-        ))
-        db.session.commit()
+        _record(form, "pay_Route9", "Shivam Raj", "9319880507", 100)
 
         pay = _payment("pay_Route9", 100, "9319880507")
         pay["notes"] = {"zform_custom": "iskcondwarka,EBG,tok"}
@@ -677,8 +697,12 @@ class TestTheDailyEmailCanRenderWhatReconciliationReturns:
         assert "Payment Reconciliation" not in _render_daily_email(summary)
 
     def test_an_unreceipted_payment_is_reported_with_its_reason(self, client, app):
-        """The reason is the actionable part: "form 'MYTE' isn't set up"
-        tells the reader what to do; a bare payment id does not."""
+        """The reason is the actionable part: "MYTE has no campaign set"
+        tells the reader exactly what to do; a bare payment id does not.
+
+        Note what it does *not* say any more -- "add it under Admin > Zoho
+        Forms". The form adds itself now; the only thing left for a person
+        is the campaign."""
         from public import reconcile_zoho_submissions
 
         app.config["RAZORPAY_ENABLED"] = True
@@ -690,13 +714,13 @@ class TestTheDailyEmailCanRenderWhatReconciliationReturns:
 
         html = _render_daily_email(summary)
         assert "pay_Unset1" in html
-        assert "MYTE" in html and "isn't set up" in html
+        assert "MYTE" in html and "no campaign set" in html
 
     def test_an_issued_receipt_is_reported(self, client, app):
         from public import reconcile_zoho_submissions
 
         form = _setup_form(app, form_key="EBG")
-        _record(form, "pay_Mail1", "shivam raj", "9319880507", 100)
+        _record(form, "pay_Mail1", "Shivam Raj", "9319880507", 100)
         pay = _payment("pay_Mail1", 100, "9319880507")
         pay["notes"] = {"zform_custom": "iskcondwarka,EBG,tok"}
 
@@ -706,154 +730,6 @@ class TestTheDailyEmailCanRenderWhatReconciliationReturns:
         html = _render_daily_email(summary)
         assert "1 receipt(s) issued" in html
         assert summary["created"][0].receipt_number in html
-
-
-class TestImmediateReceiptOnRazorpayWebhook:
-    """The receipt should land while the donor is still looking at the
-    confirmation screen, not up to an hour later.
-
-    Zoho's own webhook fires *before* the donor pays, so it can never tell
-    us a payment succeeded. Razorpay can, within seconds, on a channel
-    already configured and already signature-verified. This runs the same
-    matching the hourly job runs -- one code path, two triggers -- so the
-    gates below are the hourly job's gates, checked here because this is
-    the path that executes on every captured payment in production."""
-
-    SECRET = "wh-secret"
-
-    def _post_captured(self, client, app, payment_id, amount, contact, notes=None):
-        import hashlib
-        import hmac as hmac_mod
-        import json as json_mod
-
-        app.config["RAZORPAY_WEBHOOK_SECRET"] = self.SECRET
-        body = json_mod.dumps({
-            "event": "payment.captured",
-            "payload": {"payment": {"entity": {
-                "id": payment_id,
-                "order_id": payment_id.replace("pay_", "order_"),
-                "amount": int(round(amount * 100)),
-                "status": "captured",
-                "contact": contact,
-                "created_at": int(datetime.datetime.utcnow()
-                                  .replace(tzinfo=datetime.timezone.utc).timestamp()),
-                "notes": notes if notes is not None else
-                         {"zform_custom": "iskcondwarka,EBG,tok"},
-            }}},
-        })
-        sig = hmac_mod.new(self.SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
-        return client.post(
-            "/webhooks/razorpay", data=body,
-            headers={"Content-Type": "application/json", "X-Razorpay-Signature": sig},
-        )
-
-    def test_the_receipt_is_issued_the_moment_the_payment_lands(self, client, app):
-        from models import Donation
-
-        form = _setup_form(app, form_key="EBG")
-        _record(form, "pay_TY1ckLpy6lUDMr", "shivam raj", "9319880507", 100)
-
-        resp = self._post_captured(client, app, "pay_TY1ckLpy6lUDMr", 100, "+919319880507")
-
-        assert resp.status_code == 200
-        assert resp.get_json()["matched"] == "zoho_submission_transaction_id"
-        donation = Donation.query.one()
-        assert donation.donor.full_name == "shivam raj"
-        assert donation.receipt_number
-        assert donation.razorpay_payment_id == "pay_TY1ckLpy6lUDMr"
-
-    def test_the_amount_comes_from_razorpay_not_the_recorded_form(self, client, app):
-        """Razorpay is the authority on what was actually paid. A donor who
-        edited the amount at the checkout screen must be receipted for what
-        left their account."""
-        from models import Donation
-
-        form = _setup_form(app, form_key="EBG")
-        _record(form, "pay_Amt1", "shivam raj", "9319880507", 100)
-
-        self._post_captured(client, app, "pay_Amt1", 250, "+919319880507")
-
-        assert float(Donation.query.one().amount) == 250.0
-
-    def test_a_payer_no_record_can_name_is_left_for_the_hourly_job(self, client, app):
-        from models import Donation
-
-        _setup_form(app, form_key="EBG")
-        resp = self._post_captured(client, app, "pay_Stranger1", 100, "+919999999999")
-
-        assert resp.status_code == 200
-        assert resp.get_json().get("matched") is False
-        assert Donation.query.count() == 0
-
-    def test_an_unmapped_form_gets_no_instant_receipt(self, client, app):
-        from models import Donation
-
-        resp = self._post_captured(client, app, "pay_Unmapped1", 100, "+919319880507")
-
-        assert resp.status_code == 200
-        assert Donation.query.count() == 0
-
-    def test_a_test_form_gets_no_instant_receipt_either(self, client, app):
-        from models import Donation
-
-        form = _setup_form(app, form_key="TESTFORM", is_test=True)
-        _record(form, "pay_Test1", "shivam raj", "9319880507", 100)
-
-        self._post_captured(client, app, "pay_Test1", 100, "+919319880507",
-                            notes={"zform_custom": "iskcondwarka,TESTFORM,tok"})
-
-        assert Donation.query.count() == 0
-
-    def test_a_redelivered_webhook_does_not_receipt_twice(self, client, app):
-        """Razorpay redelivers on any non-2xx, and does so in production."""
-        from models import Donation
-
-        form = _setup_form(app, form_key="EBG")
-        _record(form, "pay_Dup1", "shivam raj", "9319880507", 100)
-
-        for _ in range(3):
-            self._post_captured(client, app, "pay_Dup1", 100, "+919319880507")
-
-        assert Donation.query.count() == 1
-
-    def test_this_sites_own_checkout_is_untouched(self, client, app):
-        """A website payment carries notes.donation_id and must go down the
-        site's own completion path, not be turned into a second donation."""
-        from extensions import db
-        from models import Campaign, Donation, Donor
-
-        _setup_form(app, form_key="EBG")
-        donor = Donor(full_name="Web Donor", phone="9000000009")
-        db.session.add(donor)
-        db.session.flush()
-        donation = Donation(
-            donor_id=donor.id, campaign_id=Campaign.query.first().id, amount=500,
-            status="pending", payment_mode="online",
-            razorpay_order_id="order_SiteOne",
-        )
-        db.session.add(donation)
-        db.session.commit()
-
-        self._post_captured(client, app, "pay_SiteOne", 500, "+919000000009",
-                            notes={"donation_id": str(donation.id), "campaign": "Annadan"})
-
-        assert Donation.query.count() == 1
-
-    def test_a_failure_in_here_never_costs_razorpay_a_2xx(self, client, app):
-        """This is a best-effort accelerator bolted onto a webhook that
-        does other work. If it raises, Razorpay retries the whole event --
-        so it must swallow its own failures and let the hourly job pick the
-        payment up."""
-        from models import Donation
-
-        form = _setup_form(app, form_key="EBG")
-        _record(form, "pay_Boom1", "shivam raj", "9319880507", 100)
-
-        with patch("public._receipt_matched_payments", side_effect=RuntimeError("boom")):
-            resp = self._post_captured(client, app, "pay_Boom1", 100, "+919319880507")
-
-        assert resp.status_code == 200
-        assert Donation.query.count() == 0
 
 
 class TestTheInternalRouteAcceptsADateRange:
@@ -892,58 +768,6 @@ class TestTheInternalRouteAcceptsADateRange:
         assert "MYTE" in orphan["why_not_receipted"]
 
 
-class TestTheWebhookPathMakesNoOutboundCall:
-    """Asserted explicitly rather than left to fail by accident.
-
-    These tests exposed this by blowing up on a sandbox with no network --
-    which means on a machine *with* network they would have passed while
-    the handler quietly made an API call per payment. The guarantee is
-    "no outbound call", so that is what gets asserted.
-
-    Why it matters: _zoho_payment_is_captured retries three times with a
-    2-second delay. A Razorpay hiccup would put 6+ seconds inside a webhook
-    handler, blow Razorpay's delivery timeout, and earn a redelivery of an
-    event this app had in fact already processed."""
-
-    def test_no_razorpay_api_call_is_made_from_the_webhook(self, client, app):
-        from models import Donation
-
-        form = _setup_form(app, form_key="EBG")
-        _record(form, "pay_NoCall1", "shivam raj", "9319880507", 100)
-
-        rz = MagicMock()
-        with patch("razorpay.Client", return_value=rz) as constructed:
-            resp = TestImmediateReceiptOnRazorpayWebhook()._post_captured(
-                client, app, "pay_NoCall1", 100, "+919319880507",
-            )
-
-        assert resp.status_code == 200
-        assert Donation.query.one().receipt_number
-        assert rz.payment.fetch.call_count == 0
-        assert constructed.call_count == 0
-
-    def test_the_hourly_job_still_confirms_every_payment(self, client, app):
-        """The other half of the same guarantee. Skipping the confirmation
-        is justified only by a verified signature, which the hourly scan
-        does not have -- it works from a bulk list read once."""
-        from public import reconcile_zoho_submissions
-
-        form = _setup_form(app, form_key="EBG")
-        _record(form, "pay_Confirm1", "shivam raj", "9319880507", 100)
-        pay = _payment("pay_Confirm1", 100, "9319880507")
-        pay["notes"] = {"zform_custom": "iskcondwarka,EBG,tok"}
-
-        rz = MagicMock()
-        rz.payment.all.return_value = {"items": [pay], "count": 1}
-        rz.payment.fetch.side_effect = lambda pid: {"id": pid, "status": "captured"}
-
-        with patch("razorpay.Client", return_value=rz):
-            summary = reconcile_zoho_submissions(app.config)
-
-        assert len(summary["created"]) == 1
-        assert rz.payment.fetch.call_args[0][0] == "pay_Confirm1"
-
-
 class TestAHandEnteredBackfillIsNotReceiptedTwice:
     """The duplicate case the outer handler cannot see.
 
@@ -964,9 +788,9 @@ class TestAHandEnteredBackfillIsNotReceiptedTwice:
         from models import Campaign, Donation, Donor
 
         form = _setup_form(app, form_key="EBG")
-        _record(form, payment_id, "shivam raj", "9319880507", 100)
+        _record(form, payment_id, "Shivam Raj", "9319880507", 100)
 
-        donor = Donor(full_name="shivam raj", phone="9319880507")
+        donor = Donor(full_name="Shivam Raj", phone="9319880507")
         db.session.add(donor)
         db.session.flush()
         db.session.add(Donation(
@@ -983,9 +807,7 @@ class TestAHandEnteredBackfillIsNotReceiptedTwice:
 
         self._record_and_backfill(app, "pay_Hand1")
 
-        resp = TestImmediateReceiptOnRazorpayWebhook()._post_captured(
-            client, app, "pay_Hand1", 100, "+919319880507",
-        )
+        resp = _post_captured(client, app, "pay_Hand1", 100, "+919319880507")
 
         assert resp.status_code == 200
         assert Donation.query.count() == 1

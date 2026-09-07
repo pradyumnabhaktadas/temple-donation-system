@@ -8,14 +8,18 @@ account it repeatedly hasn't: the donor's own Zoho record goes on to show
 only call this app ever received was the first one. The money arrives and
 nothing in the app knows about it -- no donor, no donation, no receipt.
 
-This job closes that gap without needing Zoho to behave. Every call Zoho
-makes is recorded locally as it arrives (see models.ZohoSubmission), and
-this job asks Razorpay which payments it actually captured, then matches
-each one to a recorded call **on the transaction ID and nothing else** --
-no phone, no amount, no timing. A match names the donor; the donation and
-receipt are then created exactly as the webhook would have. Anything
-unmatched is printed with the reason rather than guessed at. See
+The webhook is gone entirely, and nothing depends on it any more. This job
+asks Razorpay which payments it actually captured, then asks Zoho's own
+API who made each one, matching **on the transaction ID and nothing
+else** -- no phone, no amount, no timing. A match names the donor; the
+donation and receipt are created from there. Anything unmatched is printed
+with the reason rather than guessed at. See
 public.reconcile_zoho_submissions() for why the rules are that strict.
+
+Requires the Zoho API credentials (ZOHO_CLIENT_ID / ZOHO_CLIENT_SECRET /
+ZOHO_REFRESH_TOKEN). Without them every payment is simply reported, as it
+would be for any other unresolved payment -- nothing breaks, but nothing
+is receipted automatically either.
 
 Thin HTTP client on purpose, same as daily_report.py -- it POSTs to the
 already-running web app rather than doing the work itself, because that
@@ -69,11 +73,9 @@ def main():
         help=(
             "Scan a fixed historical window instead of the last N days. "
             "REPORT ONLY: it lists payments with no donation behind them and "
-            "changes nothing. Recorded Zoho calls are pruned after 30 days, so "
-            "an older window has a record for some of its payments and not "
-            "others -- issuing backdated receipts for an arbitrary subset of a "
-            "month is worse than issuing none. A person decides what to do "
-            "with the list."
+            "changes nothing. Issuing backdated 80G receipts for an old period "
+            "off the back of an automated scan is a decision for a person, not "
+            "a cron job -- so this prints what it found and stops."
         ),
     )
     parser.add_argument(

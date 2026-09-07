@@ -8,12 +8,17 @@
   automatically: Razorpay tells us a payment was captured and which form it came from,
   and this table says what that form's donations are for.
   <br><br>
-  The donor's name comes from the form's own webhook call, matched on the
-  <strong>transaction ID</strong> — so the one thing each form needs is a webhook
-  configured to send that ID. A form with a campaign set then gets its donations
-  receipted on its own. Without one, its payments are <em>reported</em> in the
-  reconciliation summary instead — never filed under a guessed campaign, because that
-  would quietly corrupt every figure this app reports on.
+  The donor's name comes from Zoho's own API, matched on the
+  <strong>transaction ID</strong> and nothing else — no webhook to configure, and it
+  works for payments of any age. <strong>The campaign below is the only thing that
+  needs setting.</strong> Without one, a form's payments are <em>reported</em> in the
+  reconciliation summary instead — never filed under a guessed campaign, because a
+  wrong campaign means a wrong 80G status on a tax receipt and corrupts every figure
+  this app reports on.
+  <br><br>
+  Rows appear here on their own: when a payment arrives from a form with no row, the
+  reconciliation job adds it using the exact name Razorpay recorded. You shouldn't
+  need to add one by hand.
 </p>
 
 <div class="card card-body shadow-sm mb-4" style="max-width:820px">
@@ -26,8 +31,8 @@
         <input type="text" class="form-control" name="form_key" id="form_key" required
                placeholder="EssenceofBhagavadGitaOnlyForBOYSP">
         <div class="form-text">
-          Copy it from the reconciliation report — it prints this exact name against
-          every unreceipted payment.
+          Usually filled in automatically. Only needed if you're adding a form before
+          its first payment arrives.
         </div>
       </div>
       <div class="col-md-6 mb-3">
@@ -91,6 +96,11 @@
         <label class="form-label small">Label</label>
         <input type="text" class="form-control form-control-sm" name="display_name"
                value="{{ f.display_name or '' }}">
+      </div>
+      <div class="col-md-3 mb-2">
+        <label class="form-label small">Zoho link name</label>
+        <input type="text" class="form-control form-control-sm" name="link_name"
+               value="{{ f.link_name or '' }}" placeholder="same as above">
       </div>
       <div class="col-md-5 mb-2">
         <label class="form-label small">Campaign</label>

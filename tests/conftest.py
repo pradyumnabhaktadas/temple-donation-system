@@ -48,7 +48,6 @@ def app(tmp_path):
             "PUBLIC_BASE_URL": "",
             "SMTP_HOST": "",
             "INTERNAL_TASK_TOKEN": "",
-            "ZOHO_FORMS_WEBHOOK_TOKEN": "",
 
             # Backups go to a temp directory, not instance/backups. Tests
             # that exercise the restore route trigger a real safety backup,

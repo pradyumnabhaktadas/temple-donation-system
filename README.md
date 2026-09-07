@@ -567,150 +567,39 @@ redeploy needed to add/remove a recipient.
   (same demo-mode pattern as everywhere else) — email delivery is
   unaffected either way.
 
-## Zoho Forms donations (webhook)
+## Zoho Forms donations
 
-Some collection happens through separate Zoho Forms (each with its own
-Razorpay-backed payment field configured inside Zoho, for donation
-campaigns that live outside this website) rather than this site's own
-`donate.html`. `public.zoho_form_donation_webhook` (`POST
-/internal/zoho-form-donation`) turns a completed payment on one of those
-forms into a real donation here, with a real receipt number and the same
-email/WhatsApp receipt this site's own online donations get.
+Some collection happens through separate Zoho Forms — event registrations,
+seminar fees, sponsorships — each with its own Razorpay-backed payment
+field configured inside Zoho, rather than this site's `donate.html`. Those
+donations still need donors, donations and receipts here.
 
-This route is only half of the integration — the other half is
-configuring each Zoho Form's own **Webhook** integration (Zoho Forms →
-that form → Integrations → Developer & Automation → Webhooks → Configure
-Webhook). This app has no way to do that part for you; do it once per
-Zoho Form:
+**There is no Zoho webhook any more.** There was one, and it could not do
+the job. Zoho Forms fires its webhook once, at *submission* time — before
+the donor has paid — so that call carries the whole form and no
+transaction ID. Zoho's docs say a second call follows with the payment
+result; on this account it repeatedly did not. It also had to be
+configured per form, and four of the six forms taking money in September
+2026 never were, so their donations were invisible here entirely. Two were
+found only because someone noticed a stale cell in Zoho's Reports grid
+days later:
 
-- **Webhook URL**: `https://<your-domain>/internal/zoho-form-donation`
-- **Content Type**: `application/json`
-- **URL Parameters**: add `campaign` with the exact name of the Campaign
-  in this site's Admin → Campaigns that this particular Zoho Form's
-  donations should be recorded under (one static value per form — this is
-  how multiple Zoho Forms all point at the same webhook URL but land in
-  different campaigns).
-- **Custom Headers**: add `X-Zoho-Webhook-Token` set to this app's
-  `ZOHO_FORMS_WEBHOOK_TOKEN` (same value as the Render env var below).
-- **Payload Parameters**: map each of these parameter names to the
-  matching field on that form (skip any that form doesn't collect —
-  everything but `amount`, `phone`, `payment_status` and
-  `payment_transaction_id` is optional):
-  `full_name`, `phone`, `whatsapp_number`, `email`, `pan`, `address`,
-  `city`, `state`, `pincode`, `amount`, `remarks`, `receipt_type` (send
-  `80g` or `non80g` if the form lets the donor choose; leave unmapped to
-  use the campaign's own fixed 80G/Non-80G default). For the payment
-  field itself, Zoho Forms exposes `Payment Amount`, `Payment Status` and
-  `Payment Transaction ID` as payload-parameter sources — map those to
-  `amount`, `payment_status` and `payment_transaction_id` respectively
-  (`Payment Amount` arrives as a plain decimal like `100.00`, no special
-  handling needed). Zoho's own `Payment Transaction ID` field isn't a bare
-  Razorpay payment ID — on a live account it's a combined string like
-  `Txn ID : pay_TWnsKWUifmlYnc Order ID : order_TWns42m6OljsvJ`; this
-  route pulls the `pay_...` and `order_...` pieces out of that string
-  itself, so map the field as-is and don't try to reformat it on the Zoho
-  side. In practice, though, a live webhook call's `payment_transaction_id`
-  has come through as just the bare `pay_...` id, without the order half
-  the Reports grid displays alongside it — Zoho only officially lists
-  Payment Amount/Status/Currency/Transaction ID as webhook-transferable
-  payment fields, not a separate Order ID. If that form's payment field
-  does expose an Order ID as its own selectable option under **Choose
-  Field**, add one more Payload Parameter named `payment_order_id` mapped
-  to it and this route will pick it up that way instead; if it doesn't,
-  the order ID is simply left blank on that donation (the payment ID
-  alone is what the receipt and idempotency check rely on — the order ID
-  is a nice-to-have, not required). `Payment Status` on a confirmed live account only ever reads
-  `Completed` (payment went through — the only value this route acts on),
-  `Processing` (still the early async call below) or `Processing not
-  needed` (no payment field was actually triggered on that submission) —
-  both of the latter are acknowledged and ignored, not errors.
-- Zoho sends the payment result **asynchronously** from the form
-  submission (an early "pending"/"processing" call, then in theory the
-  real outcome once the gateway responds) — Zoho's docs recommend
-  enabling the payment field's **workflow** option so the *final*
-  status/transaction ID reach this webhook directly instead of just the
-  early one; do that regardless. **But don't rely on it alone** — see the
-  next section for why this route no longer trusts `payment_status` as
-  the pass/fail gate.
+- "Me, You & The Ego", 03-Sep-2026, Rs. 100, Nandani Kumari
+- "Essence of Bhagavad Gita", 04-Sep-2026, Rs. 100, shivam raj
 
-### Why the pass/fail decision is Razorpay's, not Zoho's
-
-On a live account, the "final" webhook call has not reliably arrived even
-with **workflow** enabled: a real submission's own Zoho record went on to
-show `Payment Status: Completed`, but the *only* webhook call this route
-ever received for it carried `status: processing`, and no follow-up call
-ever came. Zoho counts a `200` response as a successfully delivered
-webhook regardless of what this route did with it, so there was nothing
-on Zoho's side to retry or alert on — the donation was silently lost.
-
-Because of that, `payment_status` is now advisory only, used solely to
-short-circuit a call that has no transaction ID at all yet (nothing to
-check). The actual pass/fail decision is made by asking **Razorpay
-directly** whether the extracted payment ID is captured
-(`public._zoho_payment_is_captured`, retried a few times via the same
-`utils.retry()` the daily report's sends use, to ride out a brief network
-hiccup talking to Razorpay). This means a donation can be created off the
-very first call this route ever receives for a given payment, regardless
-of what status label Zoho attached to it or whether Zoho ever sends a
-second call at all.
-
-This does mean `RAZORPAY_ENABLED`/`RAZORPAY_KEY_ID`/`RAZORPAY_KEY_SECRET`
-must be configured on this deployment for the Zoho integration to create
-anything — without them (or if Razorpay can't be reached after retrying),
-the route returns `502` rather than silently trusting Zoho's own label,
-so the call shows up in that Zoho Form's **Webhooks - Failed Entries**
-and can be manually re-pushed once Razorpay is reachable again, instead
-of the donation vanishing with no trace.
-
-Idempotency is keyed on `payment_transaction_id` (stored as
-`Donation.razorpay_payment_id`) — a redelivered or manually re-pushed
-webhook for a transaction already recorded is a no-op. See
-`public.zoho_form_donation_webhook`'s docstring for the one known gap in
-that (a same-millisecond duplicate delivery isn't fully closed by a
-database constraint) and why it's an accepted tradeoff rather than a
-migration.
-
-Every successful call is logged to **Admin → Settings → Activity Log**
-(`zoho_form_donation_received`) with the campaign, amount, and transaction
-ID, so a duplicate or a rejected submission (check the Zoho Form's own
-**Webhooks - Failed Entries** view for the latter — Zoho shows this
-route's error response there) is easy to trace back.
-
-### When Zoho never sends a payment call at all
-
-Everything above only helps when Zoho calls us with a transaction ID.
-Often it doesn't. Zoho fires its webhook once, at submission time —
-*before* the donor pays — so that call carries the form but no transaction
-ID, and the promised follow-up frequently never arrives. It also has to be
-configured per form: of the six forms taking money in September 2026, four
-never were, so their donations were invisible to this app entirely.
-
-| Date | Donor | Form | Zoho's own record | What we received |
-|---|---|---|---|---|
-| 03 Sep 2026 | Nandani Kumari | Me, You & The Ego | Completed, `pay_TXZJ0OU6EtNogX` | one call, no transaction ID |
-| 04 Sep 2026 | shivam raj | Essence of Bhagavad Gita | Completed, `pay_TY1ckLpy6lUDMr` | one call, no transaction ID |
-
-The money arrived and nothing here knew: no donor, no donation, no
-receipt, and no indication anything was missing. Both were found only
-because someone noticed a stale **Webhook Status** cell in Zoho's Reports
-grid days later.
-
-**The app no longer depends on that call.** Two sources cover it between
-them, and neither is asked a question it can't answer:
+Nothing needs configuring on the Zoho side now. Two sources cover this
+between them, and neither is asked a question it can't answer:
 
 - **Razorpay** knows which payments it captured and which have no donation
   behind them. It is the authority on whether a receipt is owed.
-- **This app's own record of every call Zoho makes** knows the donor's
-  name — the one thing Razorpay lacks. Every webhook call is written to
-  `zoho_submissions` as it arrives, whether or not it carries a payment,
-  the same way a Google Sheet records every submission. Rows older than 30
-  days are pruned automatically.
+- **Zoho's API** knows who made each one — the one thing Razorpay lacks.
+  It knows this for every form, however that form's webhook was set up,
+  and however long ago the payment was.
 
-`public.reconcile_zoho_submissions()` joins the two, hourly. The direction
-matters: letting Zoho decide whether a receipt is owed cannot work (the
-call that arrives has no payment ID, and Zoho's own Payment Status has
-been wrong in both directions), so the record is only ever asked *what the
-payer is called*.
+`public.reconcile_zoho_submissions()` joins the two, every 30 minutes. The
+direction matters: letting Zoho decide whether a receipt is owed cannot
+work — its own Payment Status column has been wrong in both directions —
+so Zoho is only ever asked *what the payer is called*.
 
 **The match is the transaction ID and nothing else.** No phone, no amount,
 no timing. Every hard case this feature ever hit came from inferring one:
@@ -721,51 +610,61 @@ donor who pays from a different number than they typed matches nothing.
 A guess that looks like a match is worse than no match — it produces a tax
 receipt in the wrong name and nobody notices.
 
-So this depends on each form's webhook being configured to send the
-transaction ID. That is the right place for the dependency: it is visible
-and fixable, unlike a silent mis-match. A payment whose ID never reached
-us is reported with exactly that reason.
+### What still needs a person
 
-**Each form is a row under Admin → Settings → Zoho Forms**, not a setting
-in the environment. There are six of these already and a new one appears
-whenever the temple runs a programme, so adding a seminar shouldn't need a
-redeploy — and whoever later wonders why a form's donations aren't being
-receipted can see the answer.
+**One dropdown per form**, under **Admin → Settings → Zoho Forms**.
 
-Each row carries:
+Forms add themselves: when a payment names a form with no row, the sweep
+creates one from the exact name in Razorpay's notes — no copying strings
+out of a log, where a typo would be silent and leave that form reported
+forever. What it deliberately does *not* do is guess the campaign. Which
+campaign a form's money belongs to, and whether it is 80G-eligible, is a
+judgement nothing in Razorpay's or Zoho's data contains, and guessing it
+would put the wrong 80G status on a tax receipt and corrupt every figure
+this app reports on. So an auto-created row receipts nothing until someone
+picks a campaign.
 
 | Field | What it's for |
 |---|---|
-| **Form name** | Exactly as Razorpay records it in the payment notes — the reconciliation report prints this, so copy it from there |
-| **Campaign** | Which campaign that form's donations are filed under |
+| **Form name** | Filled in automatically, exactly as Razorpay records it |
+| **Campaign** | The one thing to set. Until it is, that form's payments are reported, not receipted |
+| **Link name** | Only if Zoho's API knows the form by a different name than Razorpay does. Blank means "same" |
 | **Test form** | Its payments aren't real donations |
 
-A form with a campaign set gets its donations receipted automatically.
-Without one, its payments are *reported* instead — never filed under a
-guessed campaign, because that would quietly corrupt every figure this app
-reports on.
+### Everything fails towards reporting
 
-Everything fails towards reporting. A receipt is issued only when the
-payment names a Zoho form, that form is mapped with a campaign, a recorded
-Zoho call carries the same transaction ID, exactly one name is on it,
-Razorpay re-confirms that specific payment as captured, and the donation
-validates. Any of those failing leaves the payment on the report with the
-reason attached — and an unreachable Razorpay is **reported as an error,
-never read as "no payments exist"**, which is the reading that let
-donations go missing for weeks.
+A receipt is issued only when the payment names a Zoho form, that form has
+a campaign, Zoho's API returns exactly one entry carrying that transaction
+ID, that entry has a name, Razorpay re-confirms that specific payment as
+captured, and the donation validates. Any of those failing leaves the
+payment on the report **with the reason attached** — which is the part
+that gets acted on. "pay_X — Rs. 100" says money is unaccounted for;
+"'IGFForm' has no campaign set" says what to do about it.
 
-It runs hourly (`temple-zoho-reconcile`), and again from the daily report
-as a fallback, since this project's cron jobs have silently failed for
-days at a time before.
+Two distinctions the code is careful about, because collapsing either is
+how donations went missing before:
+
+- An unreachable **Razorpay** is an error, never "no payments exist".
+- An unreachable **Zoho** is reported, never "no entry for this payment".
+
+Receipts land within 30 minutes rather than seconds. The Razorpay webhook
+used to issue them on the spot, back when the donor's name was already in
+a local table — a database read. It isn't any more, and `zoho_api`'s
+timeouts (60s per read, 30s per token refresh, either repeatable on a 401
+retry) have no business inside a webhook handler: blowing Razorpay's
+delivery timeout earns a redelivery of an event already processed, trading
+a fast receipt for a retry storm.
 
 ```bash
 python zoho_reconcile.py                    # act on the last 3 days
 python zoho_reconcile.py --from 2026-08-01  # report only, changes nothing
 ```
 
-Receipts it issues appear in the Activity Log as `zoho_donation_reconciled`,
-distinct from `zoho_form_donation_received`, so you can tell which arrived
-normally and which had to be recovered.
+It runs every 30 minutes (`temple-zoho-reconcile`) and again from the daily
+report as a fallback, since this project's cron jobs have silently failed
+for days at a time before. Receipts it issues appear in the Activity Log as
+`zoho_donation_reconciled`, and forms it discovers as
+`zoho_form_discovered`.
 
 ### Importing a Zoho report by hand
 
