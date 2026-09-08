@@ -134,8 +134,8 @@ def _render_email_html(data, org_name):
         if rec.get("error"):
             blocks.append(
                 '<p style="margin:0 0 8px;"><strong>The payment reconciliation check could not run:</strong> '
-                f'{rec["error"]}<br><span style="color:#555;">Zoho Forms payments may be unreceipted until '
-                'this succeeds. It retries automatically every hour.</span></p>'
+                f'{rec["error"]}<br><span style="color:#555;">Check Admin &rarr; Zoho Reconcile by hand for '
+                "today until this succeeds -- it only retries on tomorrow's report.</span></p>"
             )
 
         if rec.get("created"):
@@ -218,24 +218,23 @@ def _recipient_is_due(recipient, report_date):
 
 
 def run_reconciliation_safely(app):
-    """Runs the Zoho/Razorpay reconciliation as part of the daily report,
-    and returns its summary for the report to display.
+    """Runs the Zoho/Razorpay reconciliation scan as part of the daily
+    report, and returns its summary for the report to display.
 
-    Belt and braces: reconciliation has its own hourly Cron Job
-    (render.yaml's "temple-zoho-reconcile"), but Cron Jobs need a Render
-    plan that supports them, and this project's *other* cron job spent
-    three consecutive days silently failing to do its work (see this
-    module's docstring and daily_report.py's). Hanging reconciliation off
-    the daily report as well means the worst case is a receipt issued the
-    next morning instead of within the hour -- not a payment lost
-    indefinitely, which is the failure this whole feature exists to end.
+    Report-only, deliberately: Zoho reconciliation is a manual, by-hand
+    process now (Admin > Zoho Reconcile lists the day's unreceipted
+    payments; Admin > Import Zoho Report turns that day's Zoho export into
+    donations/receipts). Nothing should auto-issue a receipt off the back
+    of a scheduled scan of an email nobody has read yet, so this always
+    passes report_only=True -- the email surfaces what's still
+    outstanding, a person decides what to do with it.
 
     Never raises: the daily report must still go out even if Razorpay is
     unreachable or reconciliation hits something unexpected. A failure
     here is reported inside the email rather than taking the email down."""
     try:
         from public import reconcile_zoho_submissions
-        return reconcile_zoho_submissions(app.config)
+        return reconcile_zoho_submissions(app.config, report_only=True)
     except Exception as exc:
         app.logger.exception("Zoho reconciliation from the daily report failed")
         # Same keys reconcile_zoho_submissions returns, so the email
@@ -244,7 +243,7 @@ def run_reconciliation_safely(app):
         # "still_waiting", "expired") from a queue that no longer exists.
         return {
             "created": [], "orphan_payments": [], "ignored_payments": [],
-            "report_only": False, "error": str(exc),
+            "report_only": True, "error": str(exc),
         }
 
 

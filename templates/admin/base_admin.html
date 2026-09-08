@@ -22,6 +22,7 @@
         {% if current_user.is_authenticated and current_user.role == 'admin' %}
         <a class="nav-link {% if request.endpoint == 'admin.import_legacy_donations' %}active{% endif %}" href="{{ url_for('admin.import_legacy_donations') }}">Import Historical Data</a>
         <a class="nav-link {% if request.endpoint == 'admin.import_zoho_report' %}active{% endif %}" href="{{ url_for('admin.import_zoho_report') }}">Import Zoho Report</a>
+        <a class="nav-link {% if request.endpoint == 'admin.zoho_reconcile' %}active{% endif %}" href="{{ url_for('admin.zoho_reconcile') }}">Zoho Reconcile</a>
         {% endif %}
 
         <div class="nav-item dropdown">
@@ -58,7 +59,6 @@
             <li><a class="dropdown-item {% if request.endpoint == 'admin.manage_users' %}active{% endif %}" href="{{ url_for('admin.manage_users') }}">Manage Users</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.activity_log' %}active{% endif %}" href="{{ url_for('admin.activity_log') }}">Activity Log</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.daily_report_recipients' %}active{% endif %}" href="{{ url_for('admin.daily_report_recipients') }}">Daily Report Recipients</a></li>
-            <li><a class="dropdown-item {% if request.endpoint == 'admin.zoho_forms' %}active{% endif %}" href="{{ url_for('admin.zoho_forms') }}">Zoho Forms</a></li>
             {% endif %}
           </ul>
         </div>

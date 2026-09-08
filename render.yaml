@@ -157,35 +157,14 @@ services:
       - key: INTERNAL_TASK_TOKEN
         sync: false   # same value as the web service's INTERNAL_TASK_TOKEN (generated there)
 
-  # Issues receipts for Zoho Forms payments Zoho never confirmed to us.
-  # Zoho fires its webhook once, before the donor pays (so it carries no
-  # transaction ID), and on this account frequently never calls again --
-  # leaving real, captured payments with no donation and no receipt
-  # anywhere in the app. This job matches those submissions against
-  # Razorpay's own record of captured payments and finishes the job. See
-  # zoho_reconcile.py and public.reconcile_zoho_submissions().
-  #
-  # Hourly, not daily: a donor who paid should get their receipt while
-  # they still remember donating. It's cheap (one Razorpay list call plus
-  # one confirm per match) and idempotent, so a run with nothing to do
-  # costs essentially nothing.
-  - type: cron
-    name: temple-zoho-reconcile
-    runtime: python
-    schedule: "7,37 * * * *"   # every 30 minutes, at 7 and 37 past -- off the
-                               # hour so it isn't competing with every other
-                               # cron on the platform. The immediate path in
-                               # _handle_payment_captured already receipts most
-                               # payments within seconds; this is the sweep for
-                               # the ones it couldn't, so half an hour is the
-                               # longest a donor should ever wait.
-    buildCommand: pip install -r requirements.txt
-    startCommand: python zoho_reconcile.py
-    envVars:
-      - key: PUBLIC_BASE_URL
-        sync: false   # the web service's own URL, e.g. https://givetokrishna.com
-      - key: INTERNAL_TASK_TOKEN
-        sync: false   # same value as the web service's INTERNAL_TASK_TOKEN (generated there)
+  # No automatic Zoho reconciliation cron any more (removed on request):
+  # receipts for Zoho Forms payments are now reviewed and issued by hand --
+  # see Admin > Zoho Reconcile (lists captured Razorpay payments still
+  # missing a donation for a given day) and Admin > Import Zoho Report
+  # (uploads that day's Zoho export to create the donations/receipts).
+  # The underlying scan (public.reconcile_zoho_submissions /
+  # zoho_reconcile.py / POST /internal/zoho-reconcile) still exists and is
+  # still tested, just nothing schedules it any more.
 
 databases:
   - name: temple-donation-db

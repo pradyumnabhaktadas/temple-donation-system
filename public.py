@@ -1903,7 +1903,7 @@ def unreconciled_razorpay_payments(config, lookback_days=3, from_date=None, to_d
 
 
 def reconcile_zoho_submissions(config, lookback_days=3, max_per_run=25,
-                               from_date=None, to_date=None):
+                               from_date=None, to_date=None, report_only=False):
     """Issues the receipts Zoho never told us to issue.
 
     Zoho Forms fires its webhook once, at submission time, *before* the
@@ -1942,7 +1942,11 @@ def reconcile_zoho_submissions(config, lookback_days=3, max_per_run=25,
 
     from_date/to_date switch to report-only: an explicit window means
     someone is auditing a historical period, and nothing should be written
-    on the strength of a scan of the past.
+    on the strength of a scan of the past. report_only forces the same
+    behaviour unconditionally -- the daily report uses it, since Zoho
+    reconciliation is a manual, by-hand process now (Admin > Zoho
+    Reconcile + Import Zoho Report): nothing should auto-issue a receipt
+    off the back of an email nobody has read yet.
 
     Returns a summary: created, the orphan payments nothing could explain
     (each with why_not_receipted where known), ignored test-form payments,
@@ -1974,7 +1978,7 @@ def reconcile_zoho_submissions(config, lookback_days=3, max_per_run=25,
     summary["ignored_payments"] = [p for p in payments if p.get("ignored")]
     payments = [p for p in payments if not p.get("ignored")]
 
-    if from_date is not None or to_date is not None:
+    if report_only or from_date is not None or to_date is not None:
         # Report-only. An explicit date range means someone is auditing a
         # historical period, and the receipt-writing half of this job has
         # no business running against it. Recorded Zoho calls are pruned

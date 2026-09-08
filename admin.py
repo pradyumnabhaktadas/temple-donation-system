@@ -20,7 +20,7 @@ from extensions import db, limiter
 from models import (
     Camp,
     Donor, Campaign, Donation, AdminUser, ReceiptCounter, BaceProperty, Festival, SevaType,
-    LiveToGivePurpose, Preacher, AssociatedWith, AdminActivityLog, DailyReportRecipient, ZohoForm,
+    LiveToGivePurpose, Preacher, AssociatedWith, AdminActivityLog, DailyReportRecipient,
     REPORT_FREQUENCIES,
     DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES, DONATION_FREQUENCY_LABELS,
 )
@@ -2454,103 +2454,38 @@ def _lookup_by_name(items_by_lower_name, raw_name, label, row_errors):
     return match.id
 
 
-@bp.route("/settings/zoho-forms", methods=["GET", "POST"])
+@bp.route("/donations/zoho-reconcile")
 @login_required
 @admin_role_required
-def zoho_forms():
-    """One row per Zoho Form that takes money: which campaign its
-    donations belong to, and where to read its submissions.
+def zoho_reconcile():
+    """Captured Razorpay payments for one day that still have no Donation
+    behind them -- the checklist to work from before uploading that day's
+    Zoho Forms report export through Import Zoho Report.
 
-    This is what lets reconciliation issue receipts on its own. Razorpay
-    tells us a payment was captured and which form it came from; this
-    table says what that form's donations are for and which Google Sheet
-    holds the donor's name. Without a row, a payment is reported rather
-    than receipted -- deliberately, since filing a donation under a
-    guessed campaign quietly corrupts every figure this app reports on.
-
-    A page rather than environment settings because there are six of these
-    already and a new one appears whenever the temple runs a new
-    programme. Adding a seminar shouldn't need a redeploy, and whoever
-    later wonders why a form's donations aren't being receipted should be
-    able to see the answer.
+    Deliberately read-only and Zoho-API-free: it's the same Razorpay-only
+    scan the daily report already runs (unreconciled_razorpay_payments),
+    narrowed to a single day, so there's no per-form Zoho call on page
+    load and no timeout/502 risk the way the earlier diagnostics page had.
     """
-    if request.method == "POST":
-        form_key = (request.form.get("form_key") or "").strip()
-        if not form_key:
-            flash("The form name from Razorpay's notes is required.")
-            return redirect(url_for("admin.zoho_forms"))
-
-        existing = ZohoForm.query.filter(
-            db.func.lower(ZohoForm.form_key) == form_key.lower()
-        ).first()
-        if existing:
-            flash(f"'{form_key}' is already set up.")
-            return redirect(url_for("admin.zoho_forms"))
-
-        campaign_id, error = _validated_id_from_form(request.form, "campaign_id", Campaign, "campaign")
-        if error:
-            flash(error)
-            return redirect(url_for("admin.zoho_forms"))
-
-        entry = ZohoForm(
-            form_key=form_key[:150],
-            display_name=(request.form.get("display_name") or "").strip()[:200] or None,
-            link_name=(request.form.get("link_name") or "").strip()[:150] or None,
-            campaign_id=campaign_id,
-            is_test=request.form.get("is_test") == "yes",
+    raw_date = (request.args.get("date") or "").strip()
+    try:
+        the_date = (
+            datetime.datetime.strptime(raw_date, "%Y-%m-%d").date() if raw_date else now_ist().date()
         )
-        db.session.add(entry)
-        db.session.commit()
-        log_activity("zoho_form_add", "zoho_form", entry.id, f"Added Zoho form '{form_key}'")
-        db.session.commit()
-        flash(f"'{entry.label}' added.")
-        return redirect(url_for("admin.zoho_forms"))
+    except ValueError:
+        flash(f"'{raw_date}' isn't a valid date (expected YYYY-MM-DD) -- showing today instead.")
+        the_date = now_ist().date()
 
-    return render_template(
-        "admin/zoho_forms.html",
-        forms=ZohoForm.query.order_by(ZohoForm.form_key).all(),
-        campaigns=Campaign.query.order_by(Campaign.name).all(),
+    from public import unreconciled_razorpay_payments
+    payments, error = unreconciled_razorpay_payments(
+        current_app.config, from_date=the_date, to_date=the_date,
     )
 
-
-@bp.route("/settings/zoho-forms/<int:form_id>/update", methods=["POST"])
-@login_required
-@admin_role_required
-def update_zoho_form(form_id):
-    entry = ZohoForm.query.get_or_404(form_id)
-
-    campaign_id, error = _validated_id_from_form(request.form, "campaign_id", Campaign, "campaign")
-    if error:
-        flash(error)
-        return redirect(url_for("admin.zoho_forms"))
-
-    entry.display_name = (request.form.get("display_name") or "").strip()[:200] or None
-    entry.link_name = (request.form.get("link_name") or "").strip()[:150] or None
-    entry.campaign_id = campaign_id
-    entry.is_test = request.form.get("is_test") == "yes"
-    entry.is_active = request.form.get("is_active") == "yes"
-    db.session.commit()
-    log_activity("zoho_form_edit", "zoho_form", entry.id, f"Edited Zoho form '{entry.form_key}'")
-    db.session.commit()
-    flash(f"'{entry.label}' updated.")
-    return redirect(url_for("admin.zoho_forms"))
-
-
-@bp.route("/settings/zoho-forms/<int:form_id>/delete", methods=["POST"])
-@login_required
-@admin_role_required
-def delete_zoho_form(form_id):
-    entry = ZohoForm.query.get_or_404(form_id)
-    label = entry.label
-    db.session.delete(entry)
-    db.session.commit()
-    log_activity("zoho_form_delete", "zoho_form", form_id, f"Removed Zoho form '{label}'")
-    db.session.commit()
-    # Removing a row doesn't touch any donation already receipted through
-    # it -- it only stops future payments from that form being receipted
-    # automatically. They'll be reported instead.
-    flash(f"'{label}' removed. Its payments will be reported rather than receipted.")
-    return redirect(url_for("admin.zoho_forms"))
+    return render_template(
+        "admin/zoho_reconcile.html",
+        payments=payments, error=error, the_date=the_date,
+        razorpay_enabled=bool(current_app.config.get("RAZORPAY_ENABLED")),
+    )
 
 
 @bp.route("/donations/import-zoho", methods=["GET", "POST"])

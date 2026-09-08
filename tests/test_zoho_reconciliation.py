@@ -515,12 +515,15 @@ class TestHistoricalScan:
 
 
 class TestDailyReportSafetyNet:
-    """Reconciliation also runs from the daily report, because this
-    project's cron jobs have silently failed for days at a time before."""
+    """Reconciliation also runs from the daily report -- report-only, on
+    request: Zoho reconciliation is a manual, by-hand process now (Admin >
+    Zoho Reconcile + Import Zoho Report), so a scheduled scan must never
+    auto-issue a receipt off the back of an email nobody has read yet."""
 
-    def test_the_daily_report_actually_issues_receipts(self, client, app):
+    def test_the_daily_report_never_issues_receipts_it_only_reports(self, client, app):
         """Not "it returned without an error" -- that passes if the call
-        is a stub. A receipt has to come out the far end."""
+        is a stub. A real captured payment that would have matched a Zoho
+        form must land in orphan_payments, not create a donation."""
         from models import Donation
         from daily_report_utils import run_reconciliation_safely
 
@@ -533,8 +536,10 @@ class TestDailyReportSafetyNet:
             summary = run_reconciliation_safely(app)
 
         assert summary["error"] is None
-        assert len(summary["created"]) == 1
-        assert Donation.query.one().receipt_number
+        assert summary["report_only"] is True
+        assert summary["created"] == []
+        assert [p["payment_id"] for p in summary["orphan_payments"]] == ["pay_Daily1"]
+        assert Donation.query.count() == 0
 
     def test_a_reconciliation_failure_never_stops_the_daily_report(self, app):
         """The report going out matters more than the sweep succeeding."""

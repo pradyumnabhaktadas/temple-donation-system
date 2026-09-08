@@ -587,92 +587,25 @@ days later:
 - "Me, You & The Ego", 03-Sep-2026, Rs. 100, Nandani Kumari
 - "Essence of Bhagavad Gita", 04-Sep-2026, Rs. 100, shivam raj
 
-Nothing needs configuring on the Zoho side now. Two sources cover this
-between them, and neither is asked a question it can't answer:
+**Reconciliation is a manual, by-hand process, on request** — there is no
+cron sweeping Razorpay and Zoho's API together and auto-issuing receipts
+any more, and no per-form settings page. Two admin pages cover the whole
+workflow between them:
 
-- **Razorpay** knows which payments it captured and which have no donation
-  behind them. It is the authority on whether a receipt is owed.
-- **Zoho's API** knows who made each one — the one thing Razorpay lacks.
-  It knows this for every form, however that form's webhook was set up,
-  and however long ago the payment was.
+### Admin → Zoho Reconcile
 
-`public.reconcile_zoho_submissions()` joins the two, every 30 minutes. The
-direction matters: letting Zoho decide whether a receipt is owed cannot
-work — its own Payment Status column has been wrong in both directions —
-so Zoho is only ever asked *what the payer is called*.
+A single date in, a list out: every Razorpay payment captured that day
+that still has no donation/receipt behind it (payment ID, amount, contact,
+email, time). Purely a read of Razorpay plus this app's own donations
+table — no Zoho API call, so no per-form fan-out and nothing that can time
+out a web worker the way an earlier diagnostics page once did. It's the
+checklist to work from before touching Zoho at all.
 
-**The match is the transaction ID and nothing else.** No phone, no amount,
-no timing. Every hard case this feature ever hit came from inferring one:
-two submissions from one donor are indistinguishable from one submission
-paid for twice, and those need opposite handling (two receipts, versus one
-receipt and a refund); a shared family phone names the wrong person; a
-donor who pays from a different number than they typed matches nothing.
-A guess that looks like a match is worse than no match — it produces a tax
-receipt in the wrong name and nobody notices.
+### Admin → Import Zoho Report
 
-### What still needs a person
-
-**One dropdown per form**, under **Admin → Settings → Zoho Forms**.
-
-Forms add themselves: when a payment names a form with no row, the sweep
-creates one from the exact name in Razorpay's notes — no copying strings
-out of a log, where a typo would be silent and leave that form reported
-forever. What it deliberately does *not* do is guess the campaign. Which
-campaign a form's money belongs to, and whether it is 80G-eligible, is a
-judgement nothing in Razorpay's or Zoho's data contains, and guessing it
-would put the wrong 80G status on a tax receipt and corrupt every figure
-this app reports on. So an auto-created row receipts nothing until someone
-picks a campaign.
-
-| Field | What it's for |
-|---|---|
-| **Form name** | Filled in automatically, exactly as Razorpay records it |
-| **Campaign** | The one thing to set. Until it is, that form's payments are reported, not receipted |
-| **Link name** | Only if Zoho's API knows the form by a different name than Razorpay does. Blank means "same" |
-| **Test form** | Its payments aren't real donations |
-
-### Everything fails towards reporting
-
-A receipt is issued only when the payment names a Zoho form, that form has
-a campaign, Zoho's API returns exactly one entry carrying that transaction
-ID, that entry has a name, Razorpay re-confirms that specific payment as
-captured, and the donation validates. Any of those failing leaves the
-payment on the report **with the reason attached** — which is the part
-that gets acted on. "pay_X — Rs. 100" says money is unaccounted for;
-"'IGFForm' has no campaign set" says what to do about it.
-
-Two distinctions the code is careful about, because collapsing either is
-how donations went missing before:
-
-- An unreachable **Razorpay** is an error, never "no payments exist".
-- An unreachable **Zoho** is reported, never "no entry for this payment".
-
-Receipts land within 30 minutes rather than seconds. The Razorpay webhook
-used to issue them on the spot, back when the donor's name was already in
-a local table — a database read. It isn't any more, and `zoho_api`'s
-timeouts (60s per read, 30s per token refresh, either repeatable on a 401
-retry) have no business inside a webhook handler: blowing Razorpay's
-delivery timeout earns a redelivery of an event already processed, trading
-a fast receipt for a retry storm.
-
-```bash
-python zoho_reconcile.py                    # act on the last 3 days
-python zoho_reconcile.py --from 2026-08-01  # report only, changes nothing
-```
-
-It runs every 30 minutes (`temple-zoho-reconcile`) and again from the daily
-report as a fallback, since this project's cron jobs have silently failed
-for days at a time before. Receipts it issues appear in the Activity Log as
-`zoho_donation_reconciled`, and forms it discovers as
-`zoho_form_discovered`.
-
-### Importing a Zoho report by hand
-
-**Admin → Import Zoho Report** is the manual counterpart, for history and
-for history predating this feature and for forms whose webhook was
-never configured. Export the form's
-report from Zoho — it must include the **Payment Transaction ID** column —
-choose the campaign, and Preview first.
+The way those payments actually become donations and receipts. Export the
+form's report from Zoho for that day — it must include the **Payment
+Transaction ID** column — choose the campaign, and Preview first.
 
 Every row is checked against Razorpay; only payments it confirms as
 captured become receipts. Rows without a payment (cash registrations,
@@ -684,6 +617,31 @@ hand-entered backfills are recognised rather than duplicated.
 Receipt notifications are off by default here — a donor who gave six weeks
 ago shouldn't get a receipt reading as though it just happened. The
 receipt is still issued and stored either way.
+
+**The match, when it happens, is the transaction ID and nothing else.** No
+phone, no amount, no timing. Every hard case this feature ever hit came
+from inferring one: two submissions from one donor are indistinguishable
+from one submission paid for twice, and those need opposite handling (two
+receipts, versus one receipt and a refund); a shared family phone names
+the wrong person; a donor who pays from a different number than they typed
+matches nothing. A guess that looks like a match is worse than no match —
+it produces a tax receipt in the wrong name and nobody notices.
+
+### The old automatic sweep still exists, just isn't scheduled
+
+`public.reconcile_zoho_submissions()` (Razorpay decides a receipt is owed,
+Zoho's API is only ever asked *what the payer is called*, matched on
+transaction ID) and its CLI wrapper `zoho_reconcile.py` are still in the
+codebase and still tested, but nothing calls either automatically any
+more — no `render.yaml` cron, and the daily report's own call now always
+passes `report_only=True`, so it only ever lists what's outstanding in the
+email, never issues a receipt off the back of a scheduled scan. Run it by
+hand if you ever want it back:
+
+```bash
+python zoho_reconcile.py                    # act on the last 3 days
+python zoho_reconcile.py --from 2026-08-01  # report only, changes nothing
+```
 
 
 ## Running the tests
