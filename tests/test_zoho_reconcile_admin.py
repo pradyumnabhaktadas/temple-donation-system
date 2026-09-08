@@ -1,10 +1,10 @@
-"""Tests for Admin -> Zoho Reconcile: the read-only, date-scoped list of
-captured Razorpay payments still missing a donation/receipt.
+"""Tests for Admin -> Zoho Reconcile: the read-only, date-range-scoped
+list of captured Razorpay payments still missing a donation/receipt.
 
 This replaces the automatic hourly/daily reconciliation for day-to-day use
 -- Zoho reconciliation is manual now (this page to see what's outstanding,
-then Import Zoho Report to turn that day's Zoho export into receipts) --
-so the page itself must make no Zoho API call and change nothing, just
+then Import Zoho Report to turn that period's Zoho export into receipts)
+-- so the page itself must make no Zoho API call and change nothing, just
 read Razorpay + this app's own donations table. See public.py's
 unreconciled_razorpay_payments(), which this page is a thin wrapper
 around.
@@ -53,7 +53,7 @@ def test_lists_a_captured_payment_with_no_donation_behind_it(client, app):
     pay = _payment("pay_Orphan1", 251, "9319880507", when)
 
     with _razorpay([pay]):
-        resp = client.get(f"{URL}?date=2026-09-05")
+        resp = client.get(f"{URL}?from=2026-09-05&to=2026-09-05")
 
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
@@ -84,16 +84,16 @@ def test_a_payment_already_recorded_does_not_appear(client, app):
     db.session.commit()
 
     with _razorpay([pay]):
-        resp = client.get(f"{URL}?date=2026-09-05")
+        resp = client.get(f"{URL}?from=2026-09-05&to=2026-09-05")
 
     assert resp.status_code == 200
     assert "pay_Done1" not in resp.get_data(as_text=True)
 
 
-def test_date_param_scopes_the_razorpay_window_to_that_day(client, app):
-    """The page hands the chosen date straight to Razorpay as a one-day
-    from/to window -- Razorpay is what actually filters, so what this can
-    check is that the right window is asked for, the same way
+def test_a_single_date_scopes_the_razorpay_window_to_that_day(client, app):
+    """The page hands the chosen range straight to Razorpay as a from/to
+    window -- Razorpay is what actually filters, so what this can check is
+    that the right window is asked for, the same way
     unreconciled_razorpay_payments' own tests do."""
     app.config["RAZORPAY_ENABLED"] = True
     seen = {}
@@ -105,14 +105,39 @@ def test_date_param_scopes_the_razorpay_window_to_that_day(client, app):
 
     client_mock.payment.all.side_effect = _record
     with patch("razorpay.Client", return_value=client_mock):
-        resp = client.get(f"{URL}?date=2026-09-05")
+        resp = client.get(f"{URL}?from=2026-09-05&to=2026-09-05")
 
     assert resp.status_code == 200
     assert seen["from"] == datetime.datetime(2026, 9, 5, tzinfo=datetime.timezone.utc).timestamp()
     assert seen["to"] == datetime.datetime(2026, 9, 6, tzinfo=datetime.timezone.utc).timestamp()
 
 
-def test_no_date_defaults_to_today_without_error(client, app):
+def test_a_multi_day_range_covers_every_day_in_it(client, app):
+    app.config["RAZORPAY_ENABLED"] = True
+    day1 = _payment("pay_Day1", 100, "9000000001", datetime.datetime(2026, 9, 5, 9, 0))
+    day3 = _payment("pay_Day3", 100, "9000000002", datetime.datetime(2026, 9, 7, 9, 0))
+
+    with _razorpay([day1, day3]):
+        resp = client.get(f"{URL}?from=2026-09-05&to=2026-09-07")
+
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "pay_Day1" in body
+    assert "pay_Day3" in body
+
+
+def test_from_after_till_is_swapped_rather_than_returning_nothing(client, app):
+    app.config["RAZORPAY_ENABLED"] = True
+    pay = _payment("pay_Swapped", 100, "9000000003", datetime.datetime(2026, 9, 5, 9, 0))
+
+    with _razorpay([pay]):
+        resp = client.get(f"{URL}?from=2026-09-07&to=2026-09-05")
+
+    assert resp.status_code == 200
+    assert "pay_Swapped" in resp.get_data(as_text=True)
+
+
+def test_no_range_defaults_to_today_without_error(client, app):
     app.config["RAZORPAY_ENABLED"] = True
     with _razorpay([]):
         resp = client.get(URL)
@@ -122,7 +147,7 @@ def test_no_date_defaults_to_today_without_error(client, app):
 def test_an_invalid_date_falls_back_to_today_rather_than_500ing(client, app):
     app.config["RAZORPAY_ENABLED"] = True
     with _razorpay([]):
-        resp = client.get(f"{URL}?date=not-a-date")
+        resp = client.get(f"{URL}?from=not-a-date&to=also-not-a-date")
     assert resp.status_code == 200
 
 
@@ -152,7 +177,7 @@ def test_a_test_form_payment_still_shows_up_but_flagged(client, app):
     )
 
     with _razorpay([pay]):
-        resp = client.get(f"{URL}?date=2026-09-05")
+        resp = client.get(f"{URL}?from=2026-09-05&to=2026-09-05")
 
     body = resp.get_data(as_text=True)
     assert "pay_TestForm1" in body

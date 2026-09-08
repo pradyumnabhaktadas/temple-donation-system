@@ -2454,36 +2454,48 @@ def _lookup_by_name(items_by_lower_name, raw_name, label, row_errors):
     return match.id
 
 
+def _parse_admin_date(raw, default):
+    """One YYYY-MM-DD query param -> a date, falling back to `default`
+    (with a flash) on anything blank or unparseable. Shared by
+    zoho_reconcile's from/to fields rather than duplicated."""
+    raw = (raw or "").strip()
+    if not raw:
+        return default
+    try:
+        return datetime.datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError:
+        flash(f"'{raw}' isn't a valid date (expected YYYY-MM-DD) -- showing today instead.")
+        return default
+
+
 @bp.route("/donations/zoho-reconcile")
 @login_required
 @admin_role_required
 def zoho_reconcile():
-    """Captured Razorpay payments for one day that still have no Donation
-    behind them -- the checklist to work from before uploading that day's
-    Zoho Forms report export through Import Zoho Report.
+    """Captured Razorpay payments in a date range that still have no
+    Donation behind them -- the checklist to work from before uploading
+    that period's Zoho Forms report export through Import Zoho Report.
 
     Deliberately read-only and Zoho-API-free: it's the same Razorpay-only
     scan the daily report already runs (unreconciled_razorpay_payments),
-    narrowed to a single day, so there's no per-form Zoho call on page
-    load and no timeout/502 risk the way the earlier diagnostics page had.
+    so there's no per-form Zoho call on page load and no timeout/502 risk
+    the way the earlier diagnostics page had.
     """
-    raw_date = (request.args.get("date") or "").strip()
-    try:
-        the_date = (
-            datetime.datetime.strptime(raw_date, "%Y-%m-%d").date() if raw_date else now_ist().date()
-        )
-    except ValueError:
-        flash(f"'{raw_date}' isn't a valid date (expected YYYY-MM-DD) -- showing today instead.")
-        the_date = now_ist().date()
+    today = now_ist().date()
+    from_date = _parse_admin_date(request.args.get("from"), today)
+    to_date = _parse_admin_date(request.args.get("to"), today)
+    if from_date > to_date:
+        flash("The 'from' date was after the 'till' date -- swapped them.")
+        from_date, to_date = to_date, from_date
 
     from public import unreconciled_razorpay_payments
     payments, error = unreconciled_razorpay_payments(
-        current_app.config, from_date=the_date, to_date=the_date,
+        current_app.config, from_date=from_date, to_date=to_date,
     )
 
     return render_template(
         "admin/zoho_reconcile.html",
-        payments=payments, error=error, the_date=the_date,
+        payments=payments, error=error, from_date=from_date, to_date=to_date, today=today,
         razorpay_enabled=bool(current_app.config.get("RAZORPAY_ENABLED")),
     )
 
