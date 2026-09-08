@@ -29,7 +29,6 @@ import zipfile
 from models import (
     Donor, Donation, Campaign, BaceProperty, Festival, SevaType,
     LiveToGivePurpose, Preacher, AssociatedWith, ReceiptCounter, DailyReportRecipient,
-    ZohoForm,
 )
 
 # (CSV filename, model, columns-to-exclude) -- one entry per table included
@@ -44,12 +43,6 @@ _BACKUP_TABLES = [
     ("live_to_give_purposes.csv", LiveToGivePurpose, []),
     ("associated_withs.csv", AssociatedWith, []),
     ("daily_report_recipients.csv", DailyReportRecipient, []),
-    # After campaigns -- it points at them. This is the only hand-entered
-    # configuration left in the Zoho flow: which campaign each form's money
-    # belongs to. Restoring without it would silently leave every form with
-    # no campaign, which stops receipts being issued and shows up only as a
-    # growing list on the reconciliation report.
-    ("zoho_forms.csv", ZohoForm, []),
     ("donors.csv", Donor, []),
     ("donations.csv", Donation, ["receipt_pdf", "razorpay_raw_payload"]),
     ("receipt_counters.csv", ReceiptCounter, []),

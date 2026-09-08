@@ -12,7 +12,6 @@ donations". That's the same silent-nothing failure that let Zoho's
 webhook lose donations for weeks, so it fails loudly or not at all.
 """
 import os
-import time
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -188,55 +187,3 @@ class TestErrorsAreLoud:
              patch("zoho_api.requests.get", side_effect=real_requests.RequestException("dns")):
             with pytest.raises(zoho_api.ZohoApiError):
                 zoho_api.get(CONFIG, "/api/x/records")
-
-
-class TestTheCallerChoosesHowLongToWait:
-    """zoho_api's defaults (60s per read, 30s for a token refresh, either
-    repeatable on a 401) exceed gunicorn's 30s worker timeout. Anything
-    running inside a web request has to be able to ask for less, or it
-    turns into a 502 rather than a report that Zoho is slow -- which is
-    the failure that made the diagnostics page necessary.
-
-    Tested here rather than only at the caller: a test that checks admin
-    passes timeout= to a mocked entries() proves nothing about whether
-    entries() forwards it to requests. It didn't, and that test passed.
-    """
-
-    def _config(self):
-        return {
-            "ZOHO_CLIENT_ID": "cid", "ZOHO_CLIENT_SECRET": "csec",
-            "ZOHO_REFRESH_TOKEN": "rtok",
-            "ZOHO_ACCOUNTS_BASE": "https://accounts.zoho.in",
-            "ZOHO_API_BASE": "https://forms.zoho.in",
-        }
-
-    def test_entries_forwards_the_timeout_to_the_http_read(self):
-        import zoho_api
-        zoho_api._token_cache["access_token"] = "tok"
-        zoho_api._token_cache["expires_at"] = time.time() + 3600
-        with patch("zoho_api.requests.get",
-                   return_value=_response(json_body={"records": []})) as http:
-            zoho_api.entries(self._config(), "EBG", timeout=8)
-        assert http.call_args.kwargs["timeout"] == 8
-
-    def test_the_token_exchange_honours_it_too(self):
-        """The refresh is the other half of the wait, and it is the half
-        that happens on a cold process -- exactly when a page is loaded."""
-        import zoho_api
-        zoho_api._token_cache["access_token"] = None
-        zoho_api._token_cache["expires_at"] = 0
-        with patch("zoho_api.requests.post",
-                   return_value=_response(json_body={"access_token": "t", "expires_in": 3600})) as post, \
-             patch("zoho_api.requests.get", return_value=_response(json_body={"records": []})):
-            zoho_api.entries(self._config(), "EBG", timeout=8)
-        assert post.call_args.kwargs["timeout"] == 8
-
-    def test_the_default_is_unchanged_for_background_callers(self):
-        """The sweep can afford to wait; nothing about it should change."""
-        import zoho_api
-        zoho_api._token_cache["access_token"] = "tok"
-        zoho_api._token_cache["expires_at"] = time.time() + 3600
-        with patch("zoho_api.requests.get",
-                   return_value=_response(json_body={"records": []})) as http:
-            zoho_api.entries(self._config(), "EBG")
-        assert http.call_args.kwargs["timeout"] == zoho_api.DEFAULT_READ_TIMEOUT

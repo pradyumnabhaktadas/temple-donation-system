@@ -32,6 +32,8 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+TOKEN = "test-zoho-token"
+URL = "/internal/zoho-form-donation"
 
 
 def _razorpay(payments, fetch_status="captured", all_side_effect=None):
