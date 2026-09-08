@@ -290,6 +290,17 @@ def main():
     config = _config()
 
     if args.diagnose:
+        # Only needs the database when it has to look up which forms are
+        # configured; an explicit --form asks Zoho directly and is fine
+        # anywhere the credentials are set.
+        if not args.form:
+            from app import create_app
+            from cli_safety import require_configured_database
+            if not require_configured_database(
+                create_app(), purpose="list the Zoho forms configured in production"
+            ):
+                return 2
+
         forms = _forms_to_diagnose(config, args.form)
         if not forms:
             print("No forms to check: pass --form <link_name>, or configure one under")

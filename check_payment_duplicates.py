@@ -47,7 +47,12 @@ Usage (Render Shell):
     python check_payment_duplicates.py
 
 Exit code 0 means clean and the constraint can be added. Exit code 1 means
-duplicates exist and need a decision first.
+duplicates exist and need a decision first. Exit code 2 means it refused to
+answer, because DATABASE_URL was not set and it would have been reporting on
+a database that isn't yours -- see cli_safety.py.
+
+Run it in the Shell of the WEB SERVICE. A cron job's shell has no
+DATABASE_URL and will be refused.
 """
 import collections
 import os
@@ -88,9 +93,15 @@ def find_duplicates(donations):
 
 def main():
     from app import create_app
+    from cli_safety import require_configured_database
     from models import Donation
 
     app = create_app()
+    if not require_configured_database(
+        app, purpose="say whether a unique constraint can be added to a production table"
+    ):
+        return 2
+
     with app.app_context():
         donations = Donation.query.order_by(Donation.id).all()
         duplicates, simulated = find_duplicates(donations)
