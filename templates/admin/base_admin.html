@@ -59,6 +59,7 @@
             <li><a class="dropdown-item {% if request.endpoint == 'admin.activity_log' %}active{% endif %}" href="{{ url_for('admin.activity_log') }}">Activity Log</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.daily_report_recipients' %}active{% endif %}" href="{{ url_for('admin.daily_report_recipients') }}">Daily Report Recipients</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.zoho_forms' %}active{% endif %}" href="{{ url_for('admin.zoho_forms') }}">Zoho Forms</a></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'admin.zoho_diagnostics' %}active{% endif %}" href="{{ url_for('admin.zoho_diagnostics') }}">Zoho Diagnostics</a></li>
             {% endif %}
           </ul>
         </div>

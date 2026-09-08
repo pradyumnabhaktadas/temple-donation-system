@@ -71,7 +71,16 @@ def _require(config, *keys):
         )
 
 
-def _token(config, force_refresh=False):
+# Whoever is waiting decides how long to wait. A background sweep can
+# afford a minute; a web request cannot -- gunicorn's worker timeout on
+# this deployment is 30 seconds, so a diagnostics page using the default
+# would 502 rather than report that Zoho is slow, which is the one thing
+# it exists to report.
+DEFAULT_TOKEN_TIMEOUT = 30
+DEFAULT_READ_TIMEOUT = 60
+
+
+def _token(config, force_refresh=False, timeout=DEFAULT_TOKEN_TIMEOUT):
     """Returns a valid access token, exchanging the refresh token when the
     cached one is missing or close to expiry."""
     _require(config, "ZOHO_CLIENT_ID", "ZOHO_CLIENT_SECRET", "ZOHO_REFRESH_TOKEN")
@@ -87,7 +96,7 @@ def _token(config, force_refresh=False):
             "client_id": config["ZOHO_CLIENT_ID"],
             "client_secret": config["ZOHO_CLIENT_SECRET"],
             "grant_type": "refresh_token",
-        }, timeout=30)
+        }, timeout=timeout)
     except requests.RequestException as exc:
         raise ZohoApiError(f"Couldn't reach Zoho accounts at {url}: {exc}") from exc
 
@@ -114,7 +123,7 @@ def _token(config, force_refresh=False):
     return access_token
 
 
-def get(config, path, params=None, _retried=False):
+def get(config, path, params=None, _retried=False, timeout=None):
     """One authenticated GET against the Forms API. Returns parsed JSON.
 
     Retries once on a 401 with a freshly minted token, since the usual
@@ -122,20 +131,24 @@ def get(config, path, params=None, _retried=False):
     retry, but only one, so a genuinely revoked credential still fails
     loudly instead of looping."""
     url = config["ZOHO_API_BASE"].rstrip("/") + "/" + path.lstrip("/")
-    token = _token(config, force_refresh=_retried)
+    read_timeout = DEFAULT_READ_TIMEOUT if timeout is None else timeout
+    token = _token(
+        config, force_refresh=_retried,
+        timeout=DEFAULT_TOKEN_TIMEOUT if timeout is None else timeout,
+    )
 
     try:
         resp = requests.get(
             url,
             headers={"Authorization": f"Zoho-oauthtoken {token}"},
             params=params or {},
-            timeout=60,
+            timeout=read_timeout,
         )
     except requests.RequestException as exc:
         raise ZohoApiError(f"Couldn't reach Zoho at {url}: {exc}") from exc
 
     if resp.status_code == 401 and not _retried:
-        return get(config, path, params=params, _retried=True)
+        return get(config, path, params=params, _retried=True, timeout=timeout)
 
     if resp.status_code >= 400:
         raise ZohoApiError(f"Zoho returned {resp.status_code} for {url}: {resp.text[:300]}")
@@ -180,7 +193,7 @@ def _records_from(body):
     return [], None
 
 
-def entries(config, form_link_name, start_index=1, limit=200):
+def entries(config, form_link_name, start_index=1, limit=200, timeout=None):
     """One page of entries for a form. Returns (records, envelope_key).
 
     start_index is 1-based, matching Zoho's own convention. The caller
@@ -190,5 +203,6 @@ def entries(config, form_link_name, start_index=1, limit=200):
         config,
         f"/api/{form_link_name}/records",
         params={"from": start_index, "limit": limit},
+        timeout=timeout,
     )
     return _records_from(body)

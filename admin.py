@@ -2513,6 +2513,141 @@ def zoho_forms():
     )
 
 
+def _zoho_diagnostics(deep=False):
+    """Everything needed to decide whether Zoho donations can be receipted
+    automatically, gathered in one place and read-only.
+
+    A page rather than a shell script, because the shell was the problem.
+    The same checks were written as CLI scripts first; running them meant
+    picking the right Render service (the cron job's shell has no
+    DATABASE_URL and silently answers about an empty SQLite file it just
+    created), pasting a command that the web shell mangles across line
+    breaks, and holding a connection that drops. Three attempts produced
+    one confidently wrong answer and two disconnections.
+
+    None of that is a real constraint. Every fact here is available to the
+    web app itself, and whoever needs it is already signed in as an admin.
+
+    deep=False reads one page of entries per form. That is enough to see
+    the field labels, whether a transaction id can be extracted, and the
+    ordering; counting every entry needs deep=True and is slow enough to
+    time out a web request on a large form, so it is opt-in.
+    """
+    import zoho_api
+    import zoho_sync
+    from cli_safety import describe_database
+    from check_payment_duplicates import find_duplicates
+
+    # Bounded hard. zoho_api's own defaults are 60s per read plus 30s for a
+    # token refresh, either repeatable on a 401 -- comfortably past
+    # gunicorn's 30s worker timeout, which would turn this page into a 502
+    # instead of a report saying Zoho is unreachable. A Zoho that cannot
+    # answer within this budget cannot serve a reconcile run either, so
+    # "timed out" is a real answer here, not a limitation of the page.
+    budget = 8
+
+    report = {"database": describe_database(current_app), "forms": [],
+              "zoho_error": None, "timeout_seconds": budget}
+
+    donations = Donation.query.order_by(Donation.id).all()
+    duplicates, simulated = find_duplicates(donations)
+    report["donation_count"] = len(donations)
+    report["simulated_count"] = simulated
+    report["duplicates"] = [
+        {"payment_id": pid, "rows": rows} for pid, rows in sorted(duplicates.items())
+    ]
+
+    configured = all(
+        (current_app.config.get(k) or "").strip()
+        for k in ("ZOHO_CLIENT_ID", "ZOHO_CLIENT_SECRET", "ZOHO_REFRESH_TOKEN")
+    )
+    report["zoho_configured"] = configured
+    if not configured:
+        report["zoho_error"] = (
+            "ZOHO_CLIENT_ID / ZOHO_CLIENT_SECRET / ZOHO_REFRESH_TOKEN are not all set on "
+            "this service. Nothing breaks without them -- Zoho payments are reported on "
+            "the reconciliation report instead of being receipted -- but automatic "
+            "receipts need them."
+        )
+
+    for form in ZohoForm.query.order_by(ZohoForm.form_key).all():
+        row = {
+            "form": form, "reachable": None, "error": None, "total": None,
+            "capped": False, "order": None, "samples": [], "with_id": 0, "seen": 0,
+        }
+        if configured:
+            try:
+                records, envelope = zoho_api.entries(
+                    current_app.config, form.api_link_name, start_index=1, limit=200,
+                    timeout=budget,
+                )
+                records = [r for r in records if isinstance(r, dict)]
+                row.update(reachable=True, envelope=envelope, seen=len(records))
+
+                times = [zoho_sync.parse_added_time(r) for r in records]
+                known = [t for t in times if t is not None]
+                if len(known) < 2:
+                    row["order"] = "unknown"
+                else:
+                    up = all(a <= b for a, b in zip(known, known[1:]))
+                    down = all(a >= b for a, b in zip(known, known[1:]))
+                    row["order"] = ("unknown" if up and down else
+                                    "newest-first" if down else
+                                    "oldest-first" if up else "unsorted")
+
+                for record in records:
+                    payment_id, _order = zoho_sync.payment_ids(record)
+                    if not payment_id:
+                        continue
+                    row["with_id"] += 1
+                    if len(row["samples"]) < 5:
+                        row["samples"].append({
+                            "payment_id": payment_id,
+                            "name": zoho_sync.donor_name(record),
+                            "status": zoho_sync.field(record, "status"),
+                            "raw": zoho_sync.field(record, "transaction"),
+                        })
+
+                row["total"] = len(records)
+                if deep and len(records) == 200:
+                    total, capped = len(records), True
+                    for _page in range(2, 26):
+                        more, _ = zoho_api.entries(
+                            current_app.config, form.api_link_name,
+                            start_index=total + 1, limit=200, timeout=budget,
+                        )
+                        more = [r for r in more if isinstance(r, dict)]
+                        if not more:
+                            capped = False
+                            break
+                        total += len(more)
+                        if len(more) < 200:
+                            capped = False
+                            break
+                    row.update(total=total, capped=capped)
+                elif len(records) == 200:
+                    row["capped"] = True
+            except zoho_api.ZohoApiError as exc:
+                row.update(reachable=False, error=str(exc))
+            except Exception as exc:  # noqa: BLE001 -- a diagnostic must not 500
+                current_app.logger.exception("Zoho diagnostics failed for %s", form.form_key)
+                row.update(reachable=False, error=f"Unexpected: {exc}")
+        report["forms"].append(row)
+
+    return report
+
+
+@bp.route("/settings/zoho-diagnostics")
+@login_required
+@admin_role_required
+def zoho_diagnostics():
+    return render_template(
+        "admin/zoho_diagnostics.html",
+        report=_zoho_diagnostics(deep=request.args.get("deep") == "1"),
+        deep=request.args.get("deep") == "1",
+    )
+
+
 @bp.route("/settings/zoho-forms/<int:form_id>/update", methods=["POST"])
 @login_required
 @admin_role_required
