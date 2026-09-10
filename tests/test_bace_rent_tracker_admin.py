@@ -221,6 +221,46 @@ class TestTrackerGrid:
         resp = client.get("/admin/bace-tracker?include_inactive=yes")
         assert "Left Already" in resp.get_data(as_text=True)
 
+    def test_grouped_into_a_section_per_property(self, client, app):
+        prop_a = _property(app, name="Nandgaon BACE")
+        prop_b = _property(app, name="Yogapitha BACE")
+        _add_student(client, prop_a, full_name="Nandgaon One", phone="9111111101")
+        _add_student(client, prop_a, full_name="Nandgaon Two", phone="9111111102")
+        _add_student(client, prop_b, full_name="Yogapitha One", phone="9111111103")
+
+        resp = client.get("/admin/bace-tracker")
+        body = resp.get_data(as_text=True)
+        assert resp.status_code == 200
+        # Each property gets its own subheader naming it and how many
+        # students it has, and every student appears somewhere under it.
+        assert "Nandgaon BACE</strong> -- 2 students" in body
+        assert "Yogapitha BACE</strong> -- 1 student," in body
+        assert body.index("Nandgaon BACE</strong>") < body.index("Nandgaon One")
+        assert body.index("Nandgaon Two") < body.index("Yogapitha BACE</strong>")
+
+    def test_property_filter_narrows_to_one_property(self, client, app):
+        prop_a = _property(app, name="Nandgaon BACE")
+        prop_b = _property(app, name="Yogapitha BACE")
+        _add_student(client, prop_a, full_name="Nandgaon Student", phone="9111111101")
+        _add_student(client, prop_b, full_name="Yogapitha Student", phone="9111111102")
+
+        resp = client.get(f"/admin/bace-tracker?bace_property_id={prop_a}")
+        body = resp.get_data(as_text=True)
+        assert "Nandgaon Student" in body
+        assert "Yogapitha Student" not in body
+        assert f'value="{prop_a}" selected' in body
+
+    def test_property_filter_csv_export_is_scoped_too(self, client, app):
+        prop_a = _property(app, name="Nandgaon BACE")
+        prop_b = _property(app, name="Yogapitha BACE")
+        _add_student(client, prop_a, full_name="Nandgaon Student", phone="9111111101")
+        _add_student(client, prop_b, full_name="Yogapitha Student", phone="9111111102")
+
+        resp = client.get(f"/admin/bace-tracker/export?bace_property_id={prop_a}")
+        body = resp.get_data(as_text=True)
+        assert "Nandgaon Student" in body
+        assert "Yogapitha Student" not in body
+
 
 class TestDashboard:
     def test_totals_reflect_a_fully_paid_student(self, client, app):

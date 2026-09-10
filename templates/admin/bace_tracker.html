@@ -14,6 +14,15 @@
 
 <form class="row g-2 mb-3 align-items-end">
   <div class="col-auto">
+    <label class="form-label small mb-1">BACE Property</label>
+    <select name="bace_property_id" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">All Properties</option>
+      {% for p in properties %}
+      <option value="{{ p.id }}" {% if bace_property_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
     <label class="form-label small mb-1">From</label>
     <input type="month" class="form-control form-control-sm" name="from" value="{{ from_month.strftime('%Y-%m') }}">
   </div>
@@ -28,7 +37,7 @@
   <div class="col-auto"><button class="btn btn-sm btn-primary">Update</button></div>
   <div class="col-auto">
     <a class="btn btn-sm btn-outline-secondary"
-       href="{{ url_for('admin.export_bace_tracker', **{'from': from_month.strftime('%Y-%m'), 'to': to_month.strftime('%Y-%m'), 'include_inactive': 'yes' if include_inactive else none}) }}">
+       href="{{ url_for('admin.export_bace_tracker', **{'from': from_month.strftime('%Y-%m'), 'to': to_month.strftime('%Y-%m'), 'include_inactive': 'yes' if include_inactive else none, 'bace_property_id': bace_property_id or none}) }}">
       Export CSV
     </a>
   </div>
@@ -48,7 +57,15 @@
       </tr>
     </thead>
     <tbody>
-      {% for row in summary %}
+      {% for prop_name, rows in summary|groupby('student.bace_property.name') %}
+      <tr class="table-secondary">
+        <td colspan="{{ 6 + months|length }}">
+          <strong>{{ prop_name }}</strong> -- {{ rows|length }} student{{ '' if rows|length == 1 else 's' }},
+          Rs. {{ '%.2f' | format(rows|sum(attribute='total_paid')) }} paid,
+          Rs. {{ '%.2f' | format(rows|sum(attribute='balance_due')) }} balance due
+        </td>
+      </tr>
+      {% for row in rows %}
       {% set s = row.student %}
       <tr>
         <td>{{ s.full_name }}{% if not s.is_active %} <span class="badge bg-secondary">Inactive</span>{% endif %}</td>
@@ -67,6 +84,7 @@
         <td class="text-end {% if row.balance_due > 0 %}text-danger fw-bold{% endif %}">{{ '%.2f' | format(row.balance_due) }}</td>
         <td class="text-center">{{ row.months_behind }}</td>
       </tr>
+      {% endfor %}
       {% else %}
       <tr><td colspan="{{ 6 + months|length }}" class="text-muted">No students to show.</td></tr>
       {% endfor %}

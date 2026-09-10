@@ -4536,17 +4536,29 @@ def _bace_tracker_summary_from_request():
     months = bace_tracker.months_between(from_month, to_month)
 
     include_inactive = request.args.get("include_inactive") == "yes"
+    bace_property_id = request.args.get("bace_property_id", type=int)
     query = BaceStudent.query
     if not include_inactive:
         query = query.filter_by(status="Active")
-    students = query.order_by(BaceStudent.full_name).all()
+    if bace_property_id:
+        query = query.filter_by(bace_property_id=bace_property_id)
+    # Joined and ordered by property name first, student name second, so
+    # both the grid (grouped into a section per property -- "base-wise",
+    # in the terms the students/donors are usually described in) and the
+    # CSV export list every property's students together instead of one
+    # flat alphabetical list mixing every BACE house.
+    students = (
+        query.join(BaceProperty, BaceStudent.bace_property_id == BaceProperty.id)
+        .order_by(BaceProperty.name, BaceStudent.full_name)
+        .all()
+    )
 
     payments = BaceRentPayment.query.filter(
         BaceRentPayment.student_id.in_([s.id for s in students])
     ).all() if students else []
 
     summary = bace_tracker.build_rent_summary(students, payments, months, today=today)
-    return summary, months, from_month, to_month, today, include_inactive
+    return summary, months, from_month, to_month, today, include_inactive, bace_property_id
 
 
 @bp.route("/bace-tracker")
@@ -4556,13 +4568,21 @@ def bace_tracker_grid():
     bace_tracker.build_rent_summary -- the computed equivalent of the
     spreadsheet's Tracker tab. Defaults to the trailing 6 months through
     this one (a wider window is one URL param away, not a hard cap the
-    way the spreadsheet's pre-formatted columns were)."""
-    summary, months, from_month, to_month, today, include_inactive = _bace_tracker_summary_from_request()
+    way the spreadsheet's pre-formatted columns were). Grouped into one
+    section per BACE property (optionally narrowed to just one via the
+    property filter) rather than a single flat alphabetical list, so
+    "how many devotees does this property have, and where do they
+    stand" is a glance rather than a scan."""
+    summary, months, from_month, to_month, today, include_inactive, bace_property_id = (
+        _bace_tracker_summary_from_request()
+    )
+    properties = BaceProperty.query.order_by(BaceProperty.name).all()
 
     return render_template(
         "admin/bace_tracker.html", summary=summary, months=months,
         from_month=from_month, to_month=to_month, today=today,
-        include_inactive=include_inactive, bt=bace_tracker,
+        include_inactive=include_inactive, bace_property_id=bace_property_id,
+        properties=properties, bt=bace_tracker,
     )
 
 
@@ -4574,7 +4594,9 @@ def export_bace_tracker():
     (Paid/Partial/Pending/Upcoming/N-A, same labels the grid shows),
     plus Total Paid/Balance Due/Months Behind -- same convention as
     export_donations()/export_bace_contributions()."""
-    summary, months, from_month, to_month, today, include_inactive = _bace_tracker_summary_from_request()
+    summary, months, from_month, to_month, today, include_inactive, bace_property_id = (
+        _bace_tracker_summary_from_request()
+    )
 
     output = io.StringIO()
     writer = csv.writer(output)
