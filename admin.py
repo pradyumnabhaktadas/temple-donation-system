@@ -4201,13 +4201,31 @@ def bace_students():
         # donations sitting unmatched (they weren't on the roster yet when
         # those donations succeeded) -- record whichever ones now resolve
         # cleanly now that they're here, same as clicking "Record all
-        # matched" on Admin -> BACE Contribution Logs.
+        # matched" on Admin -> BACE Contribution Logs. Scoped to donors
+        # sharing this one student's own phone/email rather than loading
+        # every successful BACE Contribution donation in existence -- the
+        # whole campaign's history was never the point here, just this
+        # student's, and it keeps a single "add student" request cheap
+        # regardless of how large the campaign has grown (see the memory
+        # note in gunicorn_config.py -- this route used to load the full
+        # table).
         catch_up_campaign = _bace_campaign_or_none()
         recorded_count = 0
-        if catch_up_campaign is not None:
-            past_donations = Donation.query.filter_by(
-                campaign_id=catch_up_campaign.id, status="success"
-            ).all()
+        if catch_up_campaign is not None and (student.phone or student.email):
+            contact_filters = []
+            if student.phone:
+                contact_filters.append(Donor.phone == student.phone)
+            if student.email:
+                contact_filters.append(Donor.email == student.email)
+            past_donations = (
+                Donation.query.join(Donor, Donation.donor_id == Donor.id)
+                .filter(
+                    Donation.campaign_id == catch_up_campaign.id,
+                    Donation.status == "success",
+                    or_(*contact_filters),
+                )
+                .all()
+            )
             recorded_count = len(bace_matching.record_all_matched(past_donations))
             db.session.commit()
 
@@ -4928,13 +4946,27 @@ def record_all_matched_bace_rent_payments():
     the roster) without clicking "Record as rent payment" N times.
     Ignores whatever filter is currently applied on the page and always
     covers every successful BACE Contribution donation -- the point is to
-    catch up everything that can be, not just what's on screen."""
+    catch up everything that can be, not just what's on screen.
+
+    Excludes already-recorded donations at the SQL level rather than
+    loading the whole campaign's history into memory and filtering in
+    Python -- now that most donations auto-record themselves the instant
+    they succeed, this route should usually only be pulling in the small
+    number of edge cases (donor added to the roster after their donation,
+    legacy imports, etc), not the campaign's full history every time."""
     campaign = _bace_campaign_or_none()
     if campaign is None:
         flash("The BACE Contribution campaign isn't set up yet.")
         return redirect(url_for("admin.bace_properties"))
 
-    donations = Donation.query.filter_by(campaign_id=campaign.id, status="success").all()
+    already_recorded_ids = db.session.query(BaceRentPayment.source_donation_id).filter(
+        BaceRentPayment.source_donation_id.isnot(None)
+    )
+    donations = Donation.query.filter(
+        Donation.campaign_id == campaign.id,
+        Donation.status == "success",
+        ~Donation.id.in_(already_recorded_ids),
+    ).all()
     created = bace_matching.record_all_matched(donations)
     db.session.commit()
 
