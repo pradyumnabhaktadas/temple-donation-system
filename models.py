@@ -391,11 +391,11 @@ class Donation(db.Model):
     __tablename__ = "donations"
 
     id = db.Column(db.Integer, primary_key=True)
-    donor_id = db.Column(db.Integer, db.ForeignKey("donors.id"), nullable=False)
-    campaign_id = db.Column(db.Integer, db.ForeignKey("campaigns.id"), nullable=False)
+    donor_id = db.Column(db.Integer, db.ForeignKey("donors.id"), nullable=False, index=True)
+    campaign_id = db.Column(db.Integer, db.ForeignKey("campaigns.id"), nullable=False, index=True)
     # Only set for donations against the "BACE Contribution" campaign --
     # which specific property the payment is for. NULL for every other campaign.
-    bace_property_id = db.Column(db.Integer, db.ForeignKey("bace_properties.id"), nullable=True)
+    bace_property_id = db.Column(db.Integer, db.ForeignKey("bace_properties.id"), nullable=True, index=True)
     # Only set for donations against the "Festivals" campaign via the
     # dedicated Festival Seva form -- which occasion and which seva/
     # sponsorship tier. Both NULL for every other campaign, and seva_type_id
@@ -436,7 +436,7 @@ class Donation(db.Model):
     # status changes, and the /receipt/<id> download route already refuses
     # anything that isn't status == "success", so a cancelled receipt
     # naturally stops being downloadable too. See admin.cancel_donation().
-    status = db.Column(db.String(20), default="pending")
+    status = db.Column(db.String(20), default="pending", index=True)
     cancelled_at = db.Column(db.DateTime, nullable=True)
     cancelled_by = db.Column(db.String(100), nullable=True)  # admin username
     cancellation_reason = db.Column(db.String(300), nullable=True)
@@ -451,8 +451,8 @@ class Donation(db.Model):
     cheque_bank_name = db.Column(db.String(150))
     bank_transaction_id = db.Column(db.String(100))  # UTR / reference number for bank transfers
 
-    razorpay_order_id = db.Column(db.String(100))
-    razorpay_payment_id = db.Column(db.String(100))
+    razorpay_order_id = db.Column(db.String(100), index=True)
+    razorpay_payment_id = db.Column(db.String(100), index=True)
     # `receipt` we sent Razorpay when creating the order (donation_<id>) --
     # stored back for a self-contained audit record; known at order-creation
     # time (see public.create_order), not something pulled from a webhook.
@@ -524,7 +524,7 @@ class Donation(db.Model):
     # "Receipt storage" for the migration note on existing installs.
     receipt_pdf = db.Column(db.LargeBinary)
 
-    donation_date = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    donation_date = db.Column(db.DateTime, default=datetime.datetime.utcnow, index=True)
 
     # IYF camp collections. Plain text rather than a Camp table by explicit
     # choice -- camps are short-lived and the data arrives from a Zoho
