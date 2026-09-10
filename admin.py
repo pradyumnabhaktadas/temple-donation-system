@@ -4189,7 +4189,19 @@ def bace_students():
         query = query.filter(BaceStudent.full_name.ilike(f"%{q}%"))
     students = query.order_by(BaceStudent.status, BaceStudent.full_name).all()
     properties = BaceProperty.query.filter_by(is_active=True).order_by(BaceProperty.name).all()
-    return render_template("admin/bace_students.html", students=students, properties=properties, q=q)
+
+    # "Add to roster" quick-link from Admin -> BACE Contribution Logs (see
+    # bace_contributions()) lands here with these params to pre-fill the
+    # Add a student form with a donor's details -- a person still enters
+    # the monthly amount and joined month and hits Add themselves, nothing
+    # is created automatically.
+    return render_template(
+        "admin/bace_students.html", students=students, properties=properties, q=q,
+        prefill_full_name=request.args.get("prefill_full_name"),
+        prefill_phone=request.args.get("prefill_phone"),
+        prefill_email=request.args.get("prefill_email"),
+        prefill_bace_property_id=request.args.get("prefill_bace_property_id", type=int),
+    )
 
 
 @bp.route("/bace-students/<int:student_id>/toggle", methods=["POST"])
@@ -4881,6 +4893,7 @@ def bace_contributions():
             "admin/bace_contributions.html", campaign=None, properties=properties,
             donations=[], pagination=None, summary=[], status="success", bace_property_id=None,
             date_from="", date_to="", matched_students={}, rent_payment_links={},
+            add_to_roster_links={},
         )
 
     base_query = Donation.query.filter_by(campaign_id=campaign.id)
@@ -4919,28 +4932,47 @@ def bace_contributions():
     # which month a given contribution was meant to cover, so that field
     # is deliberately left for staff to fill in before hitting Record.
     rent_payment_links = {}
+    add_to_roster_links = {}
     for d in pagination.items:
-        student = matched_students.get(d.id)
-        if not student or d.status != "success":
+        if d.status != "success":
             continue
-        donation_date = to_ist(d.donation_date) if d.payment_mode == "online" else d.donation_date
-        rent_payment_links[d.id] = url_for(
-            "admin.bace_payments",
-            prefill_student_id=student.id,
-            prefill_amount=float(d.amount),
-            prefill_date=donation_date.date().isoformat(),
-            prefill_mode="Online (givetokrishna.com)" if d.payment_mode == "online" else None,
-            prefill_reference=f"BACE Contribution {d.receipt_number or ('#' + str(d.id))}",
-            prefill_note=(
-                f"Pre-filled from a BACE Contribution donation by {d.donor.full_name} -- "
-                "confirm which month this covers before saving."
-            ),
-        )
+        student = matched_students.get(d.id)
+        if student:
+            donation_date = to_ist(d.donation_date) if d.payment_mode == "online" else d.donation_date
+            rent_payment_links[d.id] = url_for(
+                "admin.bace_payments",
+                prefill_student_id=student.id,
+                prefill_amount=float(d.amount),
+                prefill_date=donation_date.date().isoformat(),
+                prefill_mode="Online (givetokrishna.com)" if d.payment_mode == "online" else None,
+                prefill_reference=f"BACE Contribution {d.receipt_number or ('#' + str(d.id))}",
+                prefill_note=(
+                    f"Pre-filled from a BACE Contribution donation by {d.donor.full_name} -- "
+                    "confirm which month this covers before saving."
+                ),
+            )
+        elif d.bace_property_id:
+            # No roster match -- most likely because this donor simply
+            # isn't on the BACE Students roster yet (a new resident, or the
+            # roster hasn't been backfilled). Offer to add them straight
+            # from what this donation already knows, rather than sending
+            # staff to retype the same name/phone/email on the Students
+            # page. Only offered when the donation names a property --
+            # BaceStudent.bace_property_id is required, so there'd be
+            # nothing to preselect otherwise.
+            add_to_roster_links[d.id] = url_for(
+                "admin.bace_students",
+                prefill_full_name=d.donor.full_name,
+                prefill_phone=d.donor.phone,
+                prefill_email=d.donor.email,
+                prefill_bace_property_id=d.bace_property_id,
+            )
 
     return render_template(
         "admin/bace_contributions.html", campaign=campaign, properties=properties,
         donations=pagination.items, pagination=pagination, summary=summary,
-        matched_students=matched_students, rent_payment_links=rent_payment_links, **filters,
+        matched_students=matched_students, rent_payment_links=rent_payment_links,
+        add_to_roster_links=add_to_roster_links, **filters,
     )
 
 

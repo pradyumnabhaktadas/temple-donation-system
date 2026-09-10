@@ -24,26 +24,29 @@
   <div class="col-md-4">
     <div class="card card-body shadow-sm mb-3 p-3">
       <h6 class="mb-3">Add a student</h6>
+      {% if prefill_full_name %}
+      <p class="small text-muted">Pre-filled from a BACE Contribution donation -- check the details, then set a monthly amount and joined month before adding.</p>
+      {% endif %}
       <form method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="mb-2">
           <label class="form-label small">Full name</label>
-          <input type="text" class="form-control form-control-sm" name="full_name" required>
+          <input type="text" class="form-control form-control-sm" name="full_name" value="{{ prefill_full_name or '' }}" required>
         </div>
         <div class="mb-2">
           <label class="form-label small">Phone</label>
-          <input type="text" class="form-control form-control-sm" name="phone">
+          <input type="text" class="form-control form-control-sm" name="phone" value="{{ prefill_phone or '' }}">
         </div>
         <div class="mb-2">
           <label class="form-label small">Email <span class="text-muted">(optional -- lets Payments Log and BACE Contribution matching find them by email too)</span></label>
-          <input type="email" class="form-control form-control-sm" name="email">
+          <input type="email" class="form-control form-control-sm" name="email" value="{{ prefill_email or '' }}">
         </div>
         <div class="mb-2">
           <label class="form-label small">BACE property</label>
           <select class="form-select form-select-sm" name="bace_property_id" required>
             <option value="">-- choose --</option>
             {% for p in properties %}
-            <option value="{{ p.id }}">{{ p.name }}</option>
+            <option value="{{ p.id }}" {% if prefill_bace_property_id == p.id %}selected{% endif %}>{{ p.name }}</option>
             {% endfor %}
           </select>
         </div>

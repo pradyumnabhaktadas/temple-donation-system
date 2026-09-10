@@ -146,3 +146,83 @@ class TestRecordAsRentPaymentLink:
         resp = client.get("/admin/bace-contributions?status=pending")
         body = resp.get_data(as_text=True)
         assert "prefill_student_id" not in body
+
+
+class TestAddToRosterLink:
+    def test_an_unmatched_success_donation_gets_an_add_to_roster_link(self, client, app):
+        prop_id = _property(app, name="Nandgaon BACE")
+        _make_bace_contribution(
+            client, prop_id, full_name="New Resident", phone="9666666666", email="new.resident@example.com",
+        )
+
+        resp = client.get("/admin/bace-contributions")
+        body = resp.get_data(as_text=True)
+        assert "Add to roster" in body
+        assert "prefill_full_name=New+Resident" in body
+        assert "prefill_phone=9666666666" in body
+        assert "prefill_email=new.resident@example.com" in body
+        assert f"prefill_bace_property_id={prop_id}" in body
+
+    def test_a_matched_donation_does_not_get_an_add_to_roster_link(self, client, app):
+        prop_id = _property(app)
+        _add_student(client, prop_id, full_name="Already On Roster", phone="9777777777")
+        _make_bace_contribution(client, prop_id, full_name="Already On Roster", phone="9777777777")
+
+        resp = client.get("/admin/bace-contributions")
+        body = resp.get_data(as_text=True)
+        assert "prefill_full_name=" not in body
+
+    def test_only_success_donations_get_the_link(self, client, app):
+        prop_id = _property(app)
+        from extensions import db
+        from models import Donor, Campaign, Donation
+        donor = Donor(full_name="Pending New Resident", phone="9888888888")
+        db.session.add(donor)
+        db.session.commit()
+        campaign = Campaign.query.filter_by(name="BACE Contribution").first()
+        donation = Donation(
+            donor_id=donor.id, campaign_id=campaign.id, amount=500,
+            payment_mode="online", status="pending", bace_property_id=prop_id,
+        )
+        db.session.add(donation)
+        db.session.commit()
+
+        resp = client.get("/admin/bace-contributions?status=pending")
+        body = resp.get_data(as_text=True)
+        assert "prefill_full_name=" not in body
+
+    def test_following_the_link_prefills_the_add_student_form(self, client, app):
+        prop_id = _property(app, name="Yogapitha BACE")
+        _make_bace_contribution(
+            client, prop_id, full_name="Prefilled Resident", phone="9999999999",
+            email="prefilled.resident@example.com",
+        )
+
+        resp = client.get(
+            "/admin/bace-students"
+            "?prefill_full_name=Prefilled+Resident&prefill_phone=9999999999"
+            "&prefill_email=prefilled.resident%40example.com"
+            f"&prefill_bace_property_id={prop_id}"
+        )
+        body = resp.get_data(as_text=True)
+        assert 'value="Prefilled Resident"' in body
+        assert 'value="9999999999"' in body
+        assert 'value="prefilled.resident@example.com"' in body
+        assert f'value="{prop_id}" selected' in body
+
+    def test_adding_from_the_prefilled_form_creates_a_real_student(self, client, app):
+        prop_id = _property(app)
+        _make_bace_contribution(client, prop_id, full_name="Becomes Student", phone="9101010101")
+
+        client.post("/admin/bace-students", data={
+            "full_name": "Becomes Student", "phone": "9101010101", "bace_property_id": str(prop_id),
+            "monthly_amount": "3000", "joined_month": "2026-09", "room_notes": "", "notes": "",
+        }, follow_redirects=True)
+
+        from models import BaceStudent
+        assert BaceStudent.query.filter_by(full_name="Becomes Student").count() == 1
+
+        # And the contribution log now shows a match instead of "Add to roster".
+        resp = client.get("/admin/bace-contributions")
+        body = resp.get_data(as_text=True)
+        assert "Record as rent payment" in body

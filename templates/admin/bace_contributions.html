@@ -16,7 +16,7 @@
 <div class="alert alert-warning">The BACE Contribution campaign isn't set up yet -- see Admin &rarr; Campaigns.</div>
 {% else %}
 
-<p class="text-muted small">Every contribution made through the <a href="{{ url_for('public.bace_rent_form') }}" target="_blank">BACE Contribution</a> form or logged offline against a BACE property, broken down by which property it was for. The "Rent Tracker Match" column matches the donor's phone or email against the BACE Students roster -- when it finds exactly one match, "Record as rent payment" jumps to a pre-filled Payments Log entry (you still confirm the month and save it yourself; nothing is logged automatically).</p>
+<p class="text-muted small">Every contribution made through the <a href="{{ url_for('public.bace_rent_form') }}" target="_blank">BACE Contribution</a> form or logged offline against a BACE property, broken down by which property it was for. The "Rent Tracker Match" column matches the donor's phone or email against the BACE Students roster -- when it finds exactly one match, "Record as rent payment" jumps to a pre-filled Payments Log entry; when it finds no match, "Add to roster" jumps to a pre-filled Students form instead. Either way, you still fill in the rest (the month covered, or the monthly amount/joined month) and save it yourself -- nothing is created automatically.</p>
 
 <div class="table-responsive mb-4">
   <table class="table table-sm bg-white shadow-sm">
@@ -115,6 +115,9 @@
         {% if rent_payment_links.get(d.id) %}
         <a href="{{ rent_payment_links[d.id] }}">Record as rent payment</a>
         {% endif %}
+        {% elif add_to_roster_links.get(d.id) %}
+        <span class="text-muted">no match</span><br>
+        <a href="{{ add_to_roster_links[d.id] }}">Add to roster</a>
         {% else %}
         <span class="text-muted">no match</span>
         {% endif %}
