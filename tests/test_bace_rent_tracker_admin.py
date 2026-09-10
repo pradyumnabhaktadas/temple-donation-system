@@ -203,7 +203,10 @@ class TestTrackerGrid:
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
         assert "Fully Paid Student" in body
-        assert "Paid" in body
+        # A Paid cell shows the amount actually paid that month, not the
+        # bare word "Paid" -- title="Paid" (a tooltip) is still there for
+        # anyone hovering, but the visible cell text is the number.
+        assert 'title="Paid">3000<' in body
 
     def test_inactive_students_hidden_by_default(self, client, app):
         prop_id = _property(app)

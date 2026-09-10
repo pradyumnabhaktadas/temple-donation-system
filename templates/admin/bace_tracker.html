@@ -61,7 +61,7 @@
           {%- elif status == bt.STATUS_PARTIAL -%}#c9a227
           {%- elif status == bt.STATUS_PENDING -%}#b3261e
           {%- else -%}#9e9e9e
-          {%- endif -%};">{{ status }}</td>
+          {%- endif -%};" title="{{ status }}">{% if status in (bt.STATUS_PAID, bt.STATUS_PARTIAL) %}{{ '%.0f' | format(row.paid_amounts[m]) }}{% else %}{{ status }}{% endif %}</td>
         {% endfor %}
         <td class="text-end">{{ '%.2f' | format(row.total_paid) }}</td>
         <td class="text-end {% if row.balance_due > 0 %}text-danger fw-bold{% endif %}">{{ '%.2f' | format(row.balance_due) }}</td>

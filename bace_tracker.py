@@ -105,7 +105,12 @@ def build_rent_summary(students, payments, months, today=None):
     once (BaceRentPayment.query.filter(student_id.in_(...))) and pass the
     rows in, keeping this a pure function with no database access of its
     own, the same reasoning unreconciled_razorpay_payments' callers
-    follow for Razorpay."""
+    follow for Razorpay.
+
+    Also returns paid_amounts ({month: Decimal actually paid that month}),
+    alongside statuses -- the Tracker grid shows this instead of the bare
+    "Paid" label for Paid/Partial cells, so a glance at the row shows how
+    much came in each month, not just whether it cleared."""
     today = today or datetime.date.today()
     this_month = month_start(today)
     by_student = payments_by_student_month(payments)
@@ -117,10 +122,11 @@ def build_rent_summary(students, payments, months, today=None):
         monthly_amount = Decimal(student.monthly_amount)
 
         statuses = {}
+        paid_amounts = {}
         for month in months:
-            statuses[month] = status_for(
-                monthly_amount, joined, month, paid_by_month.get(month_start(month)), today,
-            )
+            month_paid = paid_by_month.get(month_start(month), Decimal("0"))
+            statuses[month] = status_for(monthly_amount, joined, month, month_paid, today)
+            paid_amounts[month] = month_paid
 
         # Balance due / months behind: every month from joined through
         # this month, regardless of whether it's in the visible `months`
@@ -145,6 +151,7 @@ def build_rent_summary(students, payments, months, today=None):
         summary.append({
             "student": student,
             "statuses": statuses,
+            "paid_amounts": paid_amounts,
             "total_paid": total_paid,
             "balance_due": balance_due,
             "months_behind": months_behind,
