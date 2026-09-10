@@ -13,7 +13,7 @@ from flask import (
     current_app, Response, abort,
 )
 from flask_login import login_user, logout_user, login_required, current_user
-from sqlalchemy import func, extract
+from sqlalchemy import func, extract, or_
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from extensions import db, limiter
@@ -4091,6 +4091,34 @@ def _parse_positive_amount(raw, label):
     return value, None
 
 
+def _bace_student_search_label(student):
+    """The exact text shown/typed in the Payments Log's student search box
+    (name -- phone -- email (property)) -- built once here so the prefilled
+    label from a "Record as rent payment" quick-link (see
+    bace_contributions()) always matches what the page's own datalist
+    options would render, letter for letter. If this drifts out of sync
+    with templates/admin/bace_payments.html's datalist markup, the
+    prefilled text won't resolve to a student_id when the page loads."""
+    label = f"{student.full_name} -- {student.phone or 'no phone'}"
+    if student.email:
+        label += f" -- {student.email}"
+    label += f" ({student.bace_property.name if student.bace_property else '?'})"
+    return label
+
+
+def _validated_optional_email(raw):
+    """Optional email field -- same permissive "looks like an email" check
+    daily_report_recipients() already uses. Returns (value, None) or
+    (None, error). Blank input is valid (the field is optional) and
+    returns (None, None)."""
+    value = (raw or "").strip()
+    if not value:
+        return None, None
+    if "@" not in value or "." not in value.split("@")[-1]:
+        return None, f"'{value}' doesn't look like a valid email address."
+    return value[:200], None
+
+
 @bp.route("/bace-students", methods=["GET", "POST"])
 @login_required
 def bace_students():
@@ -4112,6 +4140,11 @@ def bace_students():
         phone = (request.form.get("phone") or "").strip()
         if phone and not is_valid_phone(phone):
             flash("That phone number doesn't look right.")
+            return redirect(url_for("admin.bace_students"))
+
+        email, error = _validated_optional_email(request.form.get("email"))
+        if error:
+            flash(error)
             return redirect(url_for("admin.bace_students"))
 
         bace_property_id, error = _validated_id_from_form(
@@ -4136,6 +4169,7 @@ def bace_students():
         student = BaceStudent(
             full_name=full_name[:200],
             phone=normalize_phone(phone) if phone else None,
+            email=email,
             bace_property_id=bace_property_id,
             room_notes=(request.form.get("room_notes") or "").strip()[:200] or None,
             monthly_amount=monthly_amount,
@@ -4191,6 +4225,11 @@ def bace_student_edit(student_id):
             flash("That phone number doesn't look right.")
             return redirect(url_for("admin.bace_student_edit", student_id=student_id))
 
+        email, error = _validated_optional_email(request.form.get("email"))
+        if error:
+            flash(error)
+            return redirect(url_for("admin.bace_student_edit", student_id=student_id))
+
         bace_property_id, error = _validated_id_from_form(
             request.form, "bace_property_id", BaceProperty, "BACE property"
         )
@@ -4212,6 +4251,7 @@ def bace_student_edit(student_id):
 
         student.full_name = full_name[:200]
         student.phone = normalize_phone(phone) if phone else None
+        student.email = email
         student.bace_property_id = bace_property_id
         student.room_notes = (request.form.get("room_notes") or "").strip()[:200] or None
         student.monthly_amount = monthly_amount
@@ -4317,10 +4357,69 @@ def bace_payments():
     )
     students = BaceStudent.query.order_by(BaceStudent.full_name).all()
     active_students = [s for s in students if s.is_active]
+
+    # "Record as rent payment" quick-link from Admin -> BACE Contribution
+    # Logs (see bace_contributions()) lands here with these params to
+    # pre-fill the form -- a human still has to pick the month and hit
+    # Record, nothing is auto-posted. prefill_student_id is a *separate*
+    # param from the student_id above (which filters the table below) so
+    # following the quick-link doesn't also filter the log unexpectedly.
+    prefill_student_id = request.args.get("prefill_student_id", type=int)
+    prefill_student = (
+        BaceStudent.query.get(prefill_student_id) if prefill_student_id else None
+    )
     return render_template(
         "admin/bace_payments.html", payments=pagination.items, pagination=pagination,
         students=students, active_students=active_students, student_id=student_id,
         payment_modes=BACE_PAYMENT_MODES, today=now_ist().date(),
+        prefill_student_id=prefill_student.id if prefill_student else None,
+        prefill_student_label=_bace_student_search_label(prefill_student) if prefill_student else None,
+        prefill_for_month=request.args.get("prefill_for_month"),
+        prefill_amount=request.args.get("prefill_amount"),
+        prefill_date=request.args.get("prefill_date"),
+        prefill_mode=request.args.get("prefill_mode"),
+        prefill_reference=request.args.get("prefill_reference"),
+        prefill_note=request.args.get("prefill_note"),
+    )
+
+
+@bp.route("/bace-payments/export")
+@login_required
+def export_bace_payments():
+    """CSV of the Payments Log, honoring whatever student_id filter is
+    currently applied -- every column shown on screen, unpaginated --
+    same convention as export_donations()/export_bace_contributions()."""
+    student_id = request.args.get("student_id", type=int)
+    query = BaceRentPayment.query
+    if student_id:
+        query = query.filter_by(student_id=student_id)
+    rows = query.order_by(BaceRentPayment.date_paid.desc(), BaceRentPayment.id.desc()).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Date Paid", "Student", "Phone", "Email", "Property", "For Month",
+        "Amount Paid (Rs)", "Mode", "Recorded By", "Reference",
+    ])
+    for p in rows:
+        student = p.student
+        writer.writerow(csv_safe_row([
+            p.date_paid.strftime("%d-%m-%Y"),
+            student.full_name if student else "(deleted)",
+            student.phone if student else "",
+            student.email if student else "",
+            student.bace_property.name if student and student.bace_property else "",
+            p.for_month.strftime("%b %Y"),
+            float(p.amount_paid),
+            p.mode or "",
+            p.recorded_by or "",
+            p.reference or "",
+        ]))
+
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment;filename=BACE_Payments_Log.csv"},
     )
 
 
@@ -4343,14 +4442,11 @@ def bace_payment_delete(payment_id):
     return redirect(url_for("admin.bace_payments"))
 
 
-@bp.route("/bace-tracker")
-@login_required
-def bace_tracker_grid():
-    """Rows=students, columns=months, colour-coded from
-    bace_tracker.build_rent_summary -- the computed equivalent of the
-    spreadsheet's Tracker tab. Defaults to the trailing 6 months through
-    this one (a wider window is one URL param away, not a hard cap the
-    way the spreadsheet's pre-formatted columns were)."""
+def _bace_tracker_summary_from_request():
+    """Shared by bace_tracker_grid() (the page) and export_bace_tracker()
+    (its CSV) so the exported rows are always for exactly the date range
+    and Active/Inactive scope currently on screen -- same convention as
+    export_donations()/export_bace_contributions()."""
     today = now_ist().date()
     from_month, error = _parse_month(request.args.get("from"), "From month")
     if error:
@@ -4373,11 +4469,62 @@ def bace_tracker_grid():
     ).all() if students else []
 
     summary = bace_tracker.build_rent_summary(students, payments, months, today=today)
+    return summary, months, from_month, to_month, today, include_inactive
+
+
+@bp.route("/bace-tracker")
+@login_required
+def bace_tracker_grid():
+    """Rows=students, columns=months, colour-coded from
+    bace_tracker.build_rent_summary -- the computed equivalent of the
+    spreadsheet's Tracker tab. Defaults to the trailing 6 months through
+    this one (a wider window is one URL param away, not a hard cap the
+    way the spreadsheet's pre-formatted columns were)."""
+    summary, months, from_month, to_month, today, include_inactive = _bace_tracker_summary_from_request()
 
     return render_template(
         "admin/bace_tracker.html", summary=summary, months=months,
         from_month=from_month, to_month=to_month, today=today,
         include_inactive=include_inactive, bt=bace_tracker,
+    )
+
+
+@bp.route("/bace-tracker/export")
+@login_required
+def export_bace_tracker():
+    """CSV of the Tracker grid, honoring whatever from/to/include_inactive
+    is currently applied -- one row per student, one column per month
+    (Paid/Partial/Pending/Upcoming/N-A, same labels the grid shows),
+    plus Total Paid/Balance Due/Months Behind -- same convention as
+    export_donations()/export_bace_contributions()."""
+    summary, months, from_month, to_month, today, include_inactive = _bace_tracker_summary_from_request()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        ["Student", "Property", "Phone", "Email", "Monthly (Rs)"]
+        + [m.strftime("%b %Y") for m in months]
+        + ["Total Paid (Rs)", "Balance Due (Rs)", "Months Behind"]
+    )
+    for row in summary:
+        student = row["student"]
+        writer.writerow(csv_safe_row(
+            [
+                student.full_name,
+                student.bace_property.name if student.bace_property else "",
+                student.phone or "",
+                student.email or "",
+                float(student.monthly_amount),
+            ]
+            + [row["statuses"][m] for m in months]
+            + [float(row["total_paid"]), float(row["balance_due"]), row["months_behind"]]
+        ))
+
+    filename = f"BACE_Tracker_{from_month.strftime('%Y-%m')}_to_{to_month.strftime('%Y-%m')}.csv"
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment;filename={filename}"},
     )
 
 
@@ -4672,6 +4819,52 @@ def _apply_bace_contribution_filters(query):
     }
 
 
+def _match_bace_students(donations):
+    """Best-effort match of each donation's donor to a BaceStudent by
+    phone or email, for Admin -> BACE Contribution Logs -- lets staff see
+    "this looks like student X's rent" and jump straight to a pre-filled
+    Payments Log entry (bace_payments()'s prefill_* params) instead of
+    hunting for the right student by hand. Never auto-creates a payment --
+    a human still picks the month and hits Record.
+
+    Returns {donation.id: BaceStudent}. A donor whose phone or email
+    matches more than one student (a shared family number/inbox, say) is
+    left unmatched rather than guessing which one is meant -- a wrong
+    guess here would misattribute someone else's rent."""
+    phones = {d.donor.phone for d in donations if d.donor and d.donor.phone}
+    emails = {d.donor.email for d in donations if d.donor and d.donor.email}
+    if not phones and not emails:
+        return {}
+
+    conditions = []
+    if phones:
+        conditions.append(BaceStudent.phone.in_(phones))
+    if emails:
+        conditions.append(BaceStudent.email.in_(emails))
+    candidates = BaceStudent.query.filter(or_(*conditions)).all()
+
+    by_phone = defaultdict(list)
+    by_email = defaultdict(list)
+    for s in candidates:
+        if s.phone:
+            by_phone[s.phone].append(s)
+        if s.email:
+            by_email[s.email].append(s)
+
+    matched = {}
+    for d in donations:
+        if not d.donor:
+            continue
+        found = None
+        if d.donor.phone and len(by_phone.get(d.donor.phone, [])) == 1:
+            found = by_phone[d.donor.phone][0]
+        elif d.donor.email and len(by_email.get(d.donor.email, [])) == 1:
+            found = by_email[d.donor.email][0]
+        if found:
+            matched[d.id] = found
+    return matched
+
+
 @bp.route("/bace-contributions")
 @login_required
 def bace_contributions():
@@ -4687,7 +4880,7 @@ def bace_contributions():
         return render_template(
             "admin/bace_contributions.html", campaign=None, properties=properties,
             donations=[], pagination=None, summary=[], status="success", bace_property_id=None,
-            date_from="", date_to="",
+            date_from="", date_to="", matched_students={}, rent_payment_links={},
         )
 
     base_query = Donation.query.filter_by(campaign_id=campaign.id)
@@ -4716,9 +4909,38 @@ def bace_contributions():
     page = request.args.get("page", 1, type=int)
     pagination = db.paginate(query, page=page, per_page=DONATIONS_PER_PAGE, error_out=False)
 
+    matched_students = _match_bace_students(pagination.items)
+
+    # A ready-to-click "Record as rent payment" link for each matched,
+    # successful donation -- pre-fills the Payments Log's form
+    # (bace_payments()'s prefill_* params) with everything the donation
+    # already tells us (student, amount, date, and mode/reference where
+    # they translate cleanly), but never the month: only a person knows
+    # which month a given contribution was meant to cover, so that field
+    # is deliberately left for staff to fill in before hitting Record.
+    rent_payment_links = {}
+    for d in pagination.items:
+        student = matched_students.get(d.id)
+        if not student or d.status != "success":
+            continue
+        donation_date = to_ist(d.donation_date) if d.payment_mode == "online" else d.donation_date
+        rent_payment_links[d.id] = url_for(
+            "admin.bace_payments",
+            prefill_student_id=student.id,
+            prefill_amount=float(d.amount),
+            prefill_date=donation_date.date().isoformat(),
+            prefill_mode="Online (givetokrishna.com)" if d.payment_mode == "online" else None,
+            prefill_reference=f"BACE Contribution {d.receipt_number or ('#' + str(d.id))}",
+            prefill_note=(
+                f"Pre-filled from a BACE Contribution donation by {d.donor.full_name} -- "
+                "confirm which month this covers before saving."
+            ),
+        )
+
     return render_template(
         "admin/bace_contributions.html", campaign=campaign, properties=properties,
-        donations=pagination.items, pagination=pagination, summary=summary, **filters,
+        donations=pagination.items, pagination=pagination, summary=summary,
+        matched_students=matched_students, rent_payment_links=rent_payment_links, **filters,
     )
 
 

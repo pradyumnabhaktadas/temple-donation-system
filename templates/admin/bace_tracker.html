@@ -26,6 +26,12 @@
     <label class="form-check-label small" for="include_inactive">Include inactive students</label>
   </div>
   <div class="col-auto"><button class="btn btn-sm btn-primary">Update</button></div>
+  <div class="col-auto">
+    <a class="btn btn-sm btn-outline-secondary"
+       href="{{ url_for('admin.export_bace_tracker', **{'from': from_month.strftime('%Y-%m'), 'to': to_month.strftime('%Y-%m'), 'include_inactive': 'yes' if include_inactive else none}) }}">
+      Export CSV
+    </a>
+  </div>
 </form>
 
 <div class="table-responsive">

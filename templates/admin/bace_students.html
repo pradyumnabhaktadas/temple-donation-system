@@ -35,6 +35,10 @@
           <input type="text" class="form-control form-control-sm" name="phone">
         </div>
         <div class="mb-2">
+          <label class="form-label small">Email <span class="text-muted">(optional -- lets Payments Log and BACE Contribution matching find them by email too)</span></label>
+          <input type="email" class="form-control form-control-sm" name="email">
+        </div>
+        <div class="mb-2">
           <label class="form-label small">BACE property</label>
           <select class="form-select form-select-sm" name="bace_property_id" required>
             <option value="">-- choose --</option>
@@ -72,6 +76,7 @@
             <th>Name</th>
             <th>Property</th>
             <th>Phone</th>
+            <th>Email</th>
             <th>Monthly (Rs)</th>
             <th>Joined</th>
             <th>Status</th>
@@ -84,6 +89,7 @@
             <td>{{ s.full_name }}</td>
             <td>{{ s.bace_property.name if s.bace_property else '-' }}</td>
             <td>{{ s.phone or '-' }}</td>
+            <td>{{ s.email or '-' }}</td>
             <td>{{ '%.0f' | format(s.monthly_amount) }}</td>
             <td>{{ s.joined_month.strftime('%b %Y') }}</td>
             <td>
@@ -106,7 +112,7 @@
             {% endif %}
           </tr>
           {% else %}
-          <tr><td colspan="7" class="text-muted">No students yet.</td></tr>
+          <tr><td colspan="8" class="text-muted">No students yet.</td></tr>
           {% endfor %}
         </tbody>
       </table>

@@ -16,7 +16,7 @@
 <div class="alert alert-warning">The BACE Contribution campaign isn't set up yet -- see Admin &rarr; Campaigns.</div>
 {% else %}
 
-<p class="text-muted small">Every contribution made through the <a href="{{ url_for('public.bace_rent_form') }}" target="_blank">BACE Contribution</a> form or logged offline against a BACE property, broken down by which property it was for.</p>
+<p class="text-muted small">Every contribution made through the <a href="{{ url_for('public.bace_rent_form') }}" target="_blank">BACE Contribution</a> form or logged offline against a BACE property, broken down by which property it was for. The "Rent Tracker Match" column matches the donor's phone or email against the BACE Students roster -- when it finds exactly one match, "Record as rent payment" jumps to a pre-filled Payments Log entry (you still confirm the month and save it yourself; nothing is logged automatically).</p>
 
 <div class="table-responsive mb-4">
   <table class="table table-sm bg-white shadow-sm">
@@ -83,7 +83,7 @@
 <table class="table table-sm bg-white shadow-sm">
   <thead><tr>
     <th>Date</th><th>Donor</th><th>BACE Property</th><th class="text-end">Amount</th><th>Mode</th>
-    <th>Payment ID</th><th>Order ID</th><th>Receipt</th><th>Status</th>
+    <th>Payment ID</th><th>Order ID</th><th>Receipt</th><th>Status</th><th>Rent Tracker Match</th>
   </tr></thead>
   <tbody>
     {% for d in donations %}
@@ -108,9 +108,20 @@
         {% elif d.status == 'cancelled' %}<span class="badge bg-secondary">Cancelled</span>
         {% else %}<span class="badge bg-danger">Failed</span>{% endif %}
       </td>
+      <td class="small">
+        {% set matched = matched_students.get(d.id) %}
+        {% if matched %}
+        {{ matched.full_name }} ({{ matched.bace_property.name if matched.bace_property else '?' }})<br>
+        {% if rent_payment_links.get(d.id) %}
+        <a href="{{ rent_payment_links[d.id] }}">Record as rent payment</a>
+        {% endif %}
+        {% else %}
+        <span class="text-muted">no match</span>
+        {% endif %}
+      </td>
     </tr>
     {% else %}
-    <tr><td colspan="9" class="text-muted">No contributions found for this filter.</td></tr>
+    <tr><td colspan="10" class="text-muted">No contributions found for this filter.</td></tr>
     {% endfor %}
   </tbody>
 </table>

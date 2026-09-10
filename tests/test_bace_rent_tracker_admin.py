@@ -282,3 +282,156 @@ class TestPendingList:
         resp = client.get("/admin/bace-pending")
         body = resp.get_data(as_text=True)
         assert "No Phone" in body
+
+
+class TestStudentEmailField:
+    def test_add_a_student_with_email(self, client, app):
+        prop_id = _property(app)
+        _add_student(client, prop_id, full_name="Has Email", email="has.email@example.com")
+
+        from models import BaceStudent
+        student = BaceStudent.query.filter_by(full_name="Has Email").one()
+        assert student.email == "has.email@example.com"
+
+    def test_email_is_optional(self, client, app):
+        prop_id = _property(app)
+        resp = _add_student(client, prop_id, full_name="No Email")
+        assert resp.status_code == 200
+
+        from models import BaceStudent
+        student = BaceStudent.query.filter_by(full_name="No Email").one()
+        assert student.email is None
+
+    def test_an_invalid_email_is_rejected(self, client, app):
+        prop_id = _property(app)
+        _add_student(client, prop_id, full_name="Bad Email", email="not-an-email")
+
+        from models import BaceStudent
+        assert BaceStudent.query.filter_by(full_name="Bad Email").count() == 0
+
+    def test_edit_updates_the_email(self, client, app):
+        prop_id = _property(app)
+        _add_student(client, prop_id, full_name="Editable", email="old@example.com")
+        from models import BaceStudent
+        student = BaceStudent.query.first()
+
+        client.post(
+            f"/admin/bace-students/{student.id}/edit",
+            data={
+                "full_name": "Editable", "phone": "9319880507", "bace_property_id": str(prop_id),
+                "email": "new@example.com", "monthly_amount": "3000", "joined_month": "2026-09",
+                "room_notes": "", "notes": "",
+            },
+            follow_redirects=True,
+        )
+        assert BaceStudent.query.get(student.id).email == "new@example.com"
+
+
+class TestPaymentSearchAndPrefill:
+    def test_datalist_options_include_phone_and_email(self, client, app):
+        prop_id = _property(app)
+        _add_student(client, prop_id, full_name="Searchable Student", phone="9319880507", email="search@example.com")
+
+        resp = client.get("/admin/bace-payments")
+        body = resp.get_data(as_text=True)
+        assert "Searchable Student" in body
+        assert "9319880507" in body
+        assert "search@example.com" in body
+
+    def test_prefill_student_id_populates_the_hidden_field_and_search_box(self, client, app):
+        prop_id = _property(app)
+        _add_student(client, prop_id, full_name="Prefilled Student", phone="9319880507", email="prefill@example.com")
+        from models import BaceStudent
+        student = BaceStudent.query.first()
+
+        resp = client.get(f"/admin/bace-payments?prefill_student_id={student.id}&prefill_amount=1500&prefill_reference=Test+ref")
+        body = resp.get_data(as_text=True)
+        assert f'value="{student.id}"' in body
+        assert "Prefilled Student" in body
+        assert 'value="1500"' in body
+        assert "Test ref" in body
+
+    def test_recording_a_payment_still_requires_a_resolved_student_id(self, client, app):
+        """The hidden student_id field is what actually gets posted -- an
+        unresolved free-text search value must never reach the database as
+        a student_id."""
+        prop_id = _property(app)
+        _add_student(client, prop_id)
+
+        resp = client.post("/admin/bace-payments", data={
+            "student_id": "", "for_month": "2026-09", "amount_paid": "3000",
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+
+        from models import BaceRentPayment
+        assert BaceRentPayment.query.count() == 0
+
+
+class TestTrackerExport:
+    def test_export_returns_csv_with_expected_rows(self, client, app):
+        prop_id = _property(app, name="Goverdhan BACE")
+        _add_student(client, prop_id, full_name="Export Student", monthly_amount="3000", joined_month="2026-09")
+        from models import BaceStudent
+        student = BaceStudent.query.first()
+        client.post("/admin/bace-payments", data={
+            "student_id": str(student.id), "for_month": "2026-09", "amount_paid": "3000",
+        }, follow_redirects=True)
+
+        resp = client.get("/admin/bace-tracker/export?from=2026-09&to=2026-09")
+        assert resp.status_code == 200
+        assert resp.mimetype == "text/csv"
+        body = resp.get_data(as_text=True)
+        assert "Export Student" in body
+        assert "Goverdhan BACE" in body
+        assert "Paid" in body
+
+    def test_export_respects_include_inactive(self, client, app):
+        prop_id = _property(app)
+        _add_student(client, prop_id, full_name="Inactive Export")
+        from models import BaceStudent
+        student = BaceStudent.query.first()
+        client.post(f"/admin/bace-students/{student.id}/toggle", data={}, follow_redirects=True)
+
+        resp = client.get("/admin/bace-tracker/export")
+        assert "Inactive Export" not in resp.get_data(as_text=True)
+
+        resp = client.get("/admin/bace-tracker/export?include_inactive=yes")
+        assert "Inactive Export" in resp.get_data(as_text=True)
+
+
+class TestPaymentsExport:
+    def test_export_returns_csv_with_expected_rows(self, client, app):
+        prop_id = _property(app)
+        _add_student(client, prop_id, full_name="Payment Export Student", phone="9319880507", email="pe@example.com")
+        from models import BaceStudent
+        student = BaceStudent.query.first()
+        client.post("/admin/bace-payments", data={
+            "student_id": str(student.id), "for_month": "2026-09", "amount_paid": "3000",
+            "mode": "UPI", "reference": "ref999",
+        }, follow_redirects=True)
+
+        resp = client.get("/admin/bace-payments/export")
+        assert resp.status_code == 200
+        assert resp.mimetype == "text/csv"
+        body = resp.get_data(as_text=True)
+        assert "Payment Export Student" in body
+        assert "pe@example.com" in body
+        assert "ref999" in body
+
+    def test_export_respects_student_id_filter(self, client, app):
+        prop_id = _property(app)
+        _add_student(client, prop_id, full_name="Student One")
+        _add_student(client, prop_id, full_name="Student Two")
+        from models import BaceStudent
+        s1, s2 = BaceStudent.query.order_by(BaceStudent.full_name).all()
+        client.post("/admin/bace-payments", data={
+            "student_id": str(s1.id), "for_month": "2026-09", "amount_paid": "1111",
+        }, follow_redirects=True)
+        client.post("/admin/bace-payments", data={
+            "student_id": str(s2.id), "for_month": "2026-09", "amount_paid": "2222",
+        }, follow_redirects=True)
+
+        resp = client.get(f"/admin/bace-payments/export?student_id={s1.id}")
+        body = resp.get_data(as_text=True)
+        assert "1111.0" in body
+        assert "2222.0" not in body

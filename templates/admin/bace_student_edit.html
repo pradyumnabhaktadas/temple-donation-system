@@ -15,6 +15,10 @@
       <input type="text" class="form-control" name="phone" value="{{ student.phone or '' }}">
     </div>
     <div class="mb-2">
+      <label class="form-label small">Email <span class="text-muted">(optional -- lets Payments Log and BACE Contribution matching find them by email too)</span></label>
+      <input type="email" class="form-control" name="email" value="{{ student.email or '' }}">
+    </div>
+    <div class="mb-2">
       <label class="form-label small">BACE property</label>
       <select class="form-select" name="bace_property_id" required>
         {% for p in properties %}

@@ -268,12 +268,19 @@ def create_app(test_config=None):
         return render_template("500.html"), 500
 
     from public import bp as public_bp
-    from admin import bp as admin_bp
+    from admin import bp as admin_bp, _bace_student_search_label
     from donor_portal import bp as donor_bp
 
     app.register_blueprint(public_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(donor_bp)
+
+    # Lets templates/admin/bace_payments.html build its student search
+    # datalist options (name -- phone -- email (property)) with the exact
+    # same string admin.py's "Record as rent payment" quick-link uses to
+    # pre-fill that same field -- one function, not two copies that could
+    # drift apart. Usage: {{ student_search_label(student) }}
+    app.jinja_env.globals["student_search_label"] = _bace_student_search_label
 
     # Create any missing tables straight from the models -- convenient for
     # local development and the test suite, where there's no reason to run

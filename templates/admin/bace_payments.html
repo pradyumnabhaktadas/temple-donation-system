@@ -20,41 +20,46 @@
       {% if not active_students %}
       <p class="text-muted small">Add a student first under <a href="{{ url_for('admin.bace_students') }}">BACE Students</a>.</p>
       {% else %}
-      <form method="post">
+      <form method="post" id="bace-payment-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="mb-2">
-          <label class="form-label small">Student</label>
-          <select class="form-select form-select-sm" name="student_id" required>
-            <option value="">-- choose --</option>
+          <label class="form-label small">Student <span class="text-muted">(search by name, phone, or email)</span></label>
+          <input type="text" class="form-control form-control-sm" id="student_search" list="student_datalist" autocomplete="off" placeholder="Start typing...">
+          <datalist id="student_datalist">
             {% for s in active_students %}
-            <option value="{{ s.id }}">{{ s.full_name }} ({{ s.bace_property.name if s.bace_property else '?' }})</option>
+            <option data-id="{{ s.id }}" value="{{ student_search_label(s) }}"></option>
             {% endfor %}
-          </select>
+          </datalist>
+          <input type="hidden" name="student_id" id="student_id_hidden" value="{{ prefill_student_id or '' }}">
+          <div class="form-text small text-danger d-none" id="student_search_error">Pick a student from the list.</div>
         </div>
         <div class="mb-2">
           <label class="form-label small">For month</label>
-          <input type="month" class="form-control form-control-sm" name="for_month" value="{{ today.strftime('%Y-%m') }}" required>
+          <input type="month" class="form-control form-control-sm" name="for_month" value="{{ prefill_for_month or today.strftime('%Y-%m') }}" required>
         </div>
         <div class="mb-2">
           <label class="form-label small">Amount paid (Rs)</label>
-          <input type="number" step="1" min="1" class="form-control form-control-sm" name="amount_paid" required>
+          <input type="number" step="1" min="1" class="form-control form-control-sm" name="amount_paid" value="{{ prefill_amount or '' }}" required>
         </div>
         <div class="mb-2">
           <label class="form-label small">Date paid</label>
-          <input type="date" class="form-control form-control-sm" name="date_paid" value="{{ today.isoformat() }}">
+          <input type="date" class="form-control form-control-sm" name="date_paid" value="{{ prefill_date or today.isoformat() }}">
         </div>
         <div class="mb-2">
           <label class="form-label small">Mode of payment</label>
           <select class="form-select form-select-sm" name="mode">
             {% for m in payment_modes %}
-            <option value="{{ m }}">{{ m }}</option>
+            <option value="{{ m }}" {% if prefill_mode == m %}selected{% endif %}>{{ m }}</option>
             {% endfor %}
           </select>
         </div>
         <div class="mb-3">
           <label class="form-label small">Reference / notes</label>
-          <input type="text" class="form-control form-control-sm" name="reference" placeholder="UTR / ref number, if any">
+          <input type="text" class="form-control form-control-sm" name="reference" value="{{ prefill_reference or '' }}" placeholder="UTR / ref number, if any">
         </div>
+        {% if prefill_note %}
+        <p class="small text-muted">{{ prefill_note }}</p>
+        {% endif %}
         <button class="btn btn-gold btn-sm">Record payment</button>
       </form>
       {% endif %}
@@ -62,7 +67,7 @@
   </div>
   {% endif %}
   <div class="{% if current_user.role == 'admin' %}col-md-8{% else %}col-12{% endif %}">
-    <form class="row g-2 mb-3">
+    <form class="row g-2 mb-3 align-items-center">
       <div class="col-auto">
         <select name="student_id" class="form-select form-select-sm" onchange="this.form.submit()">
           <option value="">All students</option>
@@ -70,6 +75,9 @@
           <option value="{{ s.id }}" {% if student_id == s.id %}selected{% endif %}>{{ s.full_name }}</option>
           {% endfor %}
         </select>
+      </div>
+      <div class="col-auto">
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.export_bace_payments', student_id=student_id) }}">Export CSV</a>
       </div>
     </form>
     <div class="table-responsive">
@@ -129,4 +137,56 @@
     {% endif %}
   </div>
 </div>
+
+<script>
+(function () {
+  const search = document.getElementById('student_search');
+  const hidden = document.getElementById('student_id_hidden');
+  const datalist = document.getElementById('student_datalist');
+  const error = document.getElementById('student_search_error');
+  const form = document.getElementById('bace-payment-form');
+  if (!search || !hidden || !datalist || !form) return;
+
+  // Native <datalist> only tells us the text the visitor typed/picked, not
+  // which student that corresponds to -- this maps the full option label
+  // (name -- phone -- email (property)) back to the id carried in its
+  // data-id attribute, so search can match name, phone, OR email and still
+  // resolve to a real student_id, not a free-text guess.
+  const byLabel = {};
+  datalist.querySelectorAll('option').forEach(function (opt) {
+    byLabel[opt.value] = opt.dataset.id;
+  });
+
+  // Only re-resolve on submit if the visitor actually typed something --
+  // otherwise a prefilled Inactive student (valid, but not in this
+  // datalist since it only lists active_students -- see the comment
+  // below) would get its server-set hidden value wiped out by a resolve()
+  // call that can't find a match for text it never built the map from.
+  let userEdited = false;
+  function resolve() {
+    const id = byLabel[search.value];
+    hidden.value = id || '';
+    error.classList.toggle('d-none', !!id || search.value.trim() === '');
+  }
+  search.addEventListener('input', function () { userEdited = true; resolve(); });
+
+  {% if prefill_student_label %}
+  // The server already set student_id_hidden's value to the matched
+  // student's real id (see bace_payments()) -- just show the matching
+  // label in the search box without re-resolving, so this still works
+  // even for an Inactive student who wouldn't be in this datalist (built
+  // from active_students only) to resolve against.
+  search.value = {{ prefill_student_label | tojson }};
+  {% endif %}
+
+  form.addEventListener('submit', function (e) {
+    if (userEdited) resolve();
+    if (!hidden.value) {
+      e.preventDefault();
+      error.classList.remove('d-none');
+      search.focus();
+    }
+  });
+})();
+</script>
 {% endblock %}

@@ -906,6 +906,11 @@ class BaceStudent(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     full_name = db.Column(db.String(200), nullable=False)
     phone = db.Column(db.String(20), index=True)
+    # Optional -- lets a student be found by email too, not just phone, when
+    # recording a payment (Payments Log's search) or when matching a public
+    # BACE Contribution donation (public /bace-rent) back to this roster
+    # (Admin -> BACE Contribution Logs).
+    email = db.Column(db.String(200), index=True)
     bace_property_id = db.Column(db.Integer, db.ForeignKey("bace_properties.id"), nullable=False)
     room_notes = db.Column(db.String(200))
     monthly_amount = db.Column(db.Numeric(12, 2), nullable=False)
