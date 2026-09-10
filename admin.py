@@ -33,6 +33,7 @@ from public import (
 )
 from backup_utils import build_backup_zip, run_backup, restore_backup_zip
 import bace_tracker
+import bace_matching
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -2263,6 +2264,21 @@ def _create_offline_donation(
         )
         return {"ok": False, "error": f"Couldn't save the donation ({exc}). Nothing was recorded -- please try again."}
 
+    if campaign.name == "BACE Contribution" and donation.bace_property_id:
+        # If this donor's phone/email already matches exactly one BACE
+        # Students roster entry, this donation's own rent payment is
+        # recorded right now -- see bace_matching.py's module docstring.
+        # Best-effort: a failure here must never lose the donation record
+        # or its receipt, which are already safely committed above.
+        try:
+            bace_matching.record_matched_donation(donation)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception(
+                "Auto-recording BACE rent payment failed for donation id=%s", donation.id,
+            )
+
     result = {"ok": True, "donor": donor, "donation": donation, "receipt_number": receipt_number, "pdf_ok": True}
 
     try:
@@ -4180,7 +4196,26 @@ def bace_students():
         db.session.commit()
         log_activity("bace_student_add", "bace_student", student.id, f"Added BACE student '{student.full_name}'")
         db.session.commit()
-        flash(f"'{student.full_name}' added.")
+
+        # Catch up: this student may already have past BACE Contribution
+        # donations sitting unmatched (they weren't on the roster yet when
+        # those donations succeeded) -- record whichever ones now resolve
+        # cleanly now that they're here, same as clicking "Record all
+        # matched" on Admin -> BACE Contribution Logs.
+        catch_up_campaign = _bace_campaign_or_none()
+        recorded_count = 0
+        if catch_up_campaign is not None:
+            past_donations = Donation.query.filter_by(
+                campaign_id=catch_up_campaign.id, status="success"
+            ).all()
+            recorded_count = len(bace_matching.record_all_matched(past_donations))
+            db.session.commit()
+
+        flash(
+            f"'{student.full_name}' added."
+            + (f" Recorded {recorded_count} past BACE Contribution donation(s) as rent payments."
+               if recorded_count else "")
+        )
         return redirect(url_for("admin.bace_students"))
 
     q = (request.args.get("q") or "").strip()
@@ -4338,6 +4373,16 @@ def bace_payments():
             flash(f"'{date_raw}' isn't a valid date (expected YYYY-MM-DD).")
             return redirect(url_for("admin.bace_payments"))
 
+        # Carried over from a "Record as rent payment" quick-link's "Edit
+        # before saving" fallback (see bace_contributions()) -- tags this
+        # payment as coming from that donation, same as the one-click path
+        # (record_bace_rent_payment()), so the Contribution Logs page shows
+        # "Already recorded" here too instead of offering the action again.
+        source_donation_id = request.form.get("source_donation_id", type=int)
+        if source_donation_id and BaceRentPayment.query.filter_by(source_donation_id=source_donation_id).first():
+            flash("This donation has already been recorded as a rent payment.")
+            return redirect(url_for("admin.bace_payments"))
+
         student = BaceStudent.query.get(student_id)
         payment = BaceRentPayment(
             student_id=student_id,
@@ -4347,6 +4392,7 @@ def bace_payments():
             mode=(request.form.get("mode") or "").strip()[:30] or None,
             recorded_by=current_user.username,
             reference=(request.form.get("reference") or "").strip()[:200] or None,
+            source_donation_id=source_donation_id or None,
         )
         db.session.add(payment)
         db.session.commit()
@@ -4392,6 +4438,7 @@ def bace_payments():
         prefill_mode=request.args.get("prefill_mode"),
         prefill_reference=request.args.get("prefill_reference"),
         prefill_note=request.args.get("prefill_note"),
+        prefill_source_donation_id=request.args.get("prefill_source_donation_id", type=int),
     )
 
 
@@ -4831,50 +4878,71 @@ def _apply_bace_contribution_filters(query):
     }
 
 
-def _match_bace_students(donations):
-    """Best-effort match of each donation's donor to a BaceStudent by
-    phone or email, for Admin -> BACE Contribution Logs -- lets staff see
-    "this looks like student X's rent" and jump straight to a pre-filled
-    Payments Log entry (bace_payments()'s prefill_* params) instead of
-    hunting for the right student by hand. Never auto-creates a payment --
-    a human still picks the month and hits Record.
+@bp.route("/bace-contributions/<int:donation_id>/record-rent-payment", methods=["POST"])
+@login_required
+@admin_role_required
+def record_bace_rent_payment(donation_id):
+    """Manual trigger for bace_matching.record_matched_donation() on one
+    donation -- most donations never need this button at all now (see
+    _create_offline_donation() and public._finalize_success(), which call
+    the same function automatically the moment a BACE Contribution
+    donation succeeds). This route exists for the donations that couldn't
+    auto-record at the time -- the donor wasn't on the roster yet, most
+    commonly -- so once they're added, this (or the "Record all matched"
+    bulk action below) catches them up."""
+    donation = Donation.query.get_or_404(donation_id)
+    if donation.status != "success" or not donation.bace_property_id:
+        flash("Only successful BACE Contribution donations can be recorded as rent payments.")
+        return redirect(url_for("admin.bace_contributions"))
 
-    Returns {donation.id: BaceStudent}. A donor whose phone or email
-    matches more than one student (a shared family number/inbox, say) is
-    left unmatched rather than guessing which one is meant -- a wrong
-    guess here would misattribute someone else's rent."""
-    phones = {d.donor.phone for d in donations if d.donor and d.donor.phone}
-    emails = {d.donor.email for d in donations if d.donor and d.donor.email}
-    if not phones and not emails:
-        return {}
+    if BaceRentPayment.query.filter_by(source_donation_id=donation.id).first():
+        flash("This donation has already been recorded as a rent payment.")
+        return redirect(url_for("admin.bace_contributions"))
 
-    conditions = []
-    if phones:
-        conditions.append(BaceStudent.phone.in_(phones))
-    if emails:
-        conditions.append(BaceStudent.email.in_(emails))
-    candidates = BaceStudent.query.filter(or_(*conditions)).all()
+    payment = bace_matching.record_matched_donation(donation)
+    if not payment:
+        flash(
+            "Couldn't find exactly one BACE student whose phone or email matches this "
+            "donor -- add them to the roster first (or fix the roster if two students "
+            "share this contact detail), then try again."
+        )
+        db.session.rollback()
+        return redirect(url_for("admin.bace_contributions"))
 
-    by_phone = defaultdict(list)
-    by_email = defaultdict(list)
-    for s in candidates:
-        if s.phone:
-            by_phone[s.phone].append(s)
-        if s.email:
-            by_email[s.email].append(s)
+    db.session.commit()
+    flash(
+        f"Recorded Rs. {donation.amount:,.2f} from '{payment.student.full_name}' for "
+        f"{payment.for_month.strftime('%b %Y')}. If that's the wrong month, delete it from "
+        "the Payments Log and re-enter it there instead."
+    )
+    return redirect(url_for("admin.bace_contributions"))
 
-    matched = {}
-    for d in donations:
-        if not d.donor:
-            continue
-        found = None
-        if d.donor.phone and len(by_phone.get(d.donor.phone, [])) == 1:
-            found = by_phone[d.donor.phone][0]
-        elif d.donor.email and len(by_email.get(d.donor.email, [])) == 1:
-            found = by_email[d.donor.email][0]
-        if found:
-            matched[d.id] = found
-    return matched
+
+@bp.route("/bace-contributions/record-all-matched", methods=["POST"])
+@login_required
+@admin_role_required
+def record_all_matched_bace_rent_payments():
+    """One click for every currently matched, not-yet-recorded BACE
+    Contribution donation at once, not just one row at a time -- for
+    catching up a backlog (e.g. right after adding several students to
+    the roster) without clicking "Record as rent payment" N times.
+    Ignores whatever filter is currently applied on the page and always
+    covers every successful BACE Contribution donation -- the point is to
+    catch up everything that can be, not just what's on screen."""
+    campaign = _bace_campaign_or_none()
+    if campaign is None:
+        flash("The BACE Contribution campaign isn't set up yet.")
+        return redirect(url_for("admin.bace_properties"))
+
+    donations = Donation.query.filter_by(campaign_id=campaign.id, status="success").all()
+    created = bace_matching.record_all_matched(donations)
+    db.session.commit()
+
+    if created:
+        flash(f"Recorded {len(created)} rent payment(s) from matched BACE Contribution donations.")
+    else:
+        flash("Nothing to record -- every matched donation is already recorded, or none matched a student yet.")
+    return redirect(url_for("admin.bace_contributions"))
 
 
 @bp.route("/bace-contributions")
@@ -4892,8 +4960,8 @@ def bace_contributions():
         return render_template(
             "admin/bace_contributions.html", campaign=None, properties=properties,
             donations=[], pagination=None, summary=[], status="success", bace_property_id=None,
-            date_from="", date_to="", matched_students={}, rent_payment_links={},
-            add_to_roster_links={},
+            date_from="", date_to="", matched_students={}, already_recorded={},
+            recordable_month={}, edit_before_saving_links={}, add_to_roster_links={},
         )
 
     base_query = Donation.query.filter_by(campaign_id=campaign.id)
@@ -4922,24 +4990,37 @@ def bace_contributions():
     page = request.args.get("page", 1, type=int)
     pagination = db.paginate(query, page=page, per_page=DONATIONS_PER_PAGE, error_out=False)
 
-    matched_students = _match_bace_students(pagination.items)
+    matched_students = bace_matching.match_students(pagination.items)
 
-    # A ready-to-click "Record as rent payment" link for each matched,
-    # successful donation -- pre-fills the Payments Log's form
-    # (bace_payments()'s prefill_* params) with everything the donation
-    # already tells us (student, amount, date, and mode/reference where
-    # they translate cleanly), but never the month: only a person knows
-    # which month a given contribution was meant to cover, so that field
-    # is deliberately left for staff to fill in before hitting Record.
-    rent_payment_links = {}
+    # Which of these donations already have a rent payment recorded
+    # against them -- record_bace_rent_payment() sets source_donation_id,
+    # so this is how the page tells "already recorded" apart from
+    # "matched but not recorded yet" instead of offering the action again.
+    already_recorded = {
+        p.source_donation_id: p
+        for p in BaceRentPayment.query.filter(
+            BaceRentPayment.source_donation_id.in_([d.id for d in pagination.items])
+        ).all()
+    } if pagination.items else {}
+
+    # For each matched, successful, not-yet-recorded donation: the exact
+    # month record_bace_rent_payment() would use (derived from the
+    # donation's own date), shown next to the one-click button so staff
+    # can see what they're about to record before clicking -- and a
+    # fallback link to the Payments Log's own form (bace_payments()'s
+    # prefill_* params) for the rarer case where that derived month is
+    # wrong and it needs to be entered differently instead.
+    recordable_month = {}
+    edit_before_saving_links = {}
     add_to_roster_links = {}
     for d in pagination.items:
-        if d.status != "success":
+        if d.status != "success" or d.id in already_recorded:
             continue
         student = matched_students.get(d.id)
         if student:
             donation_date = to_ist(d.donation_date) if d.payment_mode == "online" else d.donation_date
-            rent_payment_links[d.id] = url_for(
+            recordable_month[d.id] = bace_tracker.month_start(donation_date.date())
+            edit_before_saving_links[d.id] = url_for(
                 "admin.bace_payments",
                 prefill_student_id=student.id,
                 prefill_amount=float(d.amount),
@@ -4950,6 +5031,7 @@ def bace_contributions():
                     f"Pre-filled from a BACE Contribution donation by {d.donor.full_name} -- "
                     "confirm which month this covers before saving."
                 ),
+                prefill_source_donation_id=d.id,
             )
         elif d.bace_property_id:
             # No roster match -- most likely because this donor simply
@@ -4971,7 +5053,8 @@ def bace_contributions():
     return render_template(
         "admin/bace_contributions.html", campaign=campaign, properties=properties,
         donations=pagination.items, pagination=pagination, summary=summary,
-        matched_students=matched_students, rent_payment_links=rent_payment_links,
+        matched_students=matched_students, already_recorded=already_recorded,
+        recordable_month=recordable_month, edit_before_saving_links=edit_before_saving_links,
         add_to_roster_links=add_to_roster_links, **filters,
     )
 

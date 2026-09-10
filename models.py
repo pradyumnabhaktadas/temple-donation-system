@@ -946,9 +946,12 @@ class BaceRentPayment(db.Model):
     Logged by hand regardless of how the money actually arrived -- UPI,
     cash, bank transfer, or through the public /bace-rent page -- same
     convention the spreadsheet used ("however they pay ... add one row").
-    Deliberately not auto-created from Donation: that form only knows
-    which property a payment is for, never which student or month, so
-    there's nothing to auto-populate this from without a person deciding.
+    Never auto-created *without a person's say-so*: a donation only ever
+    turns into a row here via a one-click "Record as rent payment" action
+    (Admin -> BACE Contribution Logs) a staff member explicitly triggers
+    once that donation's donor is matched to exactly one student -- and
+    even then, the amount/month/mode are read straight off the donation,
+    not guessed.
 
     A student paying two months at once gets two rows; a partial payment
     just gets that lesser amount entered here and the tracker marks the
@@ -963,6 +966,13 @@ class BaceRentPayment(db.Model):
     date_paid = db.Column(db.Date, nullable=False)
     mode = db.Column(db.String(30))  # UPI/Cash/Bank Transfer/Online (givetokrishna.com)/Cheque / Other
     recorded_by = db.Column(db.String(100))  # admin username
+    # Set only when this row came from the one-click "Record as rent
+    # payment" action on Admin -> BACE Contribution Logs -- lets that page
+    # show "Already recorded" instead of the action again for a donation
+    # that's already been logged, and stops the same donation being
+    # recorded as rent twice by two different staff members. NULL for
+    # every payment entered by hand the ordinary way (most of them).
+    source_donation_id = db.Column(db.Integer, db.ForeignKey("donations.id"), index=True)
     reference = db.Column(db.String(200))  # UTR/ref number, free-text notes
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 

@@ -50,6 +50,7 @@ from models import (
 )
 from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email, send_cancellation_email
+import bace_matching
 from whatsapp_utils import send_receipt_whatsapp
 from utils import (
     HIGH_VALUE_PAN_THRESHOLD, is_valid_pan, is_valid_phone, normalize_phone, receipt_access_token, retry,
@@ -910,6 +911,21 @@ def _finalize_success(donation, send_notifications=True):
         db.session.rollback()
         current_app.logger.exception("Failed to issue receipt number for donation %s", donation.id)
         return False
+
+    if campaign.name == "BACE Contribution" and donation.bace_property_id:
+        # If this donor's phone/email already matches exactly one BACE
+        # Students roster entry, this donation's own rent payment is
+        # recorded right now -- see bace_matching.py's module docstring.
+        # Best-effort: a failure here must never lose the receipt number
+        # just committed above.
+        try:
+            bace_matching.record_matched_donation(donation)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception(
+                "Auto-recording BACE rent payment failed for donation %s", donation.id
+            )
 
     try:
         pdf_bytes = generate_receipt_pdf(donation, donation.donor, campaign, _org_cfg())
