@@ -49,7 +49,7 @@ from models import (
     AssociatedWith, AdminActivityLog, ZohoForm,
 )
 from pdf_utils import generate_receipt_pdf, receipt_pdf_path
-from email_utils import send_receipt_email
+from email_utils import send_receipt_email, send_cancellation_email
 from whatsapp_utils import send_receipt_whatsapp
 from utils import (
     HIGH_VALUE_PAN_THRESHOLD, is_valid_pan, is_valid_phone, normalize_phone, receipt_access_token, retry,
@@ -800,6 +800,33 @@ def _send_receipt_notifications_background(app, donation_id, pdf_bytes):
                 send_receipt_whatsapp(donation, donation.donor, _org_cfg(), pdf_bytes)
             except Exception:
                 app.logger.exception("Background receipt WhatsApp send failed for donation %s", donation_id)
+
+
+def _send_cancellation_notifications_background(app, donation_id):
+    """Runs in a background thread, same reasoning as
+    _send_receipt_notifications_background above -- needs its own app
+    context/DB session since the admin request that triggered this has
+    already returned its response by the time this runs.
+
+    Only email is sent automatically here. There's no generic
+    WhatsApp-send capability in this app (see whatsapp_utils.py -- only
+    two fixed, pre-approved templates exist, for receipts and the daily
+    report, and a cancellation notice doesn't match either one), so a
+    WhatsApp cancellation notice is a manual wa.me link from the Donations
+    page instead (whatsapp_utils.cancellation_whatsapp_link), the same
+    copy-paste/wa.me pattern the BACE Pending List already uses.
+    """
+    with app.app_context():
+        donation = Donation.query.get(donation_id)
+        if donation is not None and donation.status == "cancelled":
+            try:
+                send_cancellation_email(
+                    donation, donation.donor, _org_cfg(), donation.cancellation_reason or ""
+                )
+            except Exception:
+                app.logger.exception(
+                    "Background cancellation email failed for donation %s", donation_id
+                )
 
 
 def _finalize_success(donation, send_notifications=True):

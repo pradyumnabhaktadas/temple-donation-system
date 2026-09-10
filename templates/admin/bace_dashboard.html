@@ -1,0 +1,90 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}BACE Dashboard{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h3 class="mb-0">🏠 BACE Dashboard</h3>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_students') }}">Students</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_payments') }}">Payments Log</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_tracker_grid') }}">Tracker</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_pending_list') }}">Pending List</a>
+  </div>
+</div>
+<p class="text-muted">As of {{ today.strftime('%d %b %Y') }} &middot; This month: {{ this_month.strftime('%b %Y') }}</p>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-3"><div class="card card-body shadow-sm text-center p-3"><div class="text-muted small">Active Students</div><div class="fs-4 fw-bold">{{ active_count }}</div></div></div>
+  <div class="col-md-3"><div class="card card-body shadow-sm text-center p-3"><div class="text-muted small">Expected This Month</div><div class="fs-4 fw-bold">Rs. {{ '%.0f' | format(expected) }}</div></div></div>
+  <div class="col-md-3"><div class="card card-body shadow-sm text-center p-3"><div class="text-muted small">Collected This Month</div><div class="fs-4 fw-bold text-success">Rs. {{ '%.0f' | format(collected) }}</div></div></div>
+  <div class="col-md-3"><div class="card card-body shadow-sm text-center p-3"><div class="text-muted small">Pending This Month</div><div class="fs-4 fw-bold text-danger">Rs. {{ '%.0f' | format(pending_amount) }}</div></div></div>
+</div>
+<div class="row g-3 mb-4">
+  <div class="col-md-3"><div class="card card-body shadow-sm text-center p-3"><div class="text-muted small">Fully Paid</div><div class="fs-5 fw-bold">{{ fully_paid }}</div></div></div>
+  <div class="col-md-3"><div class="card card-body shadow-sm text-center p-3"><div class="text-muted small">Partially Paid</div><div class="fs-5 fw-bold">{{ partially_paid }}</div></div></div>
+  <div class="col-md-3"><div class="card card-body shadow-sm text-center p-3"><div class="text-muted small">Not Yet Paid</div><div class="fs-5 fw-bold">{{ not_paid }}</div></div></div>
+  <div class="col-md-3"><div class="card card-body shadow-sm text-center p-3"><div class="text-muted small">Not Yet Due</div><div class="fs-5 fw-bold">{{ not_due }}</div></div></div>
+</div>
+
+<h5 class="mb-2">Base-wise collection, this month</h5>
+<div class="table-responsive mb-4">
+  <table class="table table-sm table-striped align-middle" style="max-width:800px">
+    <thead><tr><th>Base / Property</th><th>Active Students</th><th>Expected (Rs)</th><th>Collected (Rs)</th><th>Pending (Rs)</th><th>Collected %</th></tr></thead>
+    <tbody>
+      {% for b in base_rows %}
+      <tr>
+        <td>{{ b.name }}</td>
+        <td>{{ b.students }}</td>
+        <td>{{ '%.0f' | format(b.expected) }}</td>
+        <td>{{ '%.0f' | format(b.collected) }}</td>
+        <td>{{ '%.0f' | format(b.pending) }}</td>
+        <td>{{ '%.0f' | format(b.pct) }}%</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="text-muted">No active students yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h5 class="mb-2">Student lookup</h5>
+<input type="text" id="bace-lookup" class="form-control mb-2" style="max-width:340px" placeholder="Type a name...">
+<div class="table-responsive">
+  <table class="table table-sm table-striped align-middle" id="bace-lookup-table" style="max-width:900px">
+    <thead><tr><th>Name</th><th>Base</th><th>This month</th><th>Balance Due (Rs)</th><th>Phone</th></tr></thead>
+    <tbody>
+      {% for row in summary %}
+      <tr>
+        <td class="bace-lookup-name">{{ row.student.full_name }}</td>
+        <td>{{ row.student.bace_property.name if row.student.bace_property else '-' }}</td>
+        <td>
+          {% if row.this_month_status == bt.STATUS_PAID %}<span class="badge" style="background:#2e7d32;">Paid</span>
+          {% elif row.this_month_status == bt.STATUS_PARTIAL %}<span class="badge" style="background:#c9a227;">Partial</span>
+          {% elif row.this_month_status == bt.STATUS_PENDING %}<span class="badge" style="background:#b3261e;">Pending</span>
+          {% else %}<span class="badge bg-secondary">{{ row.this_month_status }}</span>{% endif %}
+        </td>
+        <td>{{ '%.2f' | format(row.balance_due) }}</td>
+        <td>{{ row.student.phone or '-' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="text-muted">No active students yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+(function () {
+  const input = document.getElementById('bace-lookup');
+  const rows = document.querySelectorAll('#bace-lookup-table tbody tr');
+  if (!input) return;
+  input.addEventListener('input', function () {
+    const needle = input.value.trim().toLowerCase();
+    rows.forEach(function (row) {
+      const nameCell = row.querySelector('.bace-lookup-name');
+      if (!nameCell) return;
+      row.style.display = nameCell.textContent.toLowerCase().includes(needle) ? '' : 'none';
+    });
+  });
+})();
+</script>
+{% endblock %}

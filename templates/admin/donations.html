@@ -142,6 +142,7 @@
       {% if current_user.role == 'admin' %}
       <td>
         {% if d.status == 'success' %}
+        <a href="{{ url_for('admin.reassign_donation_campaign', donation_id=d.id) }}" class="small d-block">Reassign Campaign</a>
         <a href="#" data-bs-toggle="modal" data-bs-target="#cancelDonation{{ d.id }}" class="small text-danger">Cancel</a>
         {% elif d.status == 'cancelled' %}
         <form method="post" action="{{ url_for('admin.restore_donation', donation_id=d.id) }}" class="d-inline"
@@ -149,6 +150,12 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn btn-link btn-sm p-0 small">Restore</button>
         </form>
+        {% set wa_link = cancellation_wa_links.get(d.id) %}
+        {% if wa_link %}
+        <a href="{{ wa_link }}" target="_blank" rel="noopener" class="small d-block">
+          WhatsApp cancellation notice
+        </a>
+        {% endif %}
         {% elif d.status == 'pending' and d.payment_mode == 'online' %}
         <a href="#" data-bs-toggle="modal" data-bs-target="#finalizePending{{ d.id }}" class="small">Mark as Paid</a>
         {% endif %}

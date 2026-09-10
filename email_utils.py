@@ -84,6 +84,63 @@ def send_receipt_email(donation, donor, org_cfg, pdf_bytes):
         return False
 
 
+def send_cancellation_email(donation, donor, org_cfg, reason):
+    """Emails `donor` that their donation/receipt was cancelled, and why.
+    Same demo-mode/never-raises contract as send_receipt_email(): a failed
+    or unconfigured send should never block the cancellation itself, which
+    has already been committed to the database by the time this runs.
+    """
+    if not donor.email:
+        return False
+
+    cfg = current_app.config
+    smtp_host = cfg.get("SMTP_HOST")
+    if not smtp_host:
+        return False  # DEMO MODE: nothing was actually sent
+
+    try:
+        msg = EmailMessage()
+        receipt_label = donation.receipt_number or f"#{donation.id}"
+        msg["Subject"] = f"Your donation {receipt_label} has been cancelled"
+        msg["From"] = _from_header(cfg)
+        msg["To"] = donor.email
+
+        org_name = org_cfg.get("ORG_PARENT_NAME") or org_cfg.get("ORG_NAME") or "the temple"
+        msg.set_content(
+            f"Dear {donor.full_name or 'Donor'},\n\n"
+            f"Your donation of Rs. {donation.amount:,.2f} to {org_name} "
+            f"(receipt {receipt_label}) has been cancelled.\n\n"
+            f"Reason: {reason}\n\n"
+            f"The receipt issued for this donation is no longer valid and can no "
+            f"longer be downloaded. If you believe this was done in error, or have "
+            f"any questions, please get in touch with us.\n\n"
+            f"This is a computer-generated email and does not require a signature.\n\n"
+            f"Hare Krishna,\n{org_name}"
+        )
+
+        smtp_port = int(cfg.get("SMTP_PORT", 587))
+        use_tls = cfg.get("SMTP_USE_TLS", True)
+        username = cfg.get("SMTP_USERNAME")
+        password = cfg.get("SMTP_PASSWORD")
+
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+            if use_tls:
+                server.starttls(context=ssl.create_default_context())
+            if username:
+                server.login(username, password)
+            server.send_message(msg)
+
+        return True
+    except Exception:
+        # Same policy as send_receipt_email: never let an SMTP hiccup
+        # surface as a failure of the cancellation itself, which has
+        # already been committed by the time this is called.
+        current_app.logger.exception(
+            "Failed to email cancellation notice for %s to %s", receipt_label, donor.email
+        )
+        return False
+
+
 def send_backup_email(cfg, to_email, filename, zip_bytes):
     """Emails a weekly data backup ZIP (see backup_utils.build_backup_zip)
     to `to_email`. Same demo-mode/never-raises contract as

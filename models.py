@@ -872,3 +872,94 @@ class ZohoForm(db.Model):
 
     def __repr__(self):
         return f"<ZohoForm {self.form_key}>"
+
+
+# BaceRentPayment.mode values -- free text on the column (a payment mode
+# typed once and never validated against isn't worth a lookup table the
+# way BaceProperty/Festival are), but kept as one shared list so the
+# Payments Log dropdown and the Lists sheet this replaces offer the same
+# options. "Online (givetokrishna.com)" covers a student who actually
+# used the public BACE Contribution form -- still logged here by hand,
+# same as every other mode, since that form doesn't know which student
+# or month a payment is for (see BaceRentPayment's docstring).
+BACE_PAYMENT_MODES = ["UPI", "Cash", "Bank Transfer", "Online (givetokrishna.com)", "Cheque / Other"]
+
+
+class BaceStudent(db.Model):
+    """One devotee/student staying at a BACE property, paying monthly rent
+    tracked here -- deliberately separate from the generic "BACE
+    Contribution" donation flow (public /bace-rent), which only tags a
+    payment to a *property*, never to a person or a month. Reproduces the
+    "Students" tab of the BACE Rent Contribution Tracker spreadsheet this
+    replaces.
+
+    Same admin-editable-list shape as BaceProperty/Festival/SevaType, but
+    per-student: add one row under Admin -> BACE Students, and when a
+    student leaves, set status to Inactive rather than deleting the row --
+    deleting would take their payment history in BaceRentPayment down
+    with it (well, it wouldn't -- the FK has no cascade -- but it would
+    orphan it from the roster and the tracker), the same reasoning as
+    every other "don't delete, deactivate" lookup in this codebase."""
+
+    __tablename__ = "bace_students"
+
+    id = db.Column(db.Integer, primary_key=True)
+    full_name = db.Column(db.String(200), nullable=False)
+    phone = db.Column(db.String(20), index=True)
+    bace_property_id = db.Column(db.Integer, db.ForeignKey("bace_properties.id"), nullable=False)
+    room_notes = db.Column(db.String(200))
+    monthly_amount = db.Column(db.Numeric(12, 2), nullable=False)
+    # Always the 1st of the month -- the month this student's rent started
+    # being tracked. Months before this are "N/A" in the tracker, not
+    # "Pending", the same distinction the spreadsheet draws.
+    joined_month = db.Column(db.Date, nullable=False)
+    status = db.Column(db.String(20), default="Active", nullable=False)  # Active/Inactive
+    notes = db.Column(db.String(300))
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    bace_property = db.relationship("BaceProperty")
+    payments = db.relationship(
+        "BaceRentPayment", backref="student", lazy="dynamic",
+        order_by="BaceRentPayment.for_month",
+    )
+
+    @property
+    def is_active(self):
+        return self.status == "Active"
+
+    def __repr__(self):
+        return f"<BaceStudent {self.full_name}>"
+
+
+class BaceRentPayment(db.Model):
+    """One rent payment from one BaceStudent for one month -- the
+    equivalent of the spreadsheet's "Payments Log" tab, and what the
+    tracker computation (bace_tracker.py) sums against
+    BaceStudent.monthly_amount to decide Paid/Partial/Pending per student
+    per month.
+
+    Logged by hand regardless of how the money actually arrived -- UPI,
+    cash, bank transfer, or through the public /bace-rent page -- same
+    convention the spreadsheet used ("however they pay ... add one row").
+    Deliberately not auto-created from Donation: that form only knows
+    which property a payment is for, never which student or month, so
+    there's nothing to auto-populate this from without a person deciding.
+
+    A student paying two months at once gets two rows; a partial payment
+    just gets that lesser amount entered here and the tracker marks the
+    month Partial rather than Paid."""
+
+    __tablename__ = "bace_rent_payments"
+
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey("bace_students.id"), nullable=False, index=True)
+    for_month = db.Column(db.Date, nullable=False, index=True)  # always the 1st of the month
+    amount_paid = db.Column(db.Numeric(12, 2), nullable=False)
+    date_paid = db.Column(db.Date, nullable=False)
+    mode = db.Column(db.String(30))  # UPI/Cash/Bank Transfer/Online (givetokrishna.com)/Cheque / Other
+    recorded_by = db.Column(db.String(100))  # admin username
+    reference = db.Column(db.String(200))  # UTR/ref number, free-text notes
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    def __repr__(self):
+        return f"<BaceRentPayment student={self.student_id} month={self.for_month}>"

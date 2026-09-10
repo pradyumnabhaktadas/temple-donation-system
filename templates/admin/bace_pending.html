@@ -1,0 +1,86 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}BACE Pending List{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h3 class="mb-0">📋 BACE Pending List</h3>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_dashboard') }}">Dashboard</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_students') }}">Students</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_payments') }}">Payments Log</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_tracker_grid') }}">Tracker</a>
+  </div>
+</div>
+<p class="text-muted">
+  {{ this_month.strftime('%b-%Y') }}: <strong>{{ pending|length }}</strong> student(s) pending or partial.
+  Updates automatically as payments are logged.
+</p>
+
+{% if not pending %}
+<p class="text-muted">Nobody is pending or partial this month. 🎉</p>
+{% else %}
+<div class="table-responsive mb-4">
+  <table class="table table-sm table-striped align-middle" style="max-width:1100px">
+    <thead>
+      <tr>
+        <th>#</th><th>Student</th><th>Property</th><th>Status</th><th>Due (Rs)</th><th>Phone</th><th>Reminder</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in pending %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ p.student.full_name }}</td>
+        <td>{{ p.student.bace_property.name if p.student.bace_property else '-' }}</td>
+        <td>
+          {% if p.status == 'Partial' %}<span class="badge" style="background:#c9a227;">Partial</span>
+          {% else %}<span class="badge" style="background:#b3261e;">Pending</span>{% endif %}
+        </td>
+        <td>{{ '%.2f' | format(p.due) }}</td>
+        <td>{{ p.student.phone or '-' }}</td>
+        <td class="d-flex gap-1 flex-wrap">
+          <button type="button" class="btn btn-sm btn-outline-secondary bace-copy" data-text="{{ p.message }}">Copy</button>
+          {% if p.wa_link %}
+          <a class="btn btn-sm btn-outline-success" href="{{ p.wa_link }}" target="_blank" rel="noopener">WhatsApp</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h5 class="mb-2">Combined (broadcast to everyone pending)</h5>
+<textarea class="form-control mb-2" id="bace-combined" rows="8" readonly style="max-width:800px">{{ combined }}</textarea>
+<button type="button" class="btn btn-sm btn-primary bace-copy" data-target="bace-combined">Copy all</button>
+{% endif %}
+
+<script>
+(function () {
+  document.querySelectorAll('.bace-copy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      let text = btn.getAttribute('data-text');
+      const targetId = btn.getAttribute('data-target');
+      if (targetId) {
+        const el = document.getElementById(targetId);
+        text = el ? el.value : '';
+      }
+      if (!text) return;
+      const done = function () {
+        const original = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(function () { btn.textContent = original; }, 1500);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(function () {
+          const el = document.getElementById(targetId);
+          if (el) { el.select(); document.execCommand('copy'); done(); }
+        });
+      } else {
+        const el = document.getElementById(targetId);
+        if (el) { el.select(); document.execCommand('copy'); done(); }
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}

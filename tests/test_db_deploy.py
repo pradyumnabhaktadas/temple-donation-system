@@ -158,6 +158,13 @@ class TestExistingDatabase:
             "        # current models, so the forward migration's create_table would\n"
             "        # collide with it.\n"
             "        conn.execute(sa.text('DROP TABLE zoho_forms'))\n"
+            "        # bace_rent_payments / bace_students (d4b81e6c3f92) -- same\n"
+            "        # reasoning again: create_all() above already built these from\n"
+            "        # the current models, so the forward migration's create_table\n"
+            "        # would collide. Drop the payments table first -- it carries a\n"
+            "        # foreign key to bace_students.\n"
+            "        conn.execute(sa.text('DROP TABLE bace_rent_payments'))\n"
+            "        conn.execute(sa.text('DROP TABLE bace_students'))\n"
 
             f"    stamp(revision='{revision}')\n"
         )

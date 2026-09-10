@@ -248,6 +248,34 @@ def send_daily_report_whatsapp(cfg, phone, report_data, org_name):
         return False, str(exc)
 
 
+def cancellation_whatsapp_link(donation, donor, org_cfg):
+    """Builds a wa.me deep link with a pre-filled cancellation notice for
+    `donor`, opened manually by staff -- same copy-paste/wa.me pattern the
+    BACE Pending List uses (see admin.bace_pending_list), since there's no
+    generic WhatsApp-send capability in this app: only two fixed,
+    pre-approved templates exist (send_receipt_whatsapp,
+    send_daily_report_whatsapp above), neither usable for a cancellation
+    notice, and getting a new template approved by Meta/Airtel isn't
+    instant. Returns None if the donor has no WhatsApp-reachable number on
+    file.
+    """
+    phone = donor.whatsapp_or_phone
+    if not phone:
+        return None
+
+    import urllib.parse
+
+    org_name = org_cfg.get("ORG_PARENT_NAME") or org_cfg.get("ORG_NAME") or "the temple"
+    receipt_label = donation.receipt_number or f"#{donation.id}"
+    message = (
+        f"Hare Krishna {donor.full_name or 'Donor'}, your donation of Rs "
+        f"{donation.amount:,.2f} to {org_name} (receipt {receipt_label}) has been "
+        f"cancelled. Reason: {donation.cancellation_reason or '-'}. If you have any "
+        "questions, please get in touch with us. Hare Krishna."
+    )
+    return f"https://wa.me/{_to_e164(phone)}?text={urllib.parse.quote(message)}"
+
+
 def _headers(cfg):
     # Authorization is deliberately not built here -- requests' own
     # auth=(username, password) kwarg (see the call above) constructs a

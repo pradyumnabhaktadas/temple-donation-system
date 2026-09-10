@@ -1,0 +1,115 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Reassign Campaign{% endblock %}
+{% block content %}
+<h3 class="mb-3">🔀 Reassign Campaign -- {{ donation.receipt_number or ('#' ~ donation.id) }}</h3>
+
+<p class="text-muted" style="max-width:680px">
+  Corrects which campaign this donation is filed under. Currently: <strong>{{ donation.campaign.name }}</strong>
+  ({{ 'donor: ' ~ donation.donor.full_name }}, Rs. {{ '%.2f' | format(donation.amount) }}).
+  Campaign controls 80G eligibility and what the receipt's Purpose line says, so the receipt
+  <strong>regenerates under the same receipt number</strong> once you save -- this fixes the existing
+  document, it doesn't issue a new one.
+</p>
+
+<div class="card card-body shadow-sm p-4" style="max-width:600px">
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="mb-3">
+      <label class="form-label">Campaign</label>
+      <select class="form-select" id="campaign_id" name="campaign_id" required>
+        {% for c in campaigns %}
+        <option value="{{ c.id }}" data-name="{{ c.name }}" {% if donation.campaign_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="row mb-3" id="bace-property-field" style="display:none;">
+      <div class="col-12">
+        <label class="form-label">BACE property</label>
+        <select class="form-select" id="bace_property_id" name="bace_property_id">
+          <option value="">-- choose --</option>
+          {% for p in bace_properties %}
+          <option value="{{ p.id }}" {% if donation.bace_property_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="row mb-3" id="festival-fields" style="display:none;">
+      <div class="col-md-6">
+        <label class="form-label">Festival</label>
+        <select class="form-select" id="festival_id" name="festival_id">
+          <option value="">-- choose --</option>
+          {% for f in festivals %}
+          <option value="{{ f.id }}" {% if donation.festival_id == f.id %}selected{% endif %}>{{ f.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Seva type (optional)</label>
+        <select class="form-select" id="seva_type_id" name="seva_type_id">
+          <option value="">-- none --</option>
+          {% for s in seva_types %}
+          <option value="{{ s.id }}" {% if donation.seva_type_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="mb-3" id="live-to-give-purpose-field" style="display:none;">
+      <label class="form-label">Donation purpose</label>
+      <select class="form-select" id="live_to_give_purpose_id" name="live_to_give_purpose_id">
+        <option value="">-- choose --</option>
+        {% for p in live_to_give_purposes %}
+        <option value="{{ p.id }}" {% if donation.live_to_give_purpose_id == p.id %}selected{% endif %}>{{ p.name }}{% if not p.is_80g %} (Non-80G){% endif %}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="mb-3" id="live-to-give-receipt-type-field" style="display:none;">
+      <label class="form-label">80G receipt?</label>
+      <select class="form-select" name="receipt_type">
+        <option value="default" {% if donation.is_80g_requested is none %}selected{% endif %}>Use campaign default</option>
+        <option value="80g" {% if donation.is_80g_requested == True %}selected{% endif %}>Yes -- 80G</option>
+        <option value="non80g" {% if donation.is_80g_requested == False %}selected{% endif %}>No -- Non-80G</option>
+      </select>
+    </div>
+
+    <div class="form-check mb-3">
+      <input class="form-check-input" type="checkbox" name="resend_receipt" id="resend_receipt" value="yes">
+      <label class="form-check-label" for="resend_receipt">
+        Re-send the corrected receipt to the donor (email/WhatsApp)
+      </label>
+    </div>
+
+    <button class="btn btn-gold btn-sm" type="submit"
+            data-confirm="Reassign this donation to the selected campaign and regenerate its receipt? This changes an already-issued 80G tax document.">
+      Save &amp; regenerate receipt
+    </button>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.donor_detail', donor_id=donation.donor_id) }}">Cancel</a>
+  </form>
+</div>
+
+<script>
+(function () {
+  const campaignSelect = document.getElementById('campaign_id');
+  const baceField = document.getElementById('bace-property-field');
+  const festivalFields = document.getElementById('festival-fields');
+  const liveToGivePurposeField = document.getElementById('live-to-give-purpose-field');
+  const liveToGiveReceiptTypeField = document.getElementById('live-to-give-receipt-type-field');
+
+  function sync() {
+    const selected = campaignSelect.options[campaignSelect.selectedIndex];
+    const name = selected ? selected.dataset.name : '';
+    baceField.style.display = name === 'BACE Contribution' ? '' : 'none';
+    festivalFields.style.display = name === 'Festivals' ? '' : 'none';
+    liveToGivePurposeField.style.display = name === 'Live To Give' ? '' : 'none';
+    liveToGiveReceiptTypeField.style.display = name === 'Live To Give' ? '' : 'none';
+  }
+
+  campaignSelect.addEventListener('change', sync);
+  sync();
+})();
+</script>
+{% endblock %}

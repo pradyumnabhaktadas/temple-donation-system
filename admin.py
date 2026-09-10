@@ -21,6 +21,7 @@ from models import (
     Camp,
     Donor, Campaign, Donation, AdminUser, ReceiptCounter, BaceProperty, Festival, SevaType,
     LiveToGivePurpose, Preacher, AssociatedWith, AdminActivityLog, DailyReportRecipient,
+    BaceStudent, BaceRentPayment, BACE_PAYMENT_MODES,
     REPORT_FREQUENCIES,
     DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES, DONATION_FREQUENCY_LABELS,
 )
@@ -28,9 +29,10 @@ from utils import csv_safe_row, get_financial_year, is_valid_pan, is_valid_phone
 from pdf_utils import generate_receipt_pdf
 from public import (
     find_or_create_donor, _org_cfg, high_value_pan_address_error, _finalize_success,
-    _send_receipt_notifications_background,
+    _send_receipt_notifications_background, _send_cancellation_notifications_background,
 )
 from backup_utils import build_backup_zip, run_backup, restore_backup_zip
+import bace_tracker
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -1483,9 +1485,20 @@ def donations():
     pagination = db.paginate(query, page=page, per_page=DONATIONS_PER_PAGE, error_out=False)
     campaigns = Campaign.query.order_by(Campaign.name).all()
     associated_withs = AssociatedWith.query.order_by(AssociatedWith.display_order, AssociatedWith.name).all()
+
+    # Cancelled donations on this page only -- a manual wa.me link for the
+    # cancellation notice, same copy-paste/wa.me pattern as the BACE
+    # Pending List (see whatsapp_utils.cancellation_whatsapp_link for why
+    # this can't just be sent automatically like the receipt is).
+    from whatsapp_utils import cancellation_whatsapp_link
+    cancellation_wa_links = {
+        d.id: cancellation_whatsapp_link(d, d.donor, _org_cfg())
+        for d in pagination.items if d.status == "cancelled"
+    }
+
     return render_template(
         "admin/donations.html", donations=pagination.items, pagination=pagination, campaigns=campaigns,
-        associated_withs=associated_withs, sort=sort, **filters,
+        associated_withs=associated_withs, sort=sort, cancellation_wa_links=cancellation_wa_links, **filters,
     )
 
 
@@ -1504,6 +1517,13 @@ def cancel_donation(donation_id):
     issued in this system. The /receipt/<id> download route already
     refuses to serve non-"success" donations, so a cancelled receipt just
     becomes undownloadable rather than being altered or reissued.
+
+    The donor is notified of the cancellation: an email goes out
+    automatically in the background (if SMTP is configured and they have
+    an email on file -- see _send_cancellation_notifications_background),
+    and a wa.me link with the same message pre-filled appears on the
+    Donations page for staff to send manually (no generic WhatsApp-send
+    capability exists in this app -- see whatsapp_utils.cancellation_whatsapp_link).
     """
     donation = Donation.query.get_or_404(donation_id)
     if donation.status == "cancelled":
@@ -1528,7 +1548,24 @@ def cancel_donation(donation_id):
     )
     db.session.commit()
 
-    flash(f"Donation {donation.receipt_number or ('#' + str(donation.id))} has been cancelled.")
+    # Best-effort, same pattern as the resend-receipt notification in
+    # reassign_donation_campaign below: never let a slow/failing email
+    # provider hold up the admin's request, and run it inline (not on a
+    # thread) under TESTING so tests can assert on it deterministically.
+    app = current_app._get_current_object()
+    if app.config.get("TESTING"):
+        _send_cancellation_notifications_background(app, donation.id)
+    else:
+        threading.Thread(
+            target=_send_cancellation_notifications_background,
+            args=(app, donation.id), daemon=True,
+        ).start()
+
+    flash(
+        f"Donation {donation.receipt_number or ('#' + str(donation.id))} has been cancelled. "
+        "Emailing the donor now if they have an email on file (WhatsApp: use the "
+        "\"WhatsApp cancellation notice\" link on the Donations page to send one manually)."
+    )
     return redirect(url_for("admin.donor_detail", donor_id=donation.donor_id))
 
 
@@ -1674,6 +1711,152 @@ def _offline_donation_form_context():
         # would default the field to yesterday's date.
         "today": now_ist().date(),
     }
+
+
+@bp.route("/donations/<int:donation_id>/reassign-campaign", methods=["GET", "POST"])
+@login_required
+@admin_role_required
+def reassign_donation_campaign(donation_id):
+    """Corrects which campaign a donation is filed under -- the general
+    fix for the specific case this was built for: a BACE resident who
+    donated through Live To Give by mistake instead of BACE Contribution.
+
+    Not just a field update. Campaign controls 80G eligibility
+    (Donation.effective_is_80g) and what prints on the receipt PDF's
+    Purpose line (see pdf_utils.generate_receipt_pdf -- BACE Contribution
+    always reads "BACE Contribution" there, Live To Give shows the
+    specific purpose picked), and a receipt is stored as the literal PDF
+    that was issued, never regenerated on demand. So a donation already
+    filed wrong almost certainly already has a receipt that's now wrong
+    in two ways. This corrects both: the receipt regenerates in place,
+    under the *same* receipt number (this fixes an existing receipt, it
+    doesn't issue a new one), reflecting the corrected campaign/purpose/
+    80G status, with an optional resend to the donor.
+
+    Restricted to status == "success": a pending/failed/cancelled
+    donation either has no receipt yet or has one frozen by cancellation,
+    neither of which this needs to touch."""
+    donation = Donation.query.get_or_404(donation_id)
+    if donation.status != "success":
+        flash("Only a successful donation can have its campaign reassigned.")
+        return redirect(url_for("admin.donor_detail", donor_id=donation.donor_id))
+
+    if request.method == "POST":
+        campaign_id, error = _validated_id_from_form(request.form, "campaign_id", Campaign, "campaign")
+        if not error and not campaign_id:
+            error = "Please choose a campaign."
+        if error:
+            flash(error)
+            return redirect(url_for("admin.reassign_donation_campaign", donation_id=donation_id))
+        new_campaign = Campaign.query.get(campaign_id)
+
+        bace_property_id, error = _validated_id_from_form(request.form, "bace_property_id", BaceProperty, "BACE property")
+        if error:
+            flash(error)
+            return redirect(url_for("admin.reassign_donation_campaign", donation_id=donation_id))
+        festival_id, error = _validated_id_from_form(request.form, "festival_id", Festival, "festival")
+        if error:
+            flash(error)
+            return redirect(url_for("admin.reassign_donation_campaign", donation_id=donation_id))
+        seva_type_id, error = _validated_id_from_form(request.form, "seva_type_id", SevaType, "seva type")
+        if error:
+            flash(error)
+            return redirect(url_for("admin.reassign_donation_campaign", donation_id=donation_id))
+        live_to_give_purpose_id, error = _validated_id_from_form(
+            request.form, "live_to_give_purpose_id", LiveToGivePurpose, "donation purpose"
+        )
+        if error:
+            flash(error)
+            return redirect(url_for("admin.reassign_donation_campaign", donation_id=donation_id))
+
+        if new_campaign.name == "BACE Contribution" and not bace_property_id:
+            flash("Please choose which BACE property this donation is for.")
+            return redirect(url_for("admin.reassign_donation_campaign", donation_id=donation_id))
+        if new_campaign.name == "Festivals" and not festival_id:
+            flash("Please choose which festival this donation is for.")
+            return redirect(url_for("admin.reassign_donation_campaign", donation_id=donation_id))
+
+        receipt_type = request.form.get("receipt_type")
+        if receipt_type == "80g":
+            is_80g_requested = True
+        elif receipt_type == "non80g":
+            is_80g_requested = False
+        else:
+            is_80g_requested = None
+
+        # Same hard rule manual_donation enforces -- a purpose's own 80G
+        # eligibility can't be overridden by picking "80g" here.
+        if new_campaign.name == "Live To Give" and live_to_give_purpose_id and is_80g_requested:
+            purpose = LiveToGivePurpose.query.get(live_to_give_purpose_id)
+            if purpose and not purpose.is_80g:
+                flash(
+                    f"'{purpose.name}' isn't 80G-eligible -- select \"No\" for the 80G receipt "
+                    "question, or a different purpose."
+                )
+                return redirect(url_for("admin.reassign_donation_campaign", donation_id=donation_id))
+
+        old_campaign_name = donation.campaign.name
+        old_receipt_number = donation.receipt_number
+        old_is_80g = donation.effective_is_80g
+
+        # The *_id columns, not the relationship objects. donation was
+        # already read for old_is_80g above -- effective_is_80g touches
+        # donation.live_to_give_purpose, which SQLAlchemy caches on the
+        # instance once loaded. Setting the *_id column directly still
+        # keeps that cache correctly in sync (SQLAlchemy correlates a
+        # many-to-one relationship attribute to its own FK column
+        # automatically); assigning a relationship *object* instead
+        # doesn't give the same guarantee, and a donation moved off Live
+        # To Give was caught keeping a stale .live_to_give_purpose object
+        # -- effective_is_80g crashed dereferencing it a few lines below.
+        donation.campaign_id = new_campaign.id
+        donation.bace_property_id = (
+            bace_property_id if new_campaign.name == "BACE Contribution" else None
+        )
+        donation.festival_id = festival_id if new_campaign.name == "Festivals" else None
+        donation.seva_type_id = seva_type_id if new_campaign.name == "Festivals" else None
+        donation.live_to_give_purpose_id = (
+            live_to_give_purpose_id if new_campaign.name == "Live To Give" else None
+        )
+        donation.is_80g_requested = is_80g_requested if new_campaign.name == "Live To Give" else None
+
+        new_is_80g = donation.effective_is_80g
+
+        try:
+            pdf_bytes = generate_receipt_pdf(donation, donation.donor, new_campaign, _org_cfg())
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception(
+                "Receipt regeneration failed while reassigning donation %s", donation.id
+            )
+            flash("Couldn't regenerate the receipt for the new campaign -- nothing was changed. Please try again.", "danger")
+            return redirect(url_for("admin.reassign_donation_campaign", donation_id=donation_id))
+        donation.receipt_pdf = pdf_bytes
+
+        detail = (
+            f"Reassigned donation #{donation.id} (receipt {old_receipt_number}) from "
+            f"'{old_campaign_name}' ({'80G' if old_is_80g else 'Non-80G'}) to "
+            f"'{new_campaign.name}' ({'80G' if new_is_80g else 'Non-80G'})"
+        )
+        log_activity("donation_reassign_campaign", "donation", donation.id, detail)
+        db.session.commit()
+
+        if request.form.get("resend_receipt") == "yes":
+            app = current_app._get_current_object()
+            if app.config.get("TESTING"):
+                _send_receipt_notifications_background(app, donation.id, pdf_bytes)
+            else:
+                threading.Thread(
+                    target=_send_receipt_notifications_background,
+                    args=(app, donation.id, pdf_bytes), daemon=True,
+                ).start()
+
+        flash(f"Donation reassigned to '{new_campaign.name}'. Receipt {old_receipt_number} regenerated to match.")
+        return redirect(url_for("admin.donor_detail", donor_id=donation.donor_id))
+
+    return render_template(
+        "admin/reassign_campaign.html", donation=donation, **_offline_donation_form_context(),
+    )
 
 
 # Column widths taken directly from the Donor model (models.py) -- kept
@@ -3876,6 +4059,433 @@ def bace_property_delete(property_id):
     db.session.commit()
     flash(f"BACE property '{prop.name}' deleted.")
     return redirect(url_for("admin.bace_properties"))
+
+
+# ---------------------------------------------------------------------------
+# BACE Rent Contribution Tracker -- a roster (BaceStudent) and a payments
+# log (BaceRentPayment) are the only two things anyone types into; the
+# Tracker grid, Dashboard and Pending List below are all computed from
+# them by bace_tracker.py. Replaces the spreadsheet of the same name.
+# ---------------------------------------------------------------------------
+
+def _parse_month(raw, label):
+    """'YYYY-MM' (an HTML <input type="month">) -> the 1st of that month,
+    or (None, error string)."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None, f"{label} is required."
+    try:
+        return datetime.datetime.strptime(raw, "%Y-%m").date(), None
+    except ValueError:
+        return None, f"'{raw}' isn't a valid {label.lower()} (expected YYYY-MM)."
+
+
+def _parse_positive_amount(raw, label):
+    raw = (raw or "").strip()
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None, f"{label} must be a number."
+    if value <= 0:
+        return None, f"{label} must be greater than 0."
+    return value, None
+
+
+@bp.route("/bace-students", methods=["GET", "POST"])
+@login_required
+def bace_students():
+    """Roster for the BACE Rent Contribution Tracker -- one row per
+    student paying monthly rent. Deliberately separate from BaceProperty
+    (just the property dropdown on the public /bace-rent donation form):
+    this is *who* owes *what*, which the tracker computation needs and
+    the property list alone can't provide."""
+    if request.method == "POST":
+        if current_user.role != "admin":
+            flash("That action requires an administrator account.")
+            return redirect(url_for("admin.bace_students"))
+
+        full_name = (request.form.get("full_name") or "").strip()
+        if not full_name:
+            flash("Student name can't be blank.")
+            return redirect(url_for("admin.bace_students"))
+
+        phone = (request.form.get("phone") or "").strip()
+        if phone and not is_valid_phone(phone):
+            flash("That phone number doesn't look right.")
+            return redirect(url_for("admin.bace_students"))
+
+        bace_property_id, error = _validated_id_from_form(
+            request.form, "bace_property_id", BaceProperty, "BACE property"
+        )
+        if not error and not bace_property_id:
+            error = "Please choose which BACE property this student stays at."
+        if error:
+            flash(error)
+            return redirect(url_for("admin.bace_students"))
+
+        monthly_amount, error = _parse_positive_amount(request.form.get("monthly_amount"), "Monthly amount")
+        if error:
+            flash(error)
+            return redirect(url_for("admin.bace_students"))
+
+        joined_month, error = _parse_month(request.form.get("joined_month"), "Joined month")
+        if error:
+            flash(error)
+            return redirect(url_for("admin.bace_students"))
+
+        student = BaceStudent(
+            full_name=full_name[:200],
+            phone=normalize_phone(phone) if phone else None,
+            bace_property_id=bace_property_id,
+            room_notes=(request.form.get("room_notes") or "").strip()[:200] or None,
+            monthly_amount=monthly_amount,
+            joined_month=joined_month,
+            notes=(request.form.get("notes") or "").strip()[:300] or None,
+        )
+        db.session.add(student)
+        db.session.commit()
+        log_activity("bace_student_add", "bace_student", student.id, f"Added BACE student '{student.full_name}'")
+        db.session.commit()
+        flash(f"'{student.full_name}' added.")
+        return redirect(url_for("admin.bace_students"))
+
+    q = (request.args.get("q") or "").strip()
+    query = BaceStudent.query
+    if q:
+        query = query.filter(BaceStudent.full_name.ilike(f"%{q}%"))
+    students = query.order_by(BaceStudent.status, BaceStudent.full_name).all()
+    properties = BaceProperty.query.filter_by(is_active=True).order_by(BaceProperty.name).all()
+    return render_template("admin/bace_students.html", students=students, properties=properties, q=q)
+
+
+@bp.route("/bace-students/<int:student_id>/toggle", methods=["POST"])
+@login_required
+@admin_role_required
+def toggle_bace_student(student_id):
+    student = BaceStudent.query.get_or_404(student_id)
+    student.status = "Inactive" if student.status == "Active" else "Active"
+    db.session.commit()
+    log_activity(
+        "bace_student_toggle", "bace_student", student.id,
+        f"Set '{student.full_name}' to {student.status}",
+    )
+    db.session.commit()
+    return redirect(url_for("admin.bace_students"))
+
+
+@bp.route("/bace-students/<int:student_id>/edit", methods=["GET", "POST"])
+@login_required
+@admin_role_required
+def bace_student_edit(student_id):
+    student = BaceStudent.query.get_or_404(student_id)
+    properties = BaceProperty.query.order_by(BaceProperty.name).all()
+
+    if request.method == "POST":
+        full_name = (request.form.get("full_name") or "").strip()
+        if not full_name:
+            flash("Student name can't be blank.")
+            return redirect(url_for("admin.bace_student_edit", student_id=student_id))
+
+        phone = (request.form.get("phone") or "").strip()
+        if phone and not is_valid_phone(phone):
+            flash("That phone number doesn't look right.")
+            return redirect(url_for("admin.bace_student_edit", student_id=student_id))
+
+        bace_property_id, error = _validated_id_from_form(
+            request.form, "bace_property_id", BaceProperty, "BACE property"
+        )
+        if not error and not bace_property_id:
+            error = "Please choose which BACE property this student stays at."
+        if error:
+            flash(error)
+            return redirect(url_for("admin.bace_student_edit", student_id=student_id))
+
+        monthly_amount, error = _parse_positive_amount(request.form.get("monthly_amount"), "Monthly amount")
+        if error:
+            flash(error)
+            return redirect(url_for("admin.bace_student_edit", student_id=student_id))
+
+        joined_month, error = _parse_month(request.form.get("joined_month"), "Joined month")
+        if error:
+            flash(error)
+            return redirect(url_for("admin.bace_student_edit", student_id=student_id))
+
+        student.full_name = full_name[:200]
+        student.phone = normalize_phone(phone) if phone else None
+        student.bace_property_id = bace_property_id
+        student.room_notes = (request.form.get("room_notes") or "").strip()[:200] or None
+        student.monthly_amount = monthly_amount
+        student.joined_month = joined_month
+        student.notes = (request.form.get("notes") or "").strip()[:300] or None
+        db.session.commit()
+        log_activity("bace_student_edit", "bace_student", student.id, f"Edited BACE student '{student.full_name}'")
+        db.session.commit()
+        flash(f"'{student.full_name}' updated.")
+        return redirect(url_for("admin.bace_students"))
+
+    return render_template("admin/bace_student_edit.html", student=student, properties=properties)
+
+
+@bp.route("/bace-students/<int:student_id>/delete", methods=["POST"])
+@login_required
+@admin_role_required
+def bace_student_delete(student_id):
+    student = BaceStudent.query.get_or_404(student_id)
+    has_payments = BaceRentPayment.query.filter_by(student_id=student.id).first() is not None
+    if has_payments:
+        flash(
+            f"Can't delete '{student.full_name}' -- they have payments recorded. "
+            "Set their status to Inactive instead so their history stays intact."
+        )
+        return redirect(url_for("admin.bace_students"))
+
+    name = student.full_name
+    db.session.delete(student)
+    db.session.commit()
+    log_activity("bace_student_delete", "bace_student", student_id, f"Removed BACE student '{name}'")
+    db.session.commit()
+    flash(f"'{name}' deleted.")
+    return redirect(url_for("admin.bace_students"))
+
+
+@bp.route("/bace-payments", methods=["GET", "POST"])
+@login_required
+def bace_payments():
+    """Every rent payment, logged by hand regardless of how it arrived --
+    UPI, cash, bank transfer, or through the public BACE Contribution
+    form. This is the one table the whole tracker (Tracker grid,
+    Dashboard, Pending List) is computed from; see bace_tracker.py."""
+    if request.method == "POST":
+        if current_user.role != "admin":
+            flash("That action requires an administrator account.")
+            return redirect(url_for("admin.bace_payments"))
+
+        student_id, error = _validated_id_from_form(request.form, "student_id", BaceStudent, "student")
+        if not error and not student_id:
+            error = "Please choose which student this payment is for."
+        if error:
+            flash(error)
+            return redirect(url_for("admin.bace_payments"))
+
+        for_month, error = _parse_month(request.form.get("for_month"), "Month")
+        if error:
+            flash(error)
+            return redirect(url_for("admin.bace_payments"))
+
+        amount_paid, error = _parse_positive_amount(request.form.get("amount_paid"), "Amount")
+        if error:
+            flash(error)
+            return redirect(url_for("admin.bace_payments"))
+
+        date_raw = (request.form.get("date_paid") or "").strip()
+        try:
+            date_paid = (
+                datetime.datetime.strptime(date_raw, "%Y-%m-%d").date() if date_raw else now_ist().date()
+            )
+        except ValueError:
+            flash(f"'{date_raw}' isn't a valid date (expected YYYY-MM-DD).")
+            return redirect(url_for("admin.bace_payments"))
+
+        student = BaceStudent.query.get(student_id)
+        payment = BaceRentPayment(
+            student_id=student_id,
+            for_month=for_month,
+            amount_paid=amount_paid,
+            date_paid=date_paid,
+            mode=(request.form.get("mode") or "").strip()[:30] or None,
+            recorded_by=current_user.username,
+            reference=(request.form.get("reference") or "").strip()[:200] or None,
+        )
+        db.session.add(payment)
+        db.session.commit()
+        log_activity(
+            "bace_payment_add", "bace_rent_payment", payment.id,
+            f"Rs. {amount_paid:,.2f} from '{student.full_name}' for {for_month.strftime('%b %Y')}",
+        )
+        db.session.commit()
+        flash(f"Payment recorded for '{student.full_name}'.")
+        return redirect(url_for("admin.bace_payments"))
+
+    student_id = request.args.get("student_id", type=int)
+    query = BaceRentPayment.query
+    if student_id:
+        query = query.filter_by(student_id=student_id)
+    page = request.args.get("page", 1, type=int)
+    pagination = db.paginate(
+        query.order_by(BaceRentPayment.date_paid.desc(), BaceRentPayment.id.desc()),
+        page=page, per_page=50, error_out=False,
+    )
+    students = BaceStudent.query.order_by(BaceStudent.full_name).all()
+    active_students = [s for s in students if s.is_active]
+    return render_template(
+        "admin/bace_payments.html", payments=pagination.items, pagination=pagination,
+        students=students, active_students=active_students, student_id=student_id,
+        payment_modes=BACE_PAYMENT_MODES, today=now_ist().date(),
+    )
+
+
+@bp.route("/bace-payments/<int:payment_id>/delete", methods=["POST"])
+@login_required
+@admin_role_required
+def bace_payment_delete(payment_id):
+    """Removes a mis-entered payment row. Nothing else references
+    BaceRentPayment by id (the tracker recomputes from a fresh query every
+    time), so deleting one just makes the tracker see less money paid --
+    exactly the correction a genuine data-entry mistake needs."""
+    payment = BaceRentPayment.query.get_or_404(payment_id)
+    student_name = payment.student.full_name if payment.student else "(unknown)"
+    detail = f"Rs. {payment.amount_paid:,.2f} from '{student_name}' for {payment.for_month.strftime('%b %Y')}"
+    db.session.delete(payment)
+    db.session.commit()
+    log_activity("bace_payment_delete", "bace_rent_payment", payment_id, f"Removed payment: {detail}")
+    db.session.commit()
+    flash("Payment deleted.")
+    return redirect(url_for("admin.bace_payments"))
+
+
+@bp.route("/bace-tracker")
+@login_required
+def bace_tracker_grid():
+    """Rows=students, columns=months, colour-coded from
+    bace_tracker.build_rent_summary -- the computed equivalent of the
+    spreadsheet's Tracker tab. Defaults to the trailing 6 months through
+    this one (a wider window is one URL param away, not a hard cap the
+    way the spreadsheet's pre-formatted columns were)."""
+    today = now_ist().date()
+    from_month, error = _parse_month(request.args.get("from"), "From month")
+    if error:
+        from_month = bace_tracker.add_months(bace_tracker.month_start(today), -5)
+    to_month, error = _parse_month(request.args.get("to"), "Till month")
+    if error:
+        to_month = bace_tracker.month_start(today)
+    if from_month > to_month:
+        from_month, to_month = to_month, from_month
+    months = bace_tracker.months_between(from_month, to_month)
+
+    include_inactive = request.args.get("include_inactive") == "yes"
+    query = BaceStudent.query
+    if not include_inactive:
+        query = query.filter_by(status="Active")
+    students = query.order_by(BaceStudent.full_name).all()
+
+    payments = BaceRentPayment.query.filter(
+        BaceRentPayment.student_id.in_([s.id for s in students])
+    ).all() if students else []
+
+    summary = bace_tracker.build_rent_summary(students, payments, months, today=today)
+
+    return render_template(
+        "admin/bace_tracker.html", summary=summary, months=months,
+        from_month=from_month, to_month=to_month, today=today,
+        include_inactive=include_inactive, bt=bace_tracker,
+    )
+
+
+@bp.route("/bace-dashboard")
+@login_required
+def bace_dashboard():
+    """This month's totals at a glance, base-by-base, plus a full active
+    roster with this month's status/balance/phone for the search box in
+    the template to filter client-side -- the computed equivalent of the
+    spreadsheet's Dashboard tab."""
+    today = now_ist().date()
+    this_month = bace_tracker.month_start(today)
+
+    students = BaceStudent.query.filter_by(status="Active").all()
+    payments = BaceRentPayment.query.filter(
+        BaceRentPayment.student_id.in_([s.id for s in students]),
+        BaceRentPayment.for_month == this_month,
+    ).all() if students else []
+    summary = bace_tracker.build_rent_summary(students, payments, [this_month], today=today)
+
+    due_rows = [row for row in summary if row["this_month_status"] != bace_tracker.STATUS_NA]
+    expected = sum(float(row["student"].monthly_amount) for row in due_rows)
+    collected = sum(
+        float(row["student"].monthly_amount) - float(row["this_month_due"]) for row in due_rows
+    )
+    pending_amount = sum(float(row["this_month_due"]) for row in due_rows)
+    fully_paid = sum(1 for row in due_rows if row["this_month_status"] == bace_tracker.STATUS_PAID)
+    partially_paid = sum(1 for row in due_rows if row["this_month_status"] == bace_tracker.STATUS_PARTIAL)
+    not_paid = sum(1 for row in due_rows if row["this_month_status"] == bace_tracker.STATUS_PENDING)
+    not_due = len(summary) - len(due_rows)
+
+    by_property = {}
+    for row in summary:
+        prop_name = row["student"].bace_property.name if row["student"].bace_property else "(no property)"
+        bucket = by_property.setdefault(prop_name, {"students": 0, "expected": 0.0, "collected": 0.0})
+        if row["this_month_status"] == bace_tracker.STATUS_NA:
+            continue
+        bucket["students"] += 1
+        bucket["expected"] += float(row["student"].monthly_amount)
+        bucket["collected"] += float(row["student"].monthly_amount) - float(row["this_month_due"])
+    base_rows = []
+    for name, b in sorted(by_property.items()):
+        pct = (b["collected"] / b["expected"] * 100) if b["expected"] else 0
+        base_rows.append({
+            "name": name, "students": b["students"], "expected": b["expected"],
+            "collected": b["collected"], "pending": b["expected"] - b["collected"], "pct": pct,
+        })
+
+    return render_template(
+        "admin/bace_dashboard.html", today=today, this_month=this_month, summary=summary,
+        active_count=len(students), expected=expected, collected=collected,
+        pending_amount=pending_amount, fully_paid=fully_paid, partially_paid=partially_paid,
+        not_paid=not_paid, not_due=not_due, base_rows=base_rows, bt=bace_tracker,
+    )
+
+
+@bp.route("/bace-pending")
+@login_required
+def bace_pending_list():
+    """Every active student who is Pending or Partial this month, with a
+    ready-to-send reminder drafted for each -- the computed equivalent of
+    the spreadsheet's Pending List tab. There's no generic WhatsApp-send
+    capability in this app (see whatsapp_utils.py -- only two fixed,
+    pre-approved templates exist, for receipts and the daily report), so
+    same as the spreadsheet: copy the drafted text, or use the wa.me link
+    to open a chat with it pre-filled and hit send yourself."""
+    today = now_ist().date()
+    this_month = bace_tracker.month_start(today)
+
+    students = BaceStudent.query.filter_by(status="Active").all()
+    payments = BaceRentPayment.query.filter(
+        BaceRentPayment.student_id.in_([s.id for s in students]),
+        BaceRentPayment.for_month == this_month,
+    ).all() if students else []
+    summary = bace_tracker.build_rent_summary(students, payments, [this_month], today=today)
+
+    from whatsapp_utils import _to_e164
+
+    pending = []
+    for row in summary:
+        if row["this_month_status"] not in bace_tracker.OUTSTANDING_STATUSES:
+            continue
+        student = row["student"]
+        due = float(row["this_month_due"])
+        property_name = student.bace_property.name if student.bace_property else "BACE"
+        message = (
+            f"Hare Krishna {student.full_name}, your BACE rent contribution of "
+            f"Rs {due:,.0f} for {this_month.strftime('%b-%Y')} ({property_name}) is still "
+            f"{row['this_month_status'].lower()}. Kindly contribute at "
+            "https://givetokrishna.com/bace-rent at your earliest convenience. "
+            "Thank you! Hare Krishna."
+        )
+        wa_link = None
+        if student.phone:
+            import urllib.parse
+            wa_link = f"https://wa.me/{_to_e164(student.phone)}?text={urllib.parse.quote(message)}"
+        pending.append({
+            "student": student, "status": row["this_month_status"], "due": due,
+            "message": message, "wa_link": wa_link,
+        })
+    pending.sort(key=lambda p: p["student"].full_name)
+
+    combined = "\n\n".join(p["message"] for p in pending)
+
+    return render_template(
+        "admin/bace_pending.html", pending=pending, this_month=this_month,
+        today=today, combined=combined,
+    )
 
 
 @bp.route("/daily-report-recipients", methods=["GET", "POST"])

@@ -1,0 +1,45 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Edit BACE Student{% endblock %}
+{% block content %}
+<h3 class="mb-3">🎓 Edit {{ student.full_name }}</h3>
+
+<div class="card card-body shadow-sm p-4" style="max-width:520px">
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-2">
+      <label class="form-label small">Full name</label>
+      <input type="text" class="form-control" name="full_name" value="{{ student.full_name }}" required>
+    </div>
+    <div class="mb-2">
+      <label class="form-label small">Phone</label>
+      <input type="text" class="form-control" name="phone" value="{{ student.phone or '' }}">
+    </div>
+    <div class="mb-2">
+      <label class="form-label small">BACE property</label>
+      <select class="form-select" name="bace_property_id" required>
+        {% for p in properties %}
+        <option value="{{ p.id }}" {% if student.bace_property_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="mb-2">
+      <label class="form-label small">Room / notes</label>
+      <input type="text" class="form-control" name="room_notes" value="{{ student.room_notes or '' }}">
+    </div>
+    <div class="mb-2">
+      <label class="form-label small">Monthly amount (Rs)</label>
+      <input type="number" step="1" min="1" class="form-control" name="monthly_amount" value="{{ '%.0f' | format(student.monthly_amount) }}" required>
+    </div>
+    <div class="mb-2">
+      <label class="form-label small">Joined (month)</label>
+      <input type="month" class="form-control" name="joined_month" value="{{ student.joined_month.strftime('%Y-%m') }}" required>
+    </div>
+    <div class="mb-3">
+      <label class="form-label small">Notes</label>
+      <input type="text" class="form-control" name="notes" value="{{ student.notes or '' }}">
+    </div>
+    <button class="btn btn-gold btn-sm">Save</button>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_students') }}">Cancel</a>
+  </form>
+</div>
+{% endblock %}

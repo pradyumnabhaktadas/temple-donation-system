@@ -1,0 +1,116 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}BACE Students{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h3 class="mb-0">🎓 BACE Students</h3>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_dashboard') }}">Dashboard</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_payments') }}">Payments Log</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_tracker_grid') }}">Tracker</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_pending_list') }}">Pending List</a>
+  </div>
+</div>
+<p class="text-muted">The roster the rent tracker is built from. Add one row per student; when a student leaves, set them Inactive rather than deleting -- deleting is only possible once they have no payments recorded, so their history stays intact.</p>
+
+<form class="row g-2 mb-3">
+  <div class="col-auto">
+    <input type="search" name="q" class="form-control" style="min-width:220px" placeholder="Search by name" value="{{ q or '' }}">
+  </div>
+  <div class="col-auto"><button class="btn btn-sm btn-outline-secondary">Search</button></div>
+</form>
+
+<div class="row">
+  {% if current_user.role == 'admin' %}
+  <div class="col-md-4">
+    <div class="card card-body shadow-sm mb-3 p-3">
+      <h6 class="mb-3">Add a student</h6>
+      <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-2">
+          <label class="form-label small">Full name</label>
+          <input type="text" class="form-control form-control-sm" name="full_name" required>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Phone</label>
+          <input type="text" class="form-control form-control-sm" name="phone">
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">BACE property</label>
+          <select class="form-select form-select-sm" name="bace_property_id" required>
+            <option value="">-- choose --</option>
+            {% for p in properties %}
+            <option value="{{ p.id }}">{{ p.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Room / notes</label>
+          <input type="text" class="form-control form-control-sm" name="room_notes">
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Monthly amount (Rs)</label>
+          <input type="number" step="1" min="1" class="form-control form-control-sm" name="monthly_amount" required>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Joined (month)</label>
+          <input type="month" class="form-control form-control-sm" name="joined_month" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small">Notes</label>
+          <input type="text" class="form-control form-control-sm" name="notes">
+        </div>
+        <button class="btn btn-gold btn-sm">Add</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+  <div class="{% if current_user.role == 'admin' %}col-md-8{% else %}col-12{% endif %}">
+    <div class="table-responsive">
+      <table class="table table-sm table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Property</th>
+            <th>Phone</th>
+            <th>Monthly (Rs)</th>
+            <th>Joined</th>
+            <th>Status</th>
+            {% if current_user.role == 'admin' %}<th></th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in students %}
+          <tr>
+            <td>{{ s.full_name }}</td>
+            <td>{{ s.bace_property.name if s.bace_property else '-' }}</td>
+            <td>{{ s.phone or '-' }}</td>
+            <td>{{ '%.0f' | format(s.monthly_amount) }}</td>
+            <td>{{ s.joined_month.strftime('%b %Y') }}</td>
+            <td>
+              {% if s.is_active %}<span class="badge bg-success">Active</span>
+              {% else %}<span class="badge bg-secondary">Inactive</span>{% endif %}
+            </td>
+            {% if current_user.role == 'admin' %}
+            <td class="text-nowrap">
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_student_edit', student_id=s.id) }}">Edit</a>
+              <form method="post" action="{{ url_for('admin.toggle_bace_student', student_id=s.id) }}" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-secondary">{{ 'Deactivate' if s.is_active else 'Activate' }}</button>
+              </form>
+              <form method="post" action="{{ url_for('admin.bace_student_delete', student_id=s.id) }}" class="d-inline"
+                    data-confirm="Delete '{{ s.full_name }}'? Only possible if they have no payments recorded.">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-danger">Delete</button>
+              </form>
+            </td>
+            {% endif %}
+          </tr>
+          {% else %}
+          <tr><td colspan="7" class="text-muted">No students yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

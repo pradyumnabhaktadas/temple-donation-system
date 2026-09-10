@@ -19,6 +19,8 @@
         <a class="nav-link {% if request.endpoint in offline_donation_endpoints %}active{% endif %}" href="{{ url_for('admin.manual_donation') }}">Offline Donation</a>
         {% set iyf_camp_endpoints = ['admin.iyf_camps', 'admin.iyf_camp_single', 'admin.iyf_camp_bulk'] %}
         <a class="nav-link {% if request.endpoint in iyf_camp_endpoints %}active{% endif %}" href="{{ url_for('admin.iyf_camps') }}">IYF Camps</a>
+        {% set bace_tracker_endpoints = ['admin.bace_dashboard', 'admin.bace_students', 'admin.bace_student_edit', 'admin.bace_payments', 'admin.bace_tracker_grid', 'admin.bace_pending_list'] %}
+        <a class="nav-link {% if request.endpoint in bace_tracker_endpoints %}active{% endif %}" href="{{ url_for('admin.bace_dashboard') }}">BACE Rent Tracker</a>
         {% if current_user.is_authenticated and current_user.role == 'admin' %}
         <a class="nav-link {% if request.endpoint == 'admin.import_legacy_donations' %}active{% endif %}" href="{{ url_for('admin.import_legacy_donations') }}">Import Historical Data</a>
         <a class="nav-link {% if request.endpoint == 'admin.import_zoho_report' %}active{% endif %}" href="{{ url_for('admin.import_zoho_report') }}">Import Zoho Report</a>

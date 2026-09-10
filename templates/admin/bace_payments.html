@@ -1,0 +1,132 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}BACE Payments Log{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h3 class="mb-0">💰 BACE Payments Log</h3>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_dashboard') }}">Dashboard</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_students') }}">Students</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_tracker_grid') }}">Tracker</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_pending_list') }}">Pending List</a>
+  </div>
+</div>
+<p class="text-muted">Every rent payment, logged by hand regardless of how it arrived -- UPI, cash, bank transfer, or through the public BACE Contribution form. A student paying two months at once gets two rows; a partial amount just gets that amount entered.</p>
+
+<div class="row">
+  {% if current_user.role == 'admin' %}
+  <div class="col-md-4">
+    <div class="card card-body shadow-sm mb-3 p-3">
+      <h6 class="mb-3">Record a payment</h6>
+      {% if not active_students %}
+      <p class="text-muted small">Add a student first under <a href="{{ url_for('admin.bace_students') }}">BACE Students</a>.</p>
+      {% else %}
+      <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-2">
+          <label class="form-label small">Student</label>
+          <select class="form-select form-select-sm" name="student_id" required>
+            <option value="">-- choose --</option>
+            {% for s in active_students %}
+            <option value="{{ s.id }}">{{ s.full_name }} ({{ s.bace_property.name if s.bace_property else '?' }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">For month</label>
+          <input type="month" class="form-control form-control-sm" name="for_month" value="{{ today.strftime('%Y-%m') }}" required>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Amount paid (Rs)</label>
+          <input type="number" step="1" min="1" class="form-control form-control-sm" name="amount_paid" required>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Date paid</label>
+          <input type="date" class="form-control form-control-sm" name="date_paid" value="{{ today.isoformat() }}">
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Mode of payment</label>
+          <select class="form-select form-select-sm" name="mode">
+            {% for m in payment_modes %}
+            <option value="{{ m }}">{{ m }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small">Reference / notes</label>
+          <input type="text" class="form-control form-control-sm" name="reference" placeholder="UTR / ref number, if any">
+        </div>
+        <button class="btn btn-gold btn-sm">Record payment</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+  <div class="{% if current_user.role == 'admin' %}col-md-8{% else %}col-12{% endif %}">
+    <form class="row g-2 mb-3">
+      <div class="col-auto">
+        <select name="student_id" class="form-select form-select-sm" onchange="this.form.submit()">
+          <option value="">All students</option>
+          {% for s in students %}
+          <option value="{{ s.id }}" {% if student_id == s.id %}selected{% endif %}>{{ s.full_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </form>
+    <div class="table-responsive">
+      <table class="table table-sm table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Student</th>
+            <th>For month</th>
+            <th>Amount (Rs)</th>
+            <th>Mode</th>
+            <th>Recorded by</th>
+            <th>Reference</th>
+            {% if current_user.role == 'admin' %}<th></th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in payments %}
+          <tr>
+            <td>{{ p.date_paid.strftime('%d %b %Y') }}</td>
+            <td>{{ p.student.full_name if p.student else '(deleted)' }}</td>
+            <td>{{ p.for_month.strftime('%b %Y') }}</td>
+            <td>{{ '%.2f' | format(p.amount_paid) }}</td>
+            <td>{{ p.mode or '-' }}</td>
+            <td>{{ p.recorded_by or '-' }}</td>
+            <td>{{ p.reference or '-' }}</td>
+            {% if current_user.role == 'admin' %}
+            <td>
+              <form method="post" action="{{ url_for('admin.bace_payment_delete', payment_id=p.id) }}"
+                    data-confirm="Delete this Rs. {{ '%.2f' | format(p.amount_paid) }} payment from {{ p.student.full_name if p.student else 'this student' }}?">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-danger">Delete</button>
+              </form>
+            </td>
+            {% endif %}
+          </tr>
+          {% else %}
+          <tr><td colspan="8" class="text-muted">No payments logged yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if pagination and pagination.pages > 1 %}
+    <nav>
+      <ul class="pagination pagination-sm">
+        {% for pg in pagination.iter_pages() %}
+        <li class="page-item {% if pg == pagination.page %}active{% endif %} {% if not pg %}disabled{% endif %}">
+          {% if pg %}
+          <a class="page-link" href="{{ url_for('admin.bace_payments', page=pg, student_id=student_id) }}">{{ pg }}</a>
+          {% else %}
+          <span class="page-link">&hellip;</span>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </nav>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

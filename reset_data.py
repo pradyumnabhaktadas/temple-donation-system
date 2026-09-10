@@ -1,8 +1,8 @@
 """Wipes ALL data from the database -- every donor, donation, receipt,
-campaign, BACE property, festival, seva type, Live To Give purpose,
-activity log entry, and admin login. This is IRREVERSIBLE. Meant for
-clearing out seed/test data before importing the real donor/donation
-history for go-live.
+campaign, BACE property, BACE student and rent payment, festival, seva
+type, Live To Give purpose, activity log entry, and admin login. This is
+IRREVERSIBLE. Meant for clearing out seed/test data before importing the
+real donor/donation history for go-live.
 
 Only deletes rows -- does not touch the schema (tables/columns), so there's
 no need to re-run migrations afterward.
@@ -35,6 +35,7 @@ from models import (
     Camp, Donation, Donor, Campaign, BaceProperty, Festival, SevaType,
     LiveToGivePurpose, Preacher, AssociatedWith, ReceiptCounter, DonorLoginOTP,
     AdminActivityLog, AdminUser, DailyReportRecipient, ZohoForm,
+    BaceRentPayment, BaceStudent,
 )
 
 CONFIRMATION_PHRASE = "DELETE ALL DATA"
@@ -59,6 +60,10 @@ MODELS_IN_DELETE_ORDER = [
     ReceiptCounter,
     Donor,
     Campaign,
+    # Before BaceProperty -- BaceStudent holds a foreign key to it, and
+    # BaceRentPayment holds a foreign key to BaceStudent.
+    BaceRentPayment,
+    BaceStudent,
     BaceProperty,
     Festival,
     SevaType,
