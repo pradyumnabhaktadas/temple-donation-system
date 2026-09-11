@@ -336,6 +336,28 @@ class TestManualRecordAsRentPayment:
             f"/admin/bace-contributions?bace_property_id={prop_id}&page=2"
         )
 
+    def test_record_button_backfills_missing_property_from_matched_student(self, client, app):
+        prop_id = _property(app)
+        donation = _insert_legacy_bace_donation(
+            prop_id, full_name="Historical Property", phone="9319880507", amount=8000,
+        )
+        # Older imports can belong to the BACE campaign without carrying a
+        # bace_property_id, even though the donor is on the student roster.
+        from extensions import db
+        donation.bace_property_id = None
+        db.session.commit()
+        _add_student(client, prop_id, full_name="Historical Property", phone="9319880507")
+
+        client.post(
+            f"/admin/bace-contributions/{donation.id}/record-rent-payment", data={},
+            follow_redirects=True,
+        )
+
+        from models import BaceRentPayment, Donation
+        payment = BaceRentPayment.query.filter_by(source_donation_id=donation.id).one()
+        assert payment.student.bace_property_id == prop_id
+        assert Donation.query.get(donation.id).bace_property_id == prop_id
+
     def test_recording_twice_is_refused(self, client, app):
         prop_id = _property(app)
         _add_student(client, prop_id, full_name="Once Only", phone="9319880507")

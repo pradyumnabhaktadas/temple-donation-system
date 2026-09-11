@@ -4956,7 +4956,7 @@ def record_bace_rent_payment(donation_id):
     return_to = _safe_bace_contributions_return_url(request.form.get("return_to"))
     contribution_logs = return_to or url_for("admin.bace_contributions")
     donation = Donation.query.get_or_404(donation_id)
-    if donation.status != "success" or not donation.bace_property_id:
+    if donation.status != "success":
         flash("Only successful BACE Contribution donations can be recorded as rent payments.")
         return redirect(contribution_logs)
 
@@ -4964,7 +4964,23 @@ def record_bace_rent_payment(donation_id):
         flash("This donation has already been recorded as a rent payment.")
         return redirect(contribution_logs)
 
-    payment = bace_matching.record_matched_donation(donation)
+    # Some older BACE Contribution imports predate the BACE-property field.
+    # The log can still identify one exact student from phone/email, but the
+    # generic matcher correctly refuses to create a payment until a property
+    # is present.  For this manual, admin-only action it is safe to backfill
+    # that missing property from the uniquely matched student's roster row.
+    student = bace_matching.match_students([donation]).get(donation.id)
+    if not student:
+        flash(
+            "Couldn't find exactly one BACE student whose phone or email matches this "
+            "donor -- add them to the roster first (or fix the roster if two students "
+            "share this contact detail), then try again."
+        )
+        return redirect(contribution_logs)
+    if not donation.bace_property_id:
+        donation.bace_property_id = student.bace_property_id
+
+    payment = bace_matching.record_matched_donation(donation, student=student)
     if not payment:
         flash(
             "Couldn't find exactly one BACE student whose phone or email matches this "
