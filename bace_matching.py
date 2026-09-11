@@ -86,6 +86,8 @@ def record_matched_donation(donation, student=None):
         return None
     if BaceRentPayment.query.filter_by(source_donation_id=donation.id).first():
         return None
+    if student is None and donation.bace_student_id:
+        student = BaceStudent.query.get(donation.bace_student_id)
     if student is None:
         student = match_students([donation]).get(donation.id)
     if not student:

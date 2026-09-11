@@ -26,7 +26,7 @@ from models import (
     REPORT_FREQUENCIES,
     DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES, DONATION_FREQUENCY_LABELS,
 )
-from utils import csv_safe_row, get_financial_year, is_valid_pan, is_valid_phone, normalize_phone, now_ist, to_ist, ist_day_bounds_utc
+from utils import csv_safe_row, get_financial_year, is_valid_pan, is_valid_phone, normalize_phone, now_ist, to_ist, ist_day_bounds_utc, bace_student_payment_token
 from pdf_utils import generate_receipt_pdf
 from public import (
     find_or_create_donor, _org_cfg, high_value_pan_address_error, _finalize_success,
@@ -4424,6 +4424,33 @@ def bace_payments():
             flash("This donation has already been recorded as a rent payment.")
             return redirect(return_to or url_for("admin.bace_payments"))
 
+        # A second click (or a retry after a slow connection) must not turn
+        # one manual entry into two rent payments.  A reference/UTR is a
+        # durable identifier, so it is always unique per student/month.  A
+        # cash entry may legitimately have no reference, therefore only
+        # treat it as a duplicate when every entry detail is identical and
+        # it was created in the last five minutes.
+        reference = (request.form.get("reference") or "").strip()[:200] or None
+        mode = (request.form.get("mode") or "").strip()[:30] or None
+        duplicate_query = BaceRentPayment.query.filter_by(
+            student_id=student_id, for_month=for_month, amount_paid=amount_paid,
+        )
+        if reference:
+            duplicate = duplicate_query.filter(BaceRentPayment.reference == reference).first()
+        else:
+            duplicate_cutoff = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
+            duplicate = duplicate_query.filter(
+                BaceRentPayment.reference.is_(None),
+                BaceRentPayment.date_paid == date_paid,
+                BaceRentPayment.mode == mode,
+                BaceRentPayment.created_at >= duplicate_cutoff,
+            ).first()
+        if duplicate:
+            flash(
+                "A matching rent payment is already recorded. Check the Payments Log before adding it again."
+            )
+            return redirect(return_to or url_for("admin.bace_payments"))
+
         student = BaceStudent.query.get(student_id)
         # A staff member can manually link an older BACE Contribution that
         # did not match the roster automatically.  The selected student is
@@ -4437,9 +4464,9 @@ def bace_payments():
             for_month=for_month,
             amount_paid=amount_paid,
             date_paid=date_paid,
-            mode=(request.form.get("mode") or "").strip()[:30] or None,
+            mode=mode,
             recorded_by=current_user.username,
-            reference=(request.form.get("reference") or "").strip()[:200] or None,
+            reference=reference,
             source_donation_id=source_donation_id or None,
         )
         db.session.add(payment)
@@ -4528,6 +4555,65 @@ def export_bace_payments():
         output.getvalue(),
         mimetype="text/csv",
         headers={"Content-Disposition": "attachment;filename=BACE_Payments_Log.csv"},
+    )
+
+
+@bp.route("/bace-statement/export")
+@login_required
+def export_bace_monthly_statement():
+    """One accounting-ready BACE statement for a selected calendar month.
+
+    Unlike the tracker export (which is designed for following individual
+    students over time), this is a concise property-wise month-end view:
+    expected rent from immutable ledger charges, money actually received,
+    and the remaining balance.  It is CSV so accounts can open it directly
+    in Excel or import it into their bookkeeping system.
+    """
+    month, error = _parse_month(request.args.get("month"), "Month")
+    if error:
+        month = bace_tracker.month_start(now_ist().date())
+    _ensure_current_bace_rent_charges(now_ist().date())
+
+    properties = BaceProperty.query.order_by(BaceProperty.name).all()
+    students = BaceStudent.query.filter(BaceStudent.joined_month <= month).all()
+    student_ids = [student.id for student in students]
+    charges = BaceRentCharge.query.filter(
+        BaceRentCharge.for_month == month,
+        BaceRentCharge.student_id.in_(student_ids),
+    ).all() if student_ids else []
+    payments = BaceRentPayment.query.filter(
+        BaceRentPayment.for_month == month,
+        BaceRentPayment.student_id.in_(student_ids),
+    ).all() if student_ids else []
+    expected_by_student = {charge.student_id: float(charge.amount_due) for charge in charges}
+    paid_by_student = bace_tracker.payments_by_student_month(payments)
+
+    totals = {prop.id: {"expected": 0.0, "paid": 0.0, "students": 0} for prop in properties}
+    for student in students:
+        expected = expected_by_student.get(student.id, 0.0)
+        if not expected:
+            continue
+        bucket = totals.setdefault(student.bace_property_id, {"expected": 0.0, "paid": 0.0, "students": 0})
+        bucket["students"] += 1
+        bucket["expected"] += expected
+        bucket["paid"] += float(paid_by_student.get(student.id, {}).get(month, 0))
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["BACE monthly accounting statement", month.strftime("%B %Y")])
+    writer.writerow(["Property", "Students due", "Expected rent (Rs)", "Received (Rs)", "Balance due (Rs)"])
+    grand_expected = grand_paid = 0.0
+    for prop in properties:
+        bucket = totals.get(prop.id, {})
+        expected = bucket.get("expected", 0.0)
+        paid = bucket.get("paid", 0.0)
+        grand_expected += expected
+        grand_paid += paid
+        writer.writerow(csv_safe_row([prop.name, bucket.get("students", 0), expected, paid, expected - paid]))
+    writer.writerow(["Total", "", grand_expected, grand_paid, grand_expected - grand_paid])
+    return Response(
+        output.getvalue(), mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment;filename=BACE_Monthly_Statement_{month:%Y-%m}.csv"},
     )
 
 
@@ -4798,6 +4884,11 @@ def bace_student_ledger(student_id):
     return render_template(
         "admin/bace_student_ledger.html", student=student, rows=rows,
         summary=summary, bt=bace_tracker,
+        payment_link=url_for(
+            "public.bace_rent_form", student=student.id,
+            rent_for=bace_student_payment_token(student.id, current_app.config["SECRET_KEY"]),
+            _external=True,
+        ),
     )
 
 

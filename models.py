@@ -396,6 +396,10 @@ class Donation(db.Model):
     # Only set for donations against the "BACE Contribution" campaign --
     # which specific property the payment is for. NULL for every other campaign.
     bace_property_id = db.Column(db.Integer, db.ForeignKey("bace_properties.id"), nullable=True, index=True)
+    # Set only by a valid personalised BACE rent-payment link. It makes
+    # successful payments reconcilable to the intended resident without a
+    # fragile phone/email match.
+    bace_student_id = db.Column(db.Integer, db.ForeignKey("bace_students.id"), nullable=True, index=True)
     # Only set for donations against the "Festivals" campaign via the
     # dedicated Festival Seva form -- which occasion and which seva/
     # sponsorship tier. Both NULL for every other campaign, and seva_type_id

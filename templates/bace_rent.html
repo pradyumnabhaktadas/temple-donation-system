@@ -26,33 +26,43 @@
       </div>
 
       <input type="hidden" name="campaign_id" value="{{ campaign.id }}">
+      {% if bace_student %}
+      <input type="hidden" name="bace_student_id" value="{{ bace_student.id }}">
+      <input type="hidden" name="bace_student_token" value="{{ bace_student_token }}">
+      {% endif %}
 
       <div class="form-section">
         <label class="form-label" for="bace_property_id">BACE</label>
+        {% if bace_student %}
+          <input type="hidden" name="bace_property_id" value="{{ bace_student.bace_property_id }}">
+          <div class="form-control bg-light">{{ bace_student.bace_property.name }} &mdash; rent payment for {{ bace_student.full_name }}</div>
+          <div class="form-text">A successful payment through this link is recorded against your rent ledger.</div>
+        {% else %}
         <select class="form-select" name="bace_property_id" id="bace_property_id" required {% if not properties %}disabled{% endif %}>
           <option value="" disabled selected>-- Select a property --</option>
           {% for p in properties %}
             <option value="{{ p.id }}">{{ p.name }}</option>
           {% endfor %}
         </select>
+        {% endif %}
       </div>
 
       <div class="form-section">
       <div class="row">
         <div class="col-md-6 mb-3">
           <label class="form-label" for="full_name">Full Name</label>
-          <input type="text" class="form-control" name="full_name" id="full_name" required>
+          <input type="text" class="form-control" name="full_name" id="full_name" value="{{ bace_student.full_name if bace_student else '' }}" required>
         </div>
         <div class="col-md-6 mb-3">
           <label class="form-label" for="phone">Phone</label>
-          <input type="tel" class="form-control" name="phone" id="phone" required
+          <input type="tel" class="form-control" name="phone" id="phone" value="{{ bace_student.phone if bace_student else '' }}" required
                  maxlength="20" pattern="[6-9][0-9]{9}|\+[1-9][0-9]{7,14}" inputmode="tel" title="10-digit Indian mobile number, or + and country code for numbers outside India">
         </div>
       </div>
       <div class="row">
         <div class="col-md-6 mb-0">
           <label class="form-label" for="email">Email <span class="text-muted">(optional -- your receipt will be sent here)</span></label>
-          <input type="email" class="form-control" name="email" id="email">
+          <input type="email" class="form-control" name="email" id="email" value="{{ bace_student.email if bace_student else '' }}">
         </div>
       </div>
       </div>

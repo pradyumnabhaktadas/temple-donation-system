@@ -139,6 +139,12 @@ def receipt_access_token(donation_id, secret_key):
     return hmac.new(secret_key.encode(), message, hashlib.sha256).hexdigest()[:32]
 
 
+def bace_student_payment_token(student_id, secret_key):
+    """Opaque HMAC token for a student's personalised BACE payment link."""
+    message = f"bace-student-payment:{student_id}".encode()
+    return hmac.new(secret_key.encode(), message, hashlib.sha256).hexdigest()[:32]
+
+
 def format_inr(amount, decimals=0):
     """Format a number with Indian-style digit grouping (lakh/crore), e.g.
     1234567 -> '12,34,567' instead of the Western '1,234,567'.

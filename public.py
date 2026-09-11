@@ -35,6 +35,7 @@ import io
 import os
 import re
 import threading
+import secrets
 
 from flask import (
     Blueprint, render_template, request, jsonify, redirect, url_for,
@@ -45,7 +46,7 @@ from werkzeug.exceptions import HTTPException
 
 from extensions import db, csrf, limiter
 from models import (
-    Donor, Campaign, Donation, ReceiptCounter, BaceProperty, Festival, SevaType, LiveToGivePurpose,
+    Donor, Campaign, Donation, ReceiptCounter, BaceProperty, BaceStudent, Festival, SevaType, LiveToGivePurpose,
     AssociatedWith, AdminActivityLog, ZohoForm,
 )
 from pdf_utils import generate_receipt_pdf, receipt_pdf_path
@@ -54,7 +55,7 @@ import bace_matching
 from whatsapp_utils import send_receipt_whatsapp
 from utils import (
     HIGH_VALUE_PAN_THRESHOLD, is_valid_pan, is_valid_phone, normalize_phone, receipt_access_token, retry,
-    to_ist,
+    to_ist, bace_student_payment_token,
 )
 # now_ist deliberately NOT imported here: the one place in this module that
 # reached for it (the Razorpay scan window) needed an absolute UTC instant,
@@ -350,6 +351,17 @@ def bace_rent_form():
         return redirect(url_for("public.donate_form"))
 
     properties = BaceProperty.query.filter_by(is_active=True).order_by(BaceProperty.name).all()
+    student = None
+    token = (request.args.get("rent_for") or "").strip()
+    if token:
+        candidate_id = request.args.get("student", type=int)
+        candidate = BaceStudent.query.get(candidate_id) if candidate_id else None
+        expected = bace_student_payment_token(candidate_id, current_app.config["SECRET_KEY"]) if candidate_id else ""
+        if candidate and candidate.is_active and secrets.compare_digest(token, expected):
+            student = candidate
+        else:
+            flash("That BACE payment link is no longer valid. Please contact the office for a new link.")
+            return redirect(url_for("public.bace_rent_form"))
     return render_template(
         "bace_rent.html",
         campaign=campaign,
@@ -357,6 +369,8 @@ def bace_rent_form():
         razorpay_enabled=current_app.config["RAZORPAY_ENABLED"],
         razorpay_key_id=current_app.config["RAZORPAY_KEY_ID"],
         org_name=current_app.config["ORG_NAME"],
+        bace_student=student,
+        bace_student_token=token if student else None,
     )
 
 
@@ -547,6 +561,24 @@ def create_order():
     except _InvalidFkError as e:
         return jsonify({"error": str(e)}), 400
 
+    bace_student_id = None
+    if data.get("bace_student_token") or data.get("bace_student_id"):
+        try:
+            candidate_id = int(data.get("bace_student_id"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid BACE payment link."}), 400
+        student = BaceStudent.query.get(candidate_id)
+        expected = bace_student_payment_token(candidate_id, current_app.config["SECRET_KEY"])
+        if (
+            campaign.name != "BACE Contribution" or not student or not student.is_active
+            or not secrets.compare_digest(str(data.get("bace_student_token") or ""), expected)
+        ):
+            return jsonify({"error": "This BACE payment link is no longer valid."}), 400
+        # Never trust the property's hidden input from the browser: the
+        # signed link binds the payment to the roster's current property.
+        bace_student_id = student.id
+        bace_property_id = student.bace_property_id
+
     # Only the Live To Give form sends this -- the donor's own choice of
     # 80G vs Non-80G receipt for this specific donation.
     receipt_type = data.get("receipt_type")
@@ -686,6 +718,7 @@ def create_order():
             status="pending",
             recorded_by="online",
             bace_property_id=bace_property_id,
+            bace_student_id=bace_student_id,
             festival_id=festival_id,
             seva_type_id=seva_type_id,
             live_to_give_purpose_id=live_to_give_purpose_id,

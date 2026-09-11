@@ -234,6 +234,21 @@ class TestPaymentsPage:
 
         assert BaceRentPayment.query.count() == 0
 
+    def test_same_reference_cannot_be_recorded_twice(self, client, app):
+        prop_id = _property(app)
+        _add_student(client, prop_id)
+        from models import BaceStudent, BaceRentPayment
+        student = BaceStudent.query.first()
+        payment = {
+            "student_id": str(student.id), "for_month": "2026-09", "amount_paid": "3000",
+            "date_paid": "2026-09-05", "mode": "UPI", "reference": "UTR-unique-1",
+        }
+        client.post("/admin/bace-payments", data=payment, follow_redirects=True)
+        response = client.post("/admin/bace-payments", data=payment, follow_redirects=True)
+
+        assert BaceRentPayment.query.count() == 1
+        assert "matching rent payment is already recorded" in response.get_data(as_text=True)
+
 
 class TestTrackerGrid:
     def test_renders_with_correct_status(self, client, app):
@@ -524,3 +539,50 @@ class TestPaymentsExport:
         body = resp.get_data(as_text=True)
         assert "1111.0" in body
         assert "2222.0" not in body
+
+
+class TestBaceAutomation:
+    def test_monthly_statement_is_property_wise(self, client, app):
+        prop_id = _property(app, name="Statement BACE")
+        from utils import now_ist
+        month = now_ist().strftime("%Y-%m")
+        _add_student(client, prop_id, full_name="Statement Resident", joined_month=month)
+        from models import BaceStudent
+        student = BaceStudent.query.one()
+        client.get("/admin/bace-dashboard")  # creates this month's immutable charge
+        client.post("/admin/bace-payments", data={
+            "student_id": str(student.id), "for_month": month, "amount_paid": "1000",
+        }, follow_redirects=True)
+
+        response = client.get(f"/admin/bace-statement/export?month={month}")
+        body = response.get_data(as_text=True)
+        assert response.mimetype == "text/csv"
+        assert "Statement BACE" in body
+        assert "3000.0,1000.0,2000.0" in body
+
+    def test_personal_link_binds_a_successful_payment_to_its_student(self, client, app):
+        prop_id = _property(app, name="Linked BACE")
+        _add_student(client, prop_id, full_name="Linked Resident", phone="9319880507")
+        from models import BaceStudent, Campaign, Donation, BaceRentPayment
+        from utils import bace_student_payment_token
+        student = BaceStudent.query.one()
+        campaign = Campaign.query.filter_by(name="BACE Contribution").one()
+        token = bace_student_payment_token(student.id, app.config["SECRET_KEY"])
+
+        page = client.get(f"/bace-rent?student={student.id}&rent_for={token}")
+        assert page.status_code == 200
+        assert "rent payment for Linked Resident" in page.get_data(as_text=True)
+
+        response = client.post("/api/create-order", json={
+            "campaign_id": campaign.id, "bace_property_id": prop_id,
+            "bace_student_id": student.id, "bace_student_token": token,
+            "full_name": "Linked Resident", "phone": "9319880507", "email": "",
+            "amount": 3000, "consent": True,
+        })
+        assert response.status_code == 200
+        donation = Donation.query.get(response.get_json()["donation_id"])
+        assert donation.bace_student_id == student.id
+        assert donation.bace_property_id == prop_id
+
+        client.post("/api/simulate-payment", json={"donation_id": donation.id})
+        assert BaceRentPayment.query.filter_by(source_donation_id=donation.id, student_id=student.id).count() == 1
