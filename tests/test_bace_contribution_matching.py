@@ -234,6 +234,29 @@ class TestAddToRosterLink:
         assert "prefill_phone=9666666666" in body
         assert "prefill_email=new.resident@example.com" in body
         assert f"prefill_bace_property_id={prop_id}" in body
+        assert "Record as rent payment manually" in body
+
+    def test_unmatched_donation_can_be_manually_recorded_against_selected_student(self, client, app):
+        prop_id = _property(app, name="Manual BACE")
+        donation = _make_bace_contribution(
+            client, prop_id, full_name="Unmatched Payer", phone="9666666666", amount="6000",
+        )
+        _add_student(client, prop_id, full_name="Selected Resident", phone="9777777777")
+
+        from models import Donation, BaceStudent, BaceRentPayment
+        source_donation = Donation.query.order_by(Donation.id.desc()).first()
+        selected = BaceStudent.query.filter_by(full_name="Selected Resident").one()
+
+        resp = client.get("/admin/bace-contributions")
+        assert f"prefill_source_donation_id={source_donation.id}" in resp.get_data(as_text=True)
+
+        client.post("/admin/bace-payments", data={
+            "student_id": str(selected.id), "for_month": "2026-08", "amount_paid": "6000",
+            "source_donation_id": str(source_donation.id),
+        }, follow_redirects=True)
+
+        payment = BaceRentPayment.query.filter_by(source_donation_id=source_donation.id).one()
+        assert payment.student_id == selected.id
 
     def test_a_matched_donation_does_not_get_an_add_to_roster_link(self, client, app):
         prop_id = _property(app)

@@ -138,11 +138,12 @@
         {% endif %}
         {% endif %}
         {% endif %}
-        {% elif add_to_roster_links.get(d.id) %}
-        <span class="text-muted">no match</span>
-        {% if current_user.role == 'admin' %}<br><a href="{{ add_to_roster_links[d.id] }}">Add to roster</a>{% endif %}
         {% else %}
         <span class="text-muted">no match</span>
+        {% if current_user.role == 'admin' %}
+          {% if add_to_roster_links.get(d.id) %}<br><a href="{{ add_to_roster_links[d.id] }}">Add to roster</a>{% endif %}
+          {% if manual_record_links.get(d.id) %}<br><a href="{{ manual_record_links[d.id] }}">Record as rent payment manually</a>{% endif %}
+        {% endif %}
         {% endif %}
       </td>
     </tr>

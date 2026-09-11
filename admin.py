@@ -4424,6 +4424,13 @@ def bace_payments():
             return redirect(return_to or url_for("admin.bace_payments"))
 
         student = BaceStudent.query.get(student_id)
+        # A staff member can manually link an older BACE Contribution that
+        # did not match the roster automatically.  The selected student is
+        # the explicit human confirmation of its property, so backfill a
+        # missing property on the source donation at the same time.
+        source_donation = Donation.query.get(source_donation_id) if source_donation_id else None
+        if source_donation and not source_donation.bace_property_id:
+            source_donation.bace_property_id = student.bace_property_id
         payment = BaceRentPayment(
             student_id=student_id,
             for_month=for_month,
@@ -5108,6 +5115,7 @@ def bace_contributions():
     recordable_month = {}
     edit_before_saving_links = {}
     add_to_roster_links = {}
+    manual_record_links = {}
     contribution_logs_return_url = url_for(
         "admin.bace_contributions",
         page=page,
@@ -5154,12 +5162,33 @@ def bace_contributions():
                 prefill_bace_property_id=d.bace_property_id,
             )
 
+        # No automatic match must never mean money cannot be reconciled.
+        # Rather than guessing a student from a similar name, let an admin
+        # select the correct roster entry in the Payments Log.  The source
+        # donation is retained so it cannot be recorded twice.
+        if not student:
+            donation_date = to_ist(d.donation_date) if d.payment_mode == "online" else d.donation_date
+            manual_record_links[d.id] = url_for(
+                "admin.bace_payments",
+                prefill_amount=float(d.amount),
+                prefill_date=donation_date.date().isoformat(),
+                prefill_mode="Online (givetokrishna.com)" if d.payment_mode == "online" else None,
+                prefill_reference=f"BACE Contribution {d.receipt_number or ('#' + str(d.id))}",
+                prefill_note=(
+                    f"No automatic roster match for {d.donor.full_name}. "
+                    "Choose the correct BACE student before saving."
+                ),
+                prefill_source_donation_id=d.id,
+                return_to=contribution_logs_return_url,
+            )
+
     return render_template(
         "admin/bace_contributions.html", campaign=campaign, properties=properties,
         donations=pagination.items, pagination=pagination, summary=summary,
         matched_students=matched_students, already_recorded=already_recorded,
         recordable_month=recordable_month, edit_before_saving_links=edit_before_saving_links,
         add_to_roster_links=add_to_roster_links,
+        manual_record_links=manual_record_links,
         contribution_logs_return_url=contribution_logs_return_url, **filters,
     )
 
