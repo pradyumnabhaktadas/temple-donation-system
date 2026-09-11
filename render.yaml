@@ -60,12 +60,13 @@ services:
           property: connectionString
       - key: FLASK_ENV
         value: production
-      # Keep the Starter instance within its 512 MB memory budget. gthread
-      # still handles four concurrent requests without another app process.
+      # Keep the Starter instance within its 512 MB memory budget. Two
+      # gthread requests retain responsive admin use without doubling the
+      # peak memory used by receipt/report work.
       - key: WEB_CONCURRENCY
         value: "1"
       - key: GUNICORN_THREADS
-        value: "4"
+        value: "2"
       - key: GUNICORN_TIMEOUT
         value: "90"
       # --- Fill these in manually in the Render dashboard (Environment tab) ---

@@ -27,11 +27,12 @@ bind = f"0.0.0.0:{os.environ.get('PORT', 8000)}"
 #
 # gthread lets one worker process handle several requests concurrently via
 # threads instead of needing a whole extra process per concurrent request.
-# One worker x four threads is sufficient for this small temple site and
-# leaves the largest possible memory margin on Render's 512 MB instance.
+# One worker x two threads is sufficient for this small temple site and
+# leaves extra memory margin on Render's 512 MB instance.  Heavy operations
+# such as receipt generation should not multiply their peak memory use.
 worker_class = "gthread"
 workers = int(os.environ.get("WEB_CONCURRENCY", 1))
-threads = int(os.environ.get("GUNICORN_THREADS", 4))
+threads = int(os.environ.get("GUNICORN_THREADS", 2))
 timeout = int(os.environ.get("GUNICORN_TIMEOUT", 90))
 
 # Recycle workers periodically -- cheap insurance against slow memory growth

@@ -15,6 +15,7 @@ from flask import (
 )
 from flask_login import login_user, logout_user, login_required, current_user
 from sqlalchemy import func, extract, or_
+from sqlalchemy.orm import load_only
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from extensions import db, limiter
@@ -6331,14 +6332,24 @@ def _donor_intelligence_snapshot(campaign_id=None, preacher_id=None):
     aggregation after one query: at the temple's present scale this keeps
     the definitions (especially IST calendar months) explicit and gives the
     page every useful donor measure without an N+1 query per table row.
+
+    Receipt PDFs live on Donation as a LargeBinary column.  Never load the
+    full Donation ORM object here: doing so pulls every historical PDF into
+    the web worker and can exhaust Render's 512 MB instance.
     """
     today = now_ist().date()
     this_month = today.replace(day=1)
     previous_month = bace_tracker.add_months(this_month, -1)
     three_months_ago = bace_tracker.add_months(this_month, -3)
 
-    query = db.session.query(Donation, Donor).join(Donor, Donation.donor_id == Donor.id).filter(
-        Donation.status == "success"
+    query = (
+        db.session.query(Donation, Donor)
+        .options(
+            load_only(Donation.donor_id, Donation.amount, Donation.donation_date),
+            load_only(Donor.id, Donor.full_name, Donor.phone, Donor.email),
+        )
+        .join(Donor, Donation.donor_id == Donor.id)
+        .filter(Donation.status == "success")
     )
     if campaign_id:
         query = query.filter(Donation.campaign_id == campaign_id)
