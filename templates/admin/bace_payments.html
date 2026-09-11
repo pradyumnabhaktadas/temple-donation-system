@@ -25,6 +25,9 @@
         {% if prefill_source_donation_id %}
         <input type="hidden" name="source_donation_id" value="{{ prefill_source_donation_id }}">
         {% endif %}
+        {% if return_to %}
+        <input type="hidden" name="return_to" value="{{ return_to }}">
+        {% endif %}
         <div class="mb-2">
           <label class="form-label small">Student <span class="text-muted">(search by name, phone, or email)</span></label>
           <input type="text" class="form-control form-control-sm" id="student_search" list="student_datalist" autocomplete="off" placeholder="Start typing...">

@@ -253,6 +253,17 @@ def create_app(test_config=None):
             return jsonify({"error": "Security check failed. Please refresh the page and try again."}), 400
         return render_template("csrf_error.html", reason=e.description), 400
 
+    @app.get("/healthz")
+    def healthz():
+        """A deliberately cheap liveness probe for Render.
+
+        Do not query Postgres or call another service here: Render probes this
+        endpoint every few seconds and restarts the instance after sustained
+        probe failures.  A database outage should be visible to monitoring,
+        but must not turn every health probe into a restart loop.
+        """
+        return "", 204
+
     @app.errorhandler(404)
     def handle_404(e):
         if request.path.startswith("/api/"):

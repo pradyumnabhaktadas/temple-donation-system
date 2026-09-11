@@ -33,6 +33,10 @@ services:
     # and bootstraps an empty one. See its docstring.
     preDeployCommand: python db_deploy.py
     startCommand: gunicorn -c gunicorn_config.py app:app
+    # A cheap endpoint prevents slow admin/report pages or a temporarily
+    # busy database from being mistaken for an unhealthy web instance.
+    healthCheckPath: /healthz
+    maxShutdownDelaySeconds: 60
     disk:
       name: temple-data
       # Covers both the SQLite file (if you don't switch to the Postgres
@@ -57,6 +61,14 @@ services:
           property: connectionString
       - key: FLASK_ENV
         value: production
+      # Keep the Starter instance within its 512 MB memory budget. gthread
+      # still handles four concurrent requests without another app process.
+      - key: WEB_CONCURRENCY
+        value: "1"
+      - key: GUNICORN_THREADS
+        value: "4"
+      - key: GUNICORN_TIMEOUT
+        value: "90"
       # --- Fill these in manually in the Render dashboard (Environment tab) ---
       - key: ORG_NAME
         sync: false

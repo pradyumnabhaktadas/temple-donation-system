@@ -5,6 +5,7 @@ import re
 import secrets
 import datetime
 import threading
+from urllib.parse import urlsplit
 from collections import defaultdict
 from functools import wraps
 
@@ -52,6 +53,23 @@ def _generate_temp_password():
     it can never be the account's permanent password."""
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789"  # no 0/O/1/I/l
     return "".join(secrets.choice(alphabet) for _ in range(12))
+
+
+def _safe_bace_contributions_return_url(value):
+    """Return a validated Contribution Logs URL, or None.
+
+    The payment form can be opened from a Contribution Logs row to correct
+    its month before recording it. Keep that useful return path without
+    accepting arbitrary redirect destinations from a form field.
+    """
+    if not value:
+        return None
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc:
+        return None
+    if parsed.path != url_for("admin.bace_contributions"):
+        return None
+    return value
 
 
 def log_activity(action, target_type=None, target_id=None, details=None):
@@ -4364,6 +4382,7 @@ def bace_payments():
     form. This is the one table the whole tracker (Tracker grid,
     Dashboard, Pending List) is computed from; see bace_tracker.py."""
     if request.method == "POST":
+        return_to = _safe_bace_contributions_return_url(request.form.get("return_to"))
         if current_user.role != "admin":
             flash("That action requires an administrator account.")
             return redirect(url_for("admin.bace_payments"))
@@ -4402,7 +4421,7 @@ def bace_payments():
         source_donation_id = request.form.get("source_donation_id", type=int)
         if source_donation_id and BaceRentPayment.query.filter_by(source_donation_id=source_donation_id).first():
             flash("This donation has already been recorded as a rent payment.")
-            return redirect(url_for("admin.bace_payments"))
+            return redirect(return_to or url_for("admin.bace_payments"))
 
         student = BaceStudent.query.get(student_id)
         payment = BaceRentPayment(
@@ -4423,7 +4442,7 @@ def bace_payments():
         )
         db.session.commit()
         flash(f"Payment recorded for '{student.full_name}'.")
-        return redirect(url_for("admin.bace_payments"))
+        return redirect(return_to or url_for("admin.bace_payments"))
 
     student_id = request.args.get("student_id", type=int)
     query = BaceRentPayment.query
@@ -4460,6 +4479,7 @@ def bace_payments():
         prefill_reference=request.args.get("prefill_reference"),
         prefill_note=request.args.get("prefill_note"),
         prefill_source_donation_id=request.args.get("prefill_source_donation_id", type=int),
+        return_to=_safe_bace_contributions_return_url(request.args.get("return_to")),
     )
 
 
@@ -4933,14 +4953,16 @@ def record_bace_rent_payment(donation_id):
     auto-record at the time -- the donor wasn't on the roster yet, most
     commonly -- so once they're added, this (or the "Record all matched"
     bulk action below) catches them up."""
+    return_to = _safe_bace_contributions_return_url(request.form.get("return_to"))
+    contribution_logs = return_to or url_for("admin.bace_contributions")
     donation = Donation.query.get_or_404(donation_id)
     if donation.status != "success" or not donation.bace_property_id:
         flash("Only successful BACE Contribution donations can be recorded as rent payments.")
-        return redirect(url_for("admin.bace_contributions"))
+        return redirect(contribution_logs)
 
     if BaceRentPayment.query.filter_by(source_donation_id=donation.id).first():
         flash("This donation has already been recorded as a rent payment.")
-        return redirect(url_for("admin.bace_contributions"))
+        return redirect(contribution_logs)
 
     payment = bace_matching.record_matched_donation(donation)
     if not payment:
@@ -4950,7 +4972,7 @@ def record_bace_rent_payment(donation_id):
             "share this contact detail), then try again."
         )
         db.session.rollback()
-        return redirect(url_for("admin.bace_contributions"))
+        return redirect(contribution_logs)
 
     db.session.commit()
     flash(
@@ -4958,7 +4980,7 @@ def record_bace_rent_payment(donation_id):
         f"{payment.for_month.strftime('%b %Y')}. If that's the wrong month, delete it from "
         "the Payments Log and re-enter it there instead."
     )
-    return redirect(url_for("admin.bace_contributions"))
+    return redirect(contribution_logs)
 
 
 @bp.route("/bace-contributions/record-all-matched", methods=["POST"])
@@ -5070,6 +5092,14 @@ def bace_contributions():
     recordable_month = {}
     edit_before_saving_links = {}
     add_to_roster_links = {}
+    contribution_logs_return_url = url_for(
+        "admin.bace_contributions",
+        page=page,
+        bace_property_id=filters["bace_property_id"],
+        status=filters["status"],
+        date_from=filters["date_from"],
+        date_to=filters["date_to"],
+    )
     for d in pagination.items:
         if d.status != "success" or d.id in already_recorded:
             continue
@@ -5089,6 +5119,7 @@ def bace_contributions():
                     "confirm which month this covers before saving."
                 ),
                 prefill_source_donation_id=d.id,
+                return_to=contribution_logs_return_url,
             )
         elif d.bace_property_id:
             # No roster match -- most likely because this donor simply
@@ -5112,7 +5143,8 @@ def bace_contributions():
         donations=pagination.items, pagination=pagination, summary=summary,
         matched_students=matched_students, already_recorded=already_recorded,
         recordable_month=recordable_month, edit_before_saving_links=edit_before_saving_links,
-        add_to_roster_links=add_to_roster_links, **filters,
+        add_to_roster_links=add_to_roster_links,
+        contribution_logs_return_url=contribution_logs_return_url, **filters,
     )
 
 

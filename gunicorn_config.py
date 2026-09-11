@@ -25,14 +25,14 @@ bind = f"0.0.0.0:{os.environ.get('PORT', 8000)}"
 # and was the root cause of donations getting stuck on Render's Starter
 # (512MB) tier.
 #
-# gthread lets each worker process handle several requests concurrently via
-# threads instead of needing a whole extra process per concurrent request --
-# far cheaper on a memory-constrained instance. 2 workers x 4 threads = up
-# to 8 concurrent requests from ~2 worker processes' worth of memory.
+# gthread lets one worker process handle several requests concurrently via
+# threads instead of needing a whole extra process per concurrent request.
+# One worker x four threads is sufficient for this small temple site and
+# leaves the largest possible memory margin on Render's 512 MB instance.
 worker_class = "gthread"
-workers = int(os.environ.get("WEB_CONCURRENCY", 2))
+workers = int(os.environ.get("WEB_CONCURRENCY", 1))
 threads = int(os.environ.get("GUNICORN_THREADS", 4))
-timeout = int(os.environ.get("GUNICORN_TIMEOUT", 30))
+timeout = int(os.environ.get("GUNICORN_TIMEOUT", 90))
 
 # Recycle workers periodically -- cheap insurance against slow memory growth
 # over a long-running worker's life (PDF/image generation, SMTP sockets).

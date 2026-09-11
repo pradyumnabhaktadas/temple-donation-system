@@ -320,6 +320,22 @@ class TestManualRecordAsRentPayment:
         assert payment.for_month == donation.donation_date.date().replace(day=1)
         assert payment.reference and donation.receipt_number in payment.reference
 
+    def test_record_button_returns_to_the_same_filtered_log_page(self, client, app):
+        prop_id = _property(app)
+        _add_student(client, prop_id, full_name="Keep My Place", phone="9319880507")
+        donation = _insert_legacy_bace_donation(prop_id, full_name="Keep My Place", phone="9319880507")
+
+        resp = client.post(
+            f"/admin/bace-contributions/{donation.id}/record-rent-payment",
+            data={"return_to": f"/admin/bace-contributions?bace_property_id={prop_id}&page=2"},
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 302
+        assert resp.headers["Location"].endswith(
+            f"/admin/bace-contributions?bace_property_id={prop_id}&page=2"
+        )
+
     def test_recording_twice_is_refused(self, client, app):
         prop_id = _property(app)
         _add_student(client, prop_id, full_name="Once Only", phone="9319880507")
@@ -434,6 +450,7 @@ class TestEditBeforeSavingFallback:
         assert "wrong month? edit before saving" in body
         assert f"prefill_student_id={student.id}" in body
         assert f"prefill_source_donation_id={donation.id}" in body
+        assert "return_to=/admin/bace-contributions" in body
 
         follow = client.get(
             f"/admin/bace-payments?prefill_student_id={student.id}"
@@ -442,6 +459,41 @@ class TestEditBeforeSavingFallback:
         follow_body = follow.get_data(as_text=True)
         assert "Fallback Student" in follow_body
         assert f'name="source_donation_id" value="{donation.id}"' in follow_body
+
+    def test_saving_from_the_fallback_returns_to_contribution_logs(self, client, app):
+        prop_id = _property(app)
+        _add_student(client, prop_id, full_name="Return Here", phone="9319880507")
+        donation = _insert_legacy_bace_donation(prop_id, full_name="Return Here", phone="9319880507")
+
+        from models import BaceStudent
+        student = BaceStudent.query.filter_by(full_name="Return Here").one()
+
+        resp = client.post("/admin/bace-payments", data={
+            "student_id": str(student.id), "for_month": "2026-09", "amount_paid": "3000",
+            "source_donation_id": str(donation.id),
+            "return_to": "/admin/bace-contributions?status=success&page=2",
+        }, follow_redirects=False)
+
+        assert resp.status_code == 302
+        assert resp.headers["Location"].endswith(
+            "/admin/bace-contributions?status=success&page=2"
+        )
+
+    def test_fallback_rejects_external_return_url(self, client, app):
+        prop_id = _property(app)
+        _add_student(client, prop_id, full_name="Safe Return", phone="9319880507")
+        donation = _insert_legacy_bace_donation(prop_id, full_name="Safe Return", phone="9319880507")
+
+        from models import BaceStudent
+        student = BaceStudent.query.filter_by(full_name="Safe Return").one()
+
+        resp = client.post("/admin/bace-payments", data={
+            "student_id": str(student.id), "for_month": "2026-09", "amount_paid": "3000",
+            "source_donation_id": str(donation.id), "return_to": "https://example.com",
+        }, follow_redirects=False)
+
+        assert resp.status_code == 302
+        assert resp.headers["Location"].endswith("/admin/bace-payments")
 
     def test_saving_via_the_fallback_form_also_tags_source_donation_id(self, client, app):
         prop_id = _property(app)

@@ -130,6 +130,7 @@
         <form method="post" action="{{ url_for('admin.record_bace_rent_payment', donation_id=d.id) }}" class="d-inline"
               data-confirm="Record Rs. {{ '%.0f' | format(d.amount) }} from '{{ matched.full_name }}' as rent for {{ month.strftime('%b %Y') }}?">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="return_to" value="{{ contribution_logs_return_url }}">
           <button type="submit" class="btn btn-link btn-sm p-0">Record as rent payment ({{ month.strftime('%b %Y') }})</button>
         </form>
         {% if edit_before_saving_links.get(d.id) %}
