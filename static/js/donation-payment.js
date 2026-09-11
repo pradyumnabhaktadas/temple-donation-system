@@ -99,6 +99,7 @@ window.TempleDonationPayment = (function () {
   // short enough that a donor returning much later to start a *new*
   // donation isn't yanked off to an old receipt.
   const PENDING_MAX_AGE_MS = 30 * 60 * 1000;
+  const statusTokens = Object.create(null);
 
   // ------------------------------------------------------------------
   // Small helpers (module scope -- no per-form state)
@@ -169,7 +170,10 @@ window.TempleDonationPayment = (function () {
    * wasteful and rude to Razorpay's rate limits. */
   async function fetchDonationStatus(donationId, verify) {
     try {
-      const url = '/api/donation-status/' + encodeURIComponent(donationId) + (verify ? '?verify=1' : '');
+      const params = new URLSearchParams();
+      if (verify) params.set('verify', '1');
+      if (statusTokens[donationId]) params.set('t', statusTokens[donationId]);
+      const url = '/api/donation-status/' + encodeURIComponent(donationId) + (params.toString() ? '?' + params.toString() : '');
       const resp = await fetch(url);
       if (!resp.ok) return null;
       const data = await resp.json();
@@ -194,7 +198,7 @@ window.TempleDonationPayment = (function () {
 
   function writePendingMarker(donationId) {
     try {
-      localStorage.setItem(PENDING_KEY, JSON.stringify({ donationId: donationId, ts: Date.now() }));
+      localStorage.setItem(PENDING_KEY, JSON.stringify({ donationId: donationId, statusToken: statusTokens[donationId], ts: Date.now() }));
     } catch (err) {
       // Private browsing / storage disabled. Resume-after-reload just
       // won't be available; not worth telling the donor about.
@@ -436,6 +440,7 @@ window.TempleDonationPayment = (function () {
         clearPendingMarker(); // also clears a stale/corrupt marker
         return;
       }
+      statusTokens[pending.donationId] = pending.statusToken;
       fetchDonationStatus(pending.donationId).then(function (status) {
         // This request was already in flight if the donor started a new
         // payment in the meantime. Redirecting now would yank them off an
@@ -632,6 +637,7 @@ window.TempleDonationPayment = (function () {
           return;
         }
         const order = result.data;
+        statusTokens[order.donation_id] = order.status_token;
 
         if (!razorpayEnabled) {
           const sim = await postJSON('/api/simulate-payment', { donation_id: order.donation_id }, csrfToken);

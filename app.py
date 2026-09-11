@@ -47,6 +47,10 @@ def create_app(test_config=None):
                 "before deploying -- sessions, CSRF tokens and receipt download "
                 "links are all signed with it."
             )
+        if not app.config["RAZORPAY_ENABLED"]:
+            raise RuntimeError("Razorpay credentials are required in production; refusing to enable demo payments.")
+        if not LIMITER_AVAILABLE:
+            raise RuntimeError("Flask-Limiter is required in production.")
 
     if app.config.get("IS_PRODUCTION"):
         # Render (and most PaaS hosts) puts a reverse proxy in front of the

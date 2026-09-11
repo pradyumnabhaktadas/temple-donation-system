@@ -1,7 +1,17 @@
 {% extends "admin/base_admin.html" %}
 {% block title %}Dashboard{% endblock %}
 {% block content %}
-<h3 class="mb-4">Collection Dashboard <small class="text-muted fs-6 fw-normal">FY {{ fy }}</small></h3>
+<div class="admin-page-header">
+  <div>
+    <div class="eyebrow">Temple collections &amp; follow-up</div>
+    <h3>Collection Dashboard <small class="text-muted fs-6 fw-normal">FY {{ fy }}</small></h3>
+  </div>
+  <div class="admin-page-actions">
+    <a class="btn btn-sm btn-primary" href="{{ url_for('admin.manual_donation') }}">Record donation</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.donations') }}">View donations</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.analytics') }}">Analytics</a>
+  </div>
+</div>
 
 {% if birthdays_today %}
 <div class="alert alert-info d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -62,27 +72,31 @@
 
 <div class="row g-3 mb-4">
   <div class="col-md-3">
-    <div class="stat-card text-center">
-      <div class="stat-label">🪔 Today</div>
+    <div class="stat-card dashboard-kpi">
+      <div class="stat-icon">🪔</div><div class="stat-label">Today</div>
       <div class="stat-value">Rs. {{ today_total | inr }}</div>
+      <div class="stat-subtext">Collections received today</div>
     </div>
   </div>
   <div class="col-md-3">
-    <div class="stat-card text-center">
-      <div class="stat-label">📅 This Month</div>
+    <div class="stat-card dashboard-kpi">
+      <div class="stat-icon">📅</div><div class="stat-label">This month</div>
       <div class="stat-value">Rs. {{ month_total | inr }}</div>
+      <div class="stat-subtext">{{ today.strftime('%B %Y') }}</div>
     </div>
   </div>
   <div class="col-md-3">
-    <div class="stat-card text-center">
-      <div class="stat-label">🗓️ This Financial Year</div>
+    <div class="stat-card dashboard-kpi">
+      <div class="stat-icon">🗓️</div><div class="stat-label">Financial year</div>
       <div class="stat-value">Rs. {{ year_total | inr }}</div>
+      <div class="stat-subtext">FY {{ fy }} collections</div>
     </div>
   </div>
   <div class="col-md-3">
-    <div class="stat-card text-center">
-      <div class="stat-label">🙏 Donors / Donations</div>
+    <div class="stat-card dashboard-kpi">
+      <div class="stat-icon">🙏</div><div class="stat-label">Donor community</div>
       <div class="stat-value">{{ donor_count }} / {{ donation_count }}</div>
+      <div class="stat-subtext">Donors / successful donations</div>
     </div>
   </div>
 </div>
@@ -90,13 +104,13 @@
 <div class="row g-3 mb-4">
   <div class="col-md-6">
     <div class="card card-body shadow-sm">
-      <h6 class="mb-3">📈 Monthly Trend (last 6 months)</h6>
+      <div class="dashboard-panel-title"><h6>📈 Monthly trend</h6><span class="panel-note">Last 6 months</span></div>
       <canvas id="monthlyChart" height="180"></canvas>
     </div>
   </div>
   <div class="col-md-6">
     <div class="card card-body shadow-sm">
-      <h6 class="mb-3">🥧 Campaign-wise Collection</h6>
+      <div class="dashboard-panel-title"><h6>🥧 Campaign-wise collection</h6><span class="panel-note">All successful donations</span></div>
       <canvas id="campaignChart" height="180"></canvas>
     </div>
   </div>
@@ -105,7 +119,7 @@
 <div class="row g-3">
   <div class="col-md-6">
     <div class="card card-body shadow-sm">
-      <h6 class="mb-3">💳 Payment Mode Breakdown</h6>
+      <div class="dashboard-panel-title"><h6>💳 Payment mode breakdown</h6><span class="panel-note">Successful donations</span></div>
       <table class="table table-sm">
         <thead><tr><th>Mode</th><th class="text-end">Amount</th></tr></thead>
         <tbody>
@@ -118,7 +132,7 @@
   </div>
   <div class="col-md-6">
     <div class="card card-body shadow-sm">
-      <h6 class="mb-3">📤 Exports</h6>
+      <div class="dashboard-panel-title"><h6>📤 Exports</h6><span class="panel-note">Reports &amp; filing data</span></div>
       <a class="btn btn-outline-secondary btn-sm mb-2" href="{{ url_for('admin.export_10bd') }}">Download Form 10BD data (CSV)</a><br>
       <a class="btn btn-outline-secondary btn-sm mb-3" href="{{ url_for('admin.export_collections') }}">Download all collections (CSV)</a>
       <hr>

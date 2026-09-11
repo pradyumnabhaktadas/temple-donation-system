@@ -1,22 +1,22 @@
 {% extends "admin/base_admin.html" %}
 {% block title %}BACE Dashboard{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-  <h3 class="mb-0">🏠 BACE Dashboard</h3>
-  <div class="d-flex gap-2">
+<div class="admin-page-header">
+  <div><div class="eyebrow">Monthly rent collection</div><h3>🏠 BACE Dashboard</h3></div>
+  <div class="admin-page-actions">
     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_students') }}">Students</a>
     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_payments') }}">Payments Log</a>
     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_tracker_grid') }}">Tracker</a>
     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_pending_list') }}">Pending List</a>
   </div>
 </div>
-<p class="text-muted">As of {{ today.strftime('%d %b %Y') }} &middot; This month: {{ this_month.strftime('%b %Y') }}</p>
+<div class="bace-shell mb-4 d-flex justify-content-between align-items-center flex-wrap gap-2"><span class="text-muted">As of {{ today.strftime('%d %b %Y') }}</span><strong>{{ this_month.strftime('%B %Y') }} collection cycle</strong></div>
 
 <div class="row g-3 mb-4">
-  <div class="col-md-3"><div class="card card-body shadow-sm text-center p-3"><div class="text-muted small">Active Students</div><div class="fs-4 fw-bold">{{ active_count }}</div></div></div>
-  <div class="col-md-3"><div class="card card-body shadow-sm text-center p-3"><div class="text-muted small">Expected This Month</div><div class="fs-4 fw-bold">Rs. {{ '%.0f' | format(expected) }}</div></div></div>
-  <div class="col-md-3"><div class="card card-body shadow-sm text-center p-3"><div class="text-muted small">Collected This Month</div><div class="fs-4 fw-bold text-success">Rs. {{ '%.0f' | format(collected) }}</div></div></div>
-  <div class="col-md-3"><div class="card card-body shadow-sm text-center p-3"><div class="text-muted small">Pending This Month</div><div class="fs-4 fw-bold text-danger">Rs. {{ '%.0f' | format(pending_amount) }}</div></div></div>
+  <div class="col-md-3"><div class="stat-card bace-kpi"><div class="stat-label">Active students</div><div class="stat-value">{{ active_count }}</div></div></div>
+  <div class="col-md-3"><div class="stat-card bace-kpi"><div class="stat-label">Expected this month</div><div class="stat-value">Rs. {{ '%.0f' | format(expected) }}</div></div></div>
+  <div class="col-md-3"><div class="stat-card bace-kpi is-collected"><div class="stat-label">Collected</div><div class="stat-value text-success">Rs. {{ '%.0f' | format(collected) }}</div></div></div>
+  <div class="col-md-3"><div class="stat-card bace-kpi is-pending"><div class="stat-label">Pending</div><div class="stat-value text-danger">Rs. {{ '%.0f' | format(pending_amount) }}</div></div></div>
 </div>
 <div class="row g-3 mb-4">
   <div class="col-md-3"><div class="card card-body shadow-sm text-center p-3"><div class="text-muted small">Fully Paid</div><div class="fs-5 fw-bold">{{ fully_paid }}</div></div></div>
@@ -25,7 +25,7 @@
   <div class="col-md-3"><div class="card card-body shadow-sm text-center p-3"><div class="text-muted small">Not Yet Due</div><div class="fs-5 fw-bold">{{ not_due }}</div></div></div>
 </div>
 
-<h5 class="mb-2">Base-wise collection, this month</h5>
+<div class="dashboard-panel-title"><h5>Property-wise collection</h5><span class="panel-note">This month</span></div>
 <div class="table-responsive mb-4">
   <table class="table table-sm table-striped align-middle" style="max-width:800px">
     <thead><tr><th>Base / Property</th><th>Active Students</th><th>Expected (Rs)</th><th>Collected (Rs)</th><th>Pending (Rs)</th><th>Collected %</th></tr></thead>
@@ -37,7 +37,7 @@
         <td>{{ '%.0f' | format(b.expected) }}</td>
         <td>{{ '%.0f' | format(b.collected) }}</td>
         <td>{{ '%.0f' | format(b.pending) }}</td>
-        <td>{{ '%.0f' | format(b.pct) }}%</td>
+        <td style="min-width:150px"><div class="bace-progress-label"><strong>{{ '%.0f' | format(b.pct) }}%</strong></div><div class="collection-progress mt-1"><span style="width:{{ [b.pct, 100] | min }}%"></span></div></td>
       </tr>
       {% else %}
       <tr><td colspan="6" class="text-muted">No active students yet.</td></tr>
@@ -46,7 +46,7 @@
   </table>
 </div>
 
-<h5 class="mb-2">Student lookup</h5>
+<div class="dashboard-panel-title"><h5>Student lookup</h5><span class="panel-note">Search current month status</span></div>
 <input type="text" id="bace-lookup" class="form-control mb-2" style="max-width:340px" placeholder="Type a name...">
 <div class="table-responsive">
   <table class="table table-sm table-striped align-middle" id="bace-lookup-table" style="max-width:900px">

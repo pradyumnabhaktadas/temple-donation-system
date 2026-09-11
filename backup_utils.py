@@ -54,7 +54,11 @@ def _table_to_csv_bytes(model, exclude_columns):
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(columns)
-    for row in model.query.order_by(model.id).all():
+    # Avoid materialising a whole table in the ORM identity map while a
+    # backup is being built. The ZIP itself is still returned as bytes for
+    # the existing download/email interfaces, but database memory stays
+    # bounded as donor and donation history grows.
+    for row in model.query.order_by(model.id).yield_per(1000):
         writer.writerow([getattr(row, col) for col in columns])
     return buf.getvalue().encode("utf-8")
 

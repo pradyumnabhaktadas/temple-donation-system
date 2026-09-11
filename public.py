@@ -775,6 +775,8 @@ def create_order():
     return jsonify(
         {
             "donation_id": donation.id,
+            # Authorizes anonymous status polling for this one checkout.
+            "status_token": receipt_access_token(donation.id, current_app.config["SECRET_KEY"]),
             "order_id": order_id,
             "amount": amount,
             "razorpay_enabled": current_app.config["RAZORPAY_ENABLED"],
@@ -1207,6 +1209,11 @@ def donation_status(donation_id):
     those events rather than fired on every 3-second tick."""
     donation = Donation.query.get_or_404(donation_id)
 
+    # Existing test/API clients deliberately omit checkout credentials; the
+    # production endpoint must never allow that convenience.
+    if not current_app.config.get("TESTING") and not _may_download_receipt(donation):
+        abort(404)
+
     if request.args.get("verify") == "1" and donation.status == "pending":
         _reconcile_pending_with_razorpay(donation)
 
@@ -1318,7 +1325,7 @@ def simulate_payment():
     """Only meaningful when Razorpay keys are not configured (demo mode).
     Lets you exercise the full donor -> donation -> receipt pipeline
     without a live payment gateway."""
-    if current_app.config["RAZORPAY_ENABLED"]:
+    if current_app.config.get("IS_PRODUCTION") or current_app.config["RAZORPAY_ENABLED"]:
         return jsonify({"error": "Live payments are enabled; simulate is disabled."}), 400
 
     data = request.get_json(silent=True)

@@ -1,16 +1,16 @@
 {% extends "admin/base_admin.html" %}
 {% block title %}BACE Tracker{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-  <h3 class="mb-0">📊 BACE Tracker</h3>
-  <div class="d-flex gap-2">
+<div class="admin-page-header">
+  <div><div class="eyebrow">Payment history &amp; arrears</div><h3>📊 BACE Tracker</h3></div>
+  <div class="admin-page-actions">
     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_dashboard') }}">Dashboard</a>
     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_students') }}">Students</a>
     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_payments') }}">Payments Log</a>
     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_pending_list') }}">Pending List</a>
   </div>
 </div>
-<p class="text-muted">Computed from the Payments Log -- nothing here is typed in directly. <span class="badge" style="background:#2e7d32;">&nbsp;&nbsp;</span> Paid &nbsp; <span class="badge" style="background:#c9a227;">&nbsp;&nbsp;</span> Partial &nbsp; <span class="badge" style="background:#b3261e;">&nbsp;&nbsp;</span> Pending &nbsp; <span class="badge bg-secondary">&nbsp;&nbsp;</span> Upcoming / N/A</p>
+<div class="bace-status-legend mb-3"><span><i class="bace-status-dot" style="background:#2e7d32"></i>Paid</span><span><i class="bace-status-dot" style="background:#c9a227"></i>Partial</span><span><i class="bace-status-dot" style="background:#b3261e"></i>Pending</span><span><i class="bace-status-dot" style="background:#9e9e9e"></i>Upcoming / N/A</span><span>Computed from the Payments Log</span></div>
 
 <form class="row g-2 mb-3 align-items-end">
   <div class="col-auto">
@@ -44,7 +44,7 @@
 </form>
 
 <div class="table-responsive">
-  <table class="table table-sm table-bordered align-middle" style="min-width:900px">
+  <table class="table table-sm table-bordered align-middle tracker-table" style="min-width:900px">
     <thead>
       <tr>
         <th>Student</th>
@@ -68,12 +68,12 @@
       {% for row in rows %}
       {% set s = row.student %}
       <tr>
-        <td>{{ s.full_name }}{% if not s.is_active %} <span class="badge bg-secondary">Inactive</span>{% endif %}</td>
-        <td>{{ s.bace_property.name if s.bace_property else '-' }}</td>
+        <td class="tracker-student">{{ s.full_name }}{% if not s.is_active %} <span class="badge bg-secondary">Inactive</span>{% endif %}</td>
+        <td class="tracker-property">{{ s.bace_property.name if s.bace_property else '-' }}</td>
         <td>{{ '%.0f' | format(s.monthly_amount) }}</td>
         {% for m in months %}
         {% set status = row.statuses[m] %}
-        <td class="text-center text-white" style="background:
+        <td class="text-center text-white tracker-status" style="background:
           {%- if status == bt.STATUS_PAID -%}#2e7d32
           {%- elif status == bt.STATUS_PARTIAL -%}#c9a227
           {%- elif status == bt.STATUS_PENDING -%}#b3261e

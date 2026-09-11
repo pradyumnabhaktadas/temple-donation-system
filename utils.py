@@ -311,6 +311,12 @@ def now_ist():
     return to_ist(datetime.datetime.utcnow())
 
 
+def ist_day_bounds_utc(day):
+    """Return UTC-naive [start, end) timestamps for one IST calendar day."""
+    ist_start = datetime.datetime.combine(day, datetime.time.min)
+    return ist_start - IST_OFFSET, ist_start + datetime.timedelta(days=1) - IST_OFFSET
+
+
 def get_financial_year(date=None):
     """India FY runs Apr 1 - Mar 31. Returns e.g. '2026-27'.
 

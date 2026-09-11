@@ -108,6 +108,47 @@ a:hover {
   color: var(--maroon-dark);
 }
 
+/* ---------- Admin overview and BACE workspace ---------- */
+.admin-page-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 1rem; margin-bottom: 1.5rem;
+}
+.admin-page-header .eyebrow {
+  color: var(--muted); font-size: .78rem; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; margin-bottom: .25rem;
+}
+.admin-page-header h3 { margin: 0; }
+.admin-page-actions { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: flex-end; }
+.dashboard-kpi { position: relative; overflow: hidden; min-height: 126px; text-align: left; }
+.dashboard-kpi::after { content: ''; position: absolute; right: -24px; bottom: -32px; width: 92px; height: 92px; border-radius: 50%; background: rgba(226,163,61,.15); }
+.dashboard-kpi .stat-icon { margin: 0 0 .55rem; }
+.dashboard-kpi .stat-value { position: relative; z-index: 1; font-size: 1.55rem; }
+.dashboard-kpi .stat-subtext { color: var(--muted); font-size: .76rem; margin-top: .28rem; }
+.dashboard-panel-title { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: 1rem; }
+.dashboard-panel-title h6 { margin: 0; font-weight: 700; }
+.dashboard-panel-title .panel-note { color: var(--muted); font-size: .76rem; }
+.collection-progress { height: 8px; border-radius: 99px; background: rgba(29,59,109,.10); overflow: hidden; }
+.collection-progress > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--saffron-dark), var(--saffron)); }
+
+.bace-shell { background: linear-gradient(135deg, rgba(255,255,255,.95), rgba(244,233,213,.72)); border: 1px solid rgba(29,59,109,.10); border-radius: 1rem; padding: 1rem 1.15rem; }
+.bace-kpi .stat-value { font-size: 1.5rem; }
+.bace-kpi.is-collected { border-left: 4px solid #2e7d32; }
+.bace-kpi.is-pending { border-left: 4px solid #b3261e; }
+.bace-progress-label { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; font-size: .82rem; }
+.bace-progress-label strong { color: var(--maroon-dark); }
+.bace-status-legend { display: flex; flex-wrap: wrap; gap: .5rem 1rem; color: var(--muted); font-size: .78rem; }
+.bace-status-dot { display: inline-block; width: .65rem; height: .65rem; border-radius: 50%; margin-right: .3rem; }
+.tracker-table { font-size: .82rem; }
+.tracker-table th { white-space: nowrap; background: #f3eadb; color: var(--maroon-dark); }
+.tracker-table .tracker-student { min-width: 180px; font-weight: 600; }
+.tracker-table .tracker-property { min-width: 135px; }
+.tracker-status { min-width: 58px; font-size: .72rem; font-weight: 700; white-space: nowrap; }
+@media (max-width: 767.98px) {
+  .admin-page-header { display: block; }
+  .admin-page-actions { justify-content: flex-start; margin-top: .85rem; }
+  .dashboard-kpi { min-height: 112px; }
+}
+
 /* ---------- Analytics page ---------- */
 /* .stat-icon/.stat-trend are opt-in additions used only inside
    analytics.html's KPI cards -- dashboard.html, donor_detail.html and

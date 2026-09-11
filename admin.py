@@ -25,7 +25,7 @@ from models import (
     REPORT_FREQUENCIES,
     DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES, DONATION_FREQUENCY_LABELS,
 )
-from utils import csv_safe_row, get_financial_year, is_valid_pan, is_valid_phone, normalize_phone, now_ist, to_ist
+from utils import csv_safe_row, get_financial_year, is_valid_pan, is_valid_phone, normalize_phone, now_ist, to_ist, ist_day_bounds_utc
 from pdf_utils import generate_receipt_pdf
 from public import (
     find_or_create_donor, _org_cfg, high_value_pan_address_error, _finalize_success,
@@ -110,7 +110,7 @@ def enforce_password_change():
 # real check_password_hash call without recomputing a fresh hash on every
 # login attempt; the actual value is never used for anything except
 # consuming comparable time, so it doesn't need to be a secret.
-_DUMMY_PASSWORD_HASH = generate_password_hash(secrets.token_hex(32))
+_DUMMY_PASSWORD_HASH = generate_password_hash(secrets.token_hex(32), method="pbkdf2:sha256")
 
 
 @bp.route("/login", methods=["GET", "POST"])
@@ -379,13 +379,12 @@ def dashboard():
     fy_start = datetime.date(fy_start_year, 4, 1)
 
     def total_since(d):
-        dt = datetime.datetime.combine(d, datetime.time.min)
+        dt, _ = ist_day_bounds_utc(d)
         return db.session.query(func.coalesce(func.sum(Donation.amount), 0)).filter(
             Donation.status == "success", Donation.donation_date >= dt
         ).scalar()
 
-    today_start = datetime.datetime.combine(today, datetime.time.min)
-    today_end = today_start + datetime.timedelta(days=1)
+    today_start, today_end = ist_day_bounds_utc(today)
     today_total = db.session.query(func.coalesce(func.sum(Donation.amount), 0)).filter(
         Donation.status == "success",
         Donation.donation_date >= today_start,
@@ -417,16 +416,20 @@ def dashboard():
         y, m = divmod(total_months, 12)
         return datetime.date(y, m + 1, 1)
 
-    monthly = []
-    for i in range(5, -1, -1):
-        month_date = months_ago(start_of_month, i)
-        y, m = month_date.year, month_date.month
-        total = db.session.query(func.coalesce(func.sum(Donation.amount), 0)).filter(
-            Donation.status == "success",
-            extract("year", Donation.donation_date) == y,
-            extract("month", Donation.donation_date) == m,
-        ).scalar()
-        monthly.append({"label": month_date.strftime("%b %Y"), "total": float(total)})
+    months = [months_ago(start_of_month, i) for i in range(5, -1, -1)]
+    trend_start, _ = ist_day_bounds_utc(months[0])
+    trend_end, _ = ist_day_bounds_utc(months_ago(start_of_month, -1))
+    trend_rows = db.session.query(Donation.amount, Donation.donation_date).filter(
+        Donation.status == "success", Donation.donation_date >= trend_start,
+        Donation.donation_date < trend_end,
+    ).all()
+    monthly_totals = {(m.year, m.month): 0.0 for m in months}
+    for amount, donated_at in trend_rows:
+        ist_date = to_ist(donated_at).date()
+        key = (ist_date.year, ist_date.month)
+        if key in monthly_totals:
+            monthly_totals[key] += float(amount)
+    monthly = [{"label": m.strftime("%b %Y"), "total": monthly_totals[(m.year, m.month)]} for m in months]
 
     donor_count = Donor.query.count()
     donation_count = Donation.query.filter_by(status="success").count()
@@ -689,7 +692,7 @@ def analytics():
             .filter(Donation.status == "success", Donation.donor_id.in_(population_donor_ids))
             .all()
         ):
-            d = dt.date() if hasattr(dt, "date") else dt
+            d = to_ist(dt).date() if hasattr(dt, "date") else dt
             all_pop_donations.append((did, float(amt), d, campaign_name or "Unknown", payment_mode or "unknown"))
 
     period_donation_rows = [(did, amt) for did, amt, d, *_r in all_pop_donations if period_start <= d < period_end]
@@ -6418,15 +6421,23 @@ def lapsed_donors():
     months_back = [month_key(months_ago(start_of_this_month, i)) for i in range(1, 5)]
     last_month_key = months_back[0]
 
-    donors_all = Donor.query.all()
-    lapsed = []
-    for donor in donors_all:
-        months_donated = set()
-        for d in donor.donations.filter_by(status="success"):
-            months_donated.add(month_key(d.donation_date.date()))
-        prior_three = set(months_back[1:4])
-        if prior_three.issubset(months_donated) and last_month_key not in months_donated:
-            lapsed.append(donor)
+    earliest_month = months_ago(start_of_this_month, 4)
+    query_start, _ = ist_day_bounds_utc(earliest_month)
+    query_end, _ = ist_day_bounds_utc(start_of_this_month)
+    months_by_donor = defaultdict(set)
+    for donor_id, donated_at in db.session.query(Donation.donor_id, Donation.donation_date).filter(
+        Donation.status == "success", Donation.donation_date >= query_start,
+        Donation.donation_date < query_end,
+    ):
+        ist_date = to_ist(donated_at).date()
+        months_by_donor[donor_id].add(month_key(ist_date))
+
+    prior_three = set(months_back[1:4])
+    lapsed_ids = [
+        donor_id for donor_id, donated_months in months_by_donor.items()
+        if prior_three.issubset(donated_months) and last_month_key not in donated_months
+    ]
+    lapsed = Donor.query.filter(Donor.id.in_(lapsed_ids)).order_by(Donor.full_name).all() if lapsed_ids else []
 
     return render_template("admin/lapsed_donors.html", donors=lapsed)
 

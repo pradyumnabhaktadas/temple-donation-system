@@ -50,7 +50,7 @@ def _mock_razorpay(payment=None, order_payments=None):
     return patch("razorpay.Client", return_value=client), client
 
 
-def _start_donation(app, client, amount=501, order_id="order_TEST1"):
+def _start_donation(app, client, amount=501, order_id="order_TEST1", include_response=False):
     """Create a pending donation the way the public form does."""
     from models import Campaign
     campaign = Campaign.query.filter_by(name="Annadan").first()
@@ -68,7 +68,24 @@ def _start_donation(app, client, amount=501, order_id="order_TEST1"):
             "pan": "ABCDE1234F",
         })
     assert resp.status_code == 200, resp.get_data(as_text=True)
-    return resp.get_json()["donation_id"]
+    return resp.get_json() if include_response else resp.get_json()["donation_id"]
+
+
+def test_status_poll_requires_the_checkout_token(app, client):
+    started = _start_donation(app, client, include_response=True)
+    donation_id = started["donation_id"]
+    app.config["TESTING"] = False
+    assert client.get(f"/api/donation-status/{donation_id}").status_code == 404
+    allowed = client.get(f"/api/donation-status/{donation_id}?t={started['status_token']}")
+    assert allowed.status_code == 200
+    assert allowed.get_json()["status"] == "pending"
+
+
+def test_simulation_is_never_available_in_production(app, client):
+    started = _start_donation(app, client, include_response=True)
+    app.config["IS_PRODUCTION"] = True
+    response = client.post("/api/simulate-payment", json={"donation_id": started["donation_id"]})
+    assert response.status_code == 400
 
 
 class TestDonorSeesTheirReceipt:
