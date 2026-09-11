@@ -15,7 +15,7 @@ from flask import (
 )
 from flask_login import login_user, logout_user, login_required, current_user
 from sqlalchemy import func, extract, or_
-from sqlalchemy.orm import load_only
+from sqlalchemy.orm import defer, load_only
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from extensions import db, limiter
@@ -5389,7 +5389,11 @@ def export_bace_contributions():
         return redirect(url_for("admin.bace_properties"))
 
     query, _filters = _apply_bace_contribution_filters(Donation.query.filter_by(campaign_id=campaign.id))
-    rows = query.order_by(Donation.donation_date.desc()).all()
+    # A receipt PDF can be several MB and is not a CSV column.  Defer it
+    # and iterate in batches so an export cannot OOM a 512 MB web worker.
+    rows = query.options(defer(Donation.receipt_pdf)).order_by(
+        Donation.donation_date.desc()
+    ).yield_per(100)
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -5544,7 +5548,10 @@ def export_dhoti_kurta_contributions():
         return redirect(url_for("admin.dhoti_kurta_contributions"))
 
     query, _filters = _apply_dhoti_kurta_filters(Donation.query.filter_by(campaign_id=campaign.id))
-    rows = query.order_by(Donation.donation_date.desc()).all()
+    # Do not hydrate the stored receipt PDFs while producing a CSV.
+    rows = query.options(defer(Donation.receipt_pdf)).order_by(
+        Donation.donation_date.desc()
+    ).yield_per(100)
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -5921,7 +5928,10 @@ def export_associated_with_report():
     query = Donation.query.filter(*conditions)
     if associated_with_id:
         query = query.filter_by(associated_with_id=associated_with_id)
-    rows = query.order_by(Donation.donation_date.desc()).all()
+    # Do not hydrate the stored receipt PDFs while producing a CSV.
+    rows = query.options(defer(Donation.receipt_pdf)).order_by(
+        Donation.donation_date.desc()
+    ).yield_per(100)
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -6627,7 +6637,10 @@ def export_donations():
     status = filters["status"]
     query, _sort = _sorted_donations_query(query, request.args.get("sort", "-date"))
 
-    rows = query.all()
+    # The CSV contains metadata only.  In particular, defer receipt_pdf:
+    # it is a LargeBinary field and loading every historical receipt was
+    # enough to exhaust Render's 512 MB Starter instance during exports.
+    rows = query.options(defer(Donation.receipt_pdf)).yield_per(100)
 
     output = io.StringIO()
     writer = csv.writer(output)
