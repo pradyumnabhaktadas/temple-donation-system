@@ -4527,12 +4527,23 @@ def export_bace_payments():
     if student_id:
         query = query.filter_by(student_id=student_id)
     rows = query.order_by(BaceRentPayment.date_paid.desc(), BaceRentPayment.id.desc()).all()
+    # Only some rent rows originate from a donation; manual rows naturally
+    # have no receipt. Fetch the small id -> receipt map in one query so the
+    # accounting export still shows the receipt wherever it exists.
+    source_ids = [p.source_donation_id for p in rows if p.source_donation_id]
+    receipt_numbers = {}
+    if source_ids:
+        receipt_numbers = dict(
+            db.session.query(Donation.id, Donation.receipt_number)
+            .filter(Donation.id.in_(source_ids))
+            .all()
+        )
 
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
         "Date Paid", "Student", "Phone", "Email", "Property", "For Month",
-        "Amount Paid (Rs)", "Mode", "Recorded By", "Reference",
+        "Amount Paid (Rs)", "Mode", "Recorded By", "Reference", "Receipt No",
     ])
     for p in rows:
         student = p.student
@@ -4547,6 +4558,7 @@ def export_bace_payments():
             p.mode or "",
             p.recorded_by or "",
             p.reference or "",
+            receipt_numbers.get(p.source_donation_id, ""),
         ]))
 
     return Response(
