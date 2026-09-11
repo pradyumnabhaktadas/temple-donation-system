@@ -36,7 +36,6 @@ services:
     # A cheap endpoint prevents slow admin/report pages or a temporarily
     # busy database from being mistaken for an unhealthy web instance.
     healthCheckPath: /healthz
-    maxShutdownDelaySeconds: 60
     disk:
       name: temple-data
       # Covers both the SQLite file (if you don't switch to the Postgres
