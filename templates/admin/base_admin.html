@@ -20,7 +20,7 @@
          one click back to the main admin page. #}
       {% set donations_endpoints = ['admin.donations'] + offline_donation_endpoints + ['admin.import_legacy_donations', 'admin.import_zoho_report', 'admin.zoho_reconcile'] %}
       {% set programs_endpoints = iyf_camp_endpoints + bace_tracker_endpoints %}
-      {% set donors_endpoints = ['admin.donors', 'admin.birthdays', 'admin.donor_insights', 'admin.lapsed_donors', 'admin.duplicate_donors', 'admin.import_donors'] %}
+      {% set donors_endpoints = ['admin.donors', 'admin.birthdays', 'admin.donor_insights', 'admin.donor_intelligence', 'admin.lapsed_donors', 'admin.duplicate_donors', 'admin.import_donors'] %}
       {% set settings_endpoints = ['admin.campaigns', 'admin.bace_properties', 'admin.bace_contributions', 'admin.festivals', 'admin.seva_types', 'admin.live_to_give_purposes', 'admin.preachers', 'admin.associated_withs', 'admin.associated_with_report', 'admin.dhoti_kurta_contributions', 'admin.data_backup', 'admin.manage_users', 'admin.activity_log', 'admin.daily_report_recipients'] %}
       <div class="navbar-nav ms-auto flex-wrap">
         <a class="nav-link {% if request.endpoint == 'admin.dashboard' %}active{% endif %}" href="{{ url_for('admin.dashboard') }}">Dashboard</a>
@@ -54,6 +54,7 @@
             <li><a class="dropdown-item {% if request.endpoint == 'admin.donors' %}active{% endif %}" href="{{ url_for('admin.donors') }}">Donors</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.birthdays' %}active{% endif %}" href="{{ url_for('admin.birthdays') }}">Birthdays</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.donor_insights' %}active{% endif %}" href="{{ url_for('admin.donor_insights') }}">Donor Insights</a></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'admin.donor_intelligence' %}active{% endif %}" href="{{ url_for('admin.donor_intelligence') }}">Donor Intelligence</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.lapsed_donors' %}active{% endif %}" href="{{ url_for('admin.lapsed_donors') }}">Lapsed Donors</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.duplicate_donors' %}active{% endif %}" href="{{ url_for('admin.duplicate_donors') }}">Possible Duplicates</a></li>
             {% if current_user.is_authenticated and current_user.role == 'admin' %}

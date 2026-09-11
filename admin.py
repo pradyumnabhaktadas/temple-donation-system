@@ -6326,6 +6326,103 @@ def donor_insights():
     )
 
 
+def _donor_intelligence_snapshot(campaign_id=None, preacher_id=None):
+    """Build one donor-centric view from successful donation history.
+
+    This deliberately uses actual contribution records rather than the
+    optional relationship-profile fields.  It is a compact, in-memory
+    aggregation after one query: at the temple's present scale this keeps
+    the definitions (especially IST calendar months) explicit and gives the
+    page every useful donor measure without an N+1 query per table row.
+    """
+    today = now_ist().date()
+    this_month = today.replace(day=1)
+    previous_month = bace_tracker.add_months(this_month, -1)
+    three_months_ago = bace_tracker.add_months(this_month, -3)
+
+    query = db.session.query(Donation, Donor).join(Donor, Donation.donor_id == Donor.id).filter(
+        Donation.status == "success"
+    )
+    if campaign_id:
+        query = query.filter(Donation.campaign_id == campaign_id)
+    if preacher_id:
+        query = query.filter(Donor.connected_preacher_id == preacher_id)
+
+    records = {}
+    for donation, donor in query.all():
+        # Donation timestamps are stored in UTC.  Calendar-month follow-up
+        # must use the temple's IST month, otherwise 12:00–5:30 AM IST
+        # gifts are assigned to yesterday/the prior month on Render.
+        donated_on = to_ist(donation.donation_date).date()
+        row = records.setdefault(donor.id, {
+            "donor": donor, "lifetime": 0.0, "count": 0, "this_month": 0.0,
+            "last_month": 0.0, "months": set(), "last_donation": None,
+        })
+        amount = float(donation.amount)
+        row["lifetime"] += amount
+        row["count"] += 1
+        row["months"].add((donated_on.year, donated_on.month))
+        row["last_donation"] = max(row["last_donation"], donated_on) if row["last_donation"] else donated_on
+        if donated_on >= this_month:
+            row["this_month"] += amount
+        elif previous_month <= donated_on < this_month:
+            row["last_month"] += amount
+
+    rows = list(records.values())
+    for row in rows:
+        row["average_monthly"] = row["lifetime"] / max(len(row["months"]), 1)
+        # A transparent priority score: recently missed regular support is
+        # more actionable than a long-inactive one-time gift; larger usual
+        # gifts rise within the same group.  This is guidance, not a claim
+        # about a donor's ability or willingness to give.
+        regular_months = sum(
+            (month.year, month.month) in row["months"]
+            for month in (previous_month, bace_tracker.add_months(previous_month, -1), bace_tracker.add_months(previous_month, -2))
+        )
+        row["regular_months"] = regular_months
+        row["followup_score"] = (100 if row["last_month"] and not row["this_month"] else 0) + (25 * regular_months) + min(row["average_monthly"] / 100, 50)
+
+    top_lifetime = sorted(rows, key=lambda r: (r["lifetime"], r["count"]), reverse=True)[:12]
+    top_this_month = sorted(
+        (r for r in rows if r["this_month"]), key=lambda r: r["this_month"], reverse=True
+    )[:12]
+    missed_this_month = sorted(
+        (r for r in rows if r["last_month"] and not r["this_month"]),
+        key=lambda r: (r["followup_score"], r["last_month"], r["lifetime"]), reverse=True,
+    )[:30]
+    lapsed = sorted(
+        (r for r in rows if r["count"] >= 2 and r["last_donation"] < three_months_ago),
+        key=lambda r: (r["last_donation"], -r["lifetime"]),
+    )[:30]
+    new_donors = sorted(
+        (r for r in rows if r["count"] == 1 and r["last_donation"] >= this_month),
+        key=lambda r: r["this_month"], reverse=True,
+    )[:20]
+    return {
+        "today": today, "this_month": this_month, "previous_month": previous_month,
+        "total_this_month": sum(r["this_month"] for r in rows),
+        "active_this_month": sum(1 for r in rows if r["this_month"]),
+        "top_lifetime": top_lifetime, "top_this_month": top_this_month,
+        "missed_this_month": missed_this_month, "lapsed": lapsed, "new_donors": new_donors,
+        "donor_count": len(rows),
+    }
+
+
+@bp.route("/donor-intelligence")
+@login_required
+def donor_intelligence():
+    """Actionable retention and stewardship dashboard based on donations."""
+    campaign_id = request.args.get("campaign_id", type=int)
+    preacher_id = request.args.get("preacher_id", type=int)
+    snapshot = _donor_intelligence_snapshot(campaign_id, preacher_id)
+    return render_template(
+        "admin/donor_intelligence.html", **snapshot,
+        campaigns=Campaign.query.filter_by(is_active=True).order_by(Campaign.name).all(),
+        preachers=Preacher.query.filter_by(is_active=True).order_by(Preacher.name).all(),
+        campaign_id=campaign_id, preacher_id=preacher_id,
+    )
+
+
 @bp.route("/birthdays")
 @login_required
 def birthdays():
