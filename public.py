@@ -52,7 +52,7 @@ from models import (
 from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email, send_cancellation_email
 import bace_matching
-from whatsapp_utils import send_receipt_whatsapp
+from whatsapp_utils import send_receipt_whatsapp, send_cancellation_whatsapp
 from utils import (
     HIGH_VALUE_PAN_THRESHOLD, is_valid_pan, is_valid_phone, normalize_phone, receipt_access_token, retry,
     to_ist, bace_student_payment_token,
@@ -844,13 +844,9 @@ def _send_cancellation_notifications_background(app, donation_id):
     context/DB session since the admin request that triggered this has
     already returned its response by the time this runs.
 
-    Only email is sent automatically here. There's no generic
-    WhatsApp-send capability in this app (see whatsapp_utils.py -- only
-    two fixed, pre-approved templates exist, for receipts and the daily
-    report, and a cancellation notice doesn't match either one), so a
-    WhatsApp cancellation notice is a manual wa.me link from the Donations
-    page instead (whatsapp_utils.cancellation_whatsapp_link), the same
-    copy-paste/wa.me pattern the BACE Pending List already uses.
+    Email and the approved Airtel cancellation template are both attempted
+    independently. Each is best-effort, so one failure never prevents the
+    other notification or changes the already-committed cancellation.
     """
     with app.app_context():
         donation = Donation.query.get(donation_id)
@@ -862,6 +858,12 @@ def _send_cancellation_notifications_background(app, donation_id):
             except Exception:
                 app.logger.exception(
                     "Background cancellation email failed for donation %s", donation_id
+                )
+            try:
+                send_cancellation_whatsapp(donation, donation.donor, _org_cfg())
+            except Exception:
+                app.logger.exception(
+                    "Background cancellation WhatsApp send failed for donation %s", donation_id
                 )
 
 

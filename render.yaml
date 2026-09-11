@@ -95,6 +95,8 @@ services:
         sync: false
       - key: WHATSAPP_TEMPLATE_ID
         sync: false
+      - key: WHATSAPP_CANCELLATION_TEMPLATE_ID
+        sync: false
       - key: PUBLIC_BASE_URL
         sync: false
       - key: SENTRY_DSN

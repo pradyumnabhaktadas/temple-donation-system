@@ -268,6 +268,13 @@ class Config:
     # that one is the receipt template (3 donor-facing variables + a PDF
     # attachment), which doesn't fit a 5-number internal report.
     WHATSAPP_REPORT_TEMPLATE_ID = os.environ.get("WHATSAPP_REPORT_TEMPLATE_ID", "01m16jfj9pg8zs0rxwk2p54g8j")
+    # Approved donor-facing cancellation notice. Its Airtel variable order
+    # is donor name, amount, receipt number, organisation name, reason.
+    # Template IDs are not credentials; the Airtel username/password above
+    # remain the only secret configuration needed to send it.
+    WHATSAPP_CANCELLATION_TEMPLATE_ID = os.environ.get(
+        "WHATSAPP_CANCELLATION_TEMPLATE_ID", "01m27v4exx34qcycgwnybhknak"
+    )
     WHATSAPP_AIRTEL_BASE_URL = os.environ.get("WHATSAPP_AIRTEL_BASE_URL", "")  # has a working default in whatsapp_utils.py
     # See the ⚠️ note in whatsapp_utils.py before setting this -- likely a
     # session-scoped value, not a stable API credential. Leave blank unless

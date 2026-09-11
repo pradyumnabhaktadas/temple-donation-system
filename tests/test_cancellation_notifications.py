@@ -41,7 +41,7 @@ def _make_success_donation(client, full_name="Cancel Test Donor", phone="9319880
     return donation
 
 
-class TestCancellationEmail:
+class TestCancellationNotifications:
     def test_cancelling_sends_an_email_to_the_donor(self, client, app):
         donation = _make_success_donation(client)
         from extensions import db
@@ -50,7 +50,8 @@ class TestCancellationEmail:
         donor.email = "donor@example.com"
         db.session.commit()
 
-        with patch("public.send_cancellation_email") as mock_email:
+        with patch("public.send_cancellation_email") as mock_email, \
+             patch("public.send_cancellation_whatsapp") as mock_whatsapp:
             client.post(
                 f"/admin/donations/{donation.id}/cancel",
                 data={"cancellation_reason": "Duplicate entry"},
@@ -61,6 +62,8 @@ class TestCancellationEmail:
             assert called_donation.id == donation.id
             assert called_donor.id == donor.id
             assert called_reason == "Duplicate entry"
+            mock_whatsapp.assert_called_once()
+            assert mock_whatsapp.call_args[0][0].id == donation.id
 
     def test_no_email_attempted_without_an_address_on_file(self, client, app):
         """send_cancellation_email itself already no-ops without an email
@@ -69,7 +72,8 @@ class TestCancellationEmail:
         nothing to send to."""
         donation = _make_success_donation(client, full_name="No Email Donor", phone="9319880508")
 
-        with patch("public.send_cancellation_email") as mock_email:
+        with patch("public.send_cancellation_email") as mock_email, \
+             patch("public.send_cancellation_whatsapp") as mock_whatsapp:
             resp = client.post(
                 f"/admin/donations/{donation.id}/cancel",
                 data={"cancellation_reason": "Wrong campaign"},
@@ -77,6 +81,7 @@ class TestCancellationEmail:
             )
             assert resp.status_code == 200
             mock_email.assert_called_once()
+            mock_whatsapp.assert_called_once()
 
     def test_restoring_does_not_send_a_cancellation_email(self, client, app):
         donation = _make_success_donation(client)
@@ -84,9 +89,11 @@ class TestCancellationEmail:
             f"/admin/donations/{donation.id}/cancel",
             data={"cancellation_reason": "Test"}, follow_redirects=True,
         )
-        with patch("public.send_cancellation_email") as mock_email:
+        with patch("public.send_cancellation_email") as mock_email, \
+             patch("public.send_cancellation_whatsapp") as mock_whatsapp:
             client.post(f"/admin/donations/{donation.id}/restore", data={}, follow_redirects=True)
             mock_email.assert_not_called()
+            mock_whatsapp.assert_not_called()
 
 
 class TestCancellationWhatsAppLink:

@@ -6,11 +6,12 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from whatsapp_utils import send_receipt_whatsapp, _to_e164
+from whatsapp_utils import send_receipt_whatsapp, send_cancellation_whatsapp, _to_e164
 
 
 def _fake_donation(donation_id=42):
-    return SimpleNamespace(id=donation_id, receipt_number="032511/ISK500000", amount=501.0)
+    return SimpleNamespace(id=donation_id, receipt_number="032511/ISK500000", amount=501.0,
+                           cancellation_reason="Duplicate entry")
 
 
 def _fake_donor(whatsapp_or_phone="9876543210", full_name="Test Donor"):
@@ -26,6 +27,7 @@ def _configure(app):
     app.config["WHATSAPP_AIRTEL_PASSWORD"] = "test-pass"
     app.config["WHATSAPP_FROM_NUMBER"] = "918178798462"
     app.config["WHATSAPP_TEMPLATE_ID"] = "01kzdy128ke65be98yhg9fjazx"
+    app.config["WHATSAPP_CANCELLATION_TEMPLATE_ID"] = "01m27v4exx34qcycgwnybhknak"
     app.config["PUBLIC_BASE_URL"] = "https://givetokrishna.com"
 
 
@@ -129,6 +131,22 @@ class TestWhatsAppReceipt:
             sent = send_receipt_whatsapp(_fake_donation(), _fake_donor(), {}, _fake_pdf_bytes())
 
         assert sent is False
+
+    def test_cancellation_uses_the_approved_five_variable_template(self, app):
+        _configure(app)
+        response = MagicMock(ok=True)
+        with app.app_context(), patch("whatsapp_utils.requests.post", return_value=response) as post:
+            sent = send_cancellation_whatsapp(
+                _fake_donation(), _fake_donor(), {"ORG_NAME": "ISKCON Dwarka"}
+            )
+
+        assert sent is True
+        payload = post.call_args.kwargs["json"]
+        assert payload["templateId"] == "01m27v4exx34qcycgwnybhknak"
+        assert payload["to"] == "919876543210"
+        assert payload["message"]["variables"] == [
+            "Test Donor", "501.00", "032511/ISK500000", "ISKCON Dwarka", "Duplicate entry",
+        ]
 
     def test_online_donation_flow_triggers_whatsapp_when_configured(self, app, client):
         """End-to-end: the full create-order -> simulate-payment flow should

@@ -248,6 +248,62 @@ def send_daily_report_whatsapp(cfg, phone, report_data, org_name):
         return False, str(exc)
 
 
+def send_cancellation_whatsapp(donation, donor, org_cfg):
+    """Send the approved cancellation template through Airtel IQ.
+
+    Cancellation is committed before this function is called.  Like receipt
+    delivery, this is deliberately best-effort: a provider outage, an
+    unconfigured account, or a donor without a WhatsApp number can never
+    undo or delay the financial cancellation itself.
+    """
+    phone = donor.whatsapp_or_phone
+    if not phone:
+        return False
+
+    cfg = current_app.config
+    username = cfg.get("WHATSAPP_AIRTEL_USERNAME")
+    password = cfg.get("WHATSAPP_AIRTEL_PASSWORD")
+    from_number = cfg.get("WHATSAPP_FROM_NUMBER")
+    template_id = cfg.get("WHATSAPP_CANCELLATION_TEMPLATE_ID")
+    if not (username and password and from_number and template_id):
+        return False
+
+    try:
+        org_name = org_cfg.get("ORG_PARENT_NAME") or org_cfg.get("ORG_NAME") or "ISKCON Dwarka"
+        payload = {
+            "templateId": template_id,
+            "to": _to_e164(phone),
+            "from": _to_e164(from_number),
+            "message": {
+                # Exact order from the approved Airtel template/curl:
+                # name, amount, receipt, organisation, cancellation reason.
+                "variables": [
+                    (donor.full_name or "Donor")[:60],
+                    f"{float(donation.amount):.2f}",
+                    (donation.receipt_number or f"#{donation.id}")[:100],
+                    org_name[:60],
+                    (donation.cancellation_reason or "Not specified")[:300],
+                ]
+            },
+        }
+        response = requests.post(
+            cfg.get("WHATSAPP_AIRTEL_BASE_URL") or DEFAULT_AIRTEL_BASE_URL,
+            headers=_headers(cfg), auth=(username, password), json=payload, timeout=15,
+        )
+        if not response.ok:
+            current_app.logger.error(
+                "WhatsApp (Airtel) cancellation send failed for donation %s: %s %s",
+                donation.receipt_number or donation.id, response.status_code, response.text[:500],
+            )
+            return False
+        return True
+    except Exception:
+        current_app.logger.exception(
+            "Failed to send WhatsApp cancellation for donation %s", donation.receipt_number or donation.id
+        )
+        return False
+
+
 def cancellation_whatsapp_link(donation, donor, org_cfg):
     """Builds a wa.me deep link with a pre-filled cancellation notice for
     `donor`, opened manually by staff -- same copy-paste/wa.me pattern the

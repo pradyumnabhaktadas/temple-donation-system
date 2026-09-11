@@ -1540,12 +1540,10 @@ def cancel_donation(donation_id):
     refuses to serve non-"success" donations, so a cancelled receipt just
     becomes undownloadable rather than being altered or reissued.
 
-    The donor is notified of the cancellation: an email goes out
-    automatically in the background (if SMTP is configured and they have
-    an email on file -- see _send_cancellation_notifications_background),
-    and a wa.me link with the same message pre-filled appears on the
-    Donations page for staff to send manually (no generic WhatsApp-send
-    capability exists in this app -- see whatsapp_utils.cancellation_whatsapp_link).
+    The donor is notified in the background by email and the approved
+    Airtel WhatsApp cancellation template when their contact/configuration
+    supports it. A manual wa.me link remains available on the Donations
+    page as a fallback.
     """
     donation = Donation.query.get_or_404(donation_id)
     if donation.status == "cancelled":
@@ -1585,8 +1583,7 @@ def cancel_donation(donation_id):
 
     flash(
         f"Donation {donation.receipt_number or ('#' + str(donation.id))} has been cancelled. "
-        "Emailing the donor now if they have an email on file (WhatsApp: use the "
-        "\"WhatsApp cancellation notice\" link on the Donations page to send one manually)."
+        "Sending email and WhatsApp notices now when the donor has those contacts configured."
     )
     return redirect(url_for("admin.donor_detail", donor_id=donation.donor_id))
 
