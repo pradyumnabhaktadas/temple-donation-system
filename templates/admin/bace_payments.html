@@ -37,6 +37,13 @@
             {% endfor %}
           </datalist>
           <input type="hidden" name="student_id" id="student_id_hidden" value="{{ prefill_student_id or '' }}">
+          <label class="form-label small mt-2" for="student_picker">Or choose from the BACE student list</label>
+          <select class="form-select form-select-sm" id="student_picker">
+            <option value="">Choose a BACE student…</option>
+            {% for s in active_students %}
+            <option value="{{ s.id }}" {% if prefill_student_id == s.id %}selected{% endif %}>{{ student_search_label(s) }}</option>
+            {% endfor %}
+          </select>
           <div class="form-text small text-danger d-none" id="student_search_error">Pick a student from the list.</div>
         </div>
         <div class="mb-2">
@@ -149,9 +156,10 @@
   const search = document.getElementById('student_search');
   const hidden = document.getElementById('student_id_hidden');
   const datalist = document.getElementById('student_datalist');
+  const picker = document.getElementById('student_picker');
   const error = document.getElementById('student_search_error');
   const form = document.getElementById('bace-payment-form');
-  if (!search || !hidden || !datalist || !form) return;
+  if (!search || !hidden || !datalist || !picker || !form) return;
 
   // Native <datalist> only tells us the text the visitor typed/picked, not
   // which student that corresponds to -- this maps the full option label
@@ -172,9 +180,21 @@
   function resolve() {
     const id = byLabel[search.value];
     hidden.value = id || '';
+    picker.value = id || '';
     error.classList.toggle('d-none', !!id || search.value.trim() === '');
   }
   search.addEventListener('input', function () { userEdited = true; resolve(); });
+
+  // Mobile browsers are inconsistent about displaying <datalist>
+  // suggestions. Keep the fast search field, but also offer a conventional
+  // select control that always exposes every active BACE resident.
+  picker.addEventListener('change', function () {
+    const option = picker.options[picker.selectedIndex];
+    hidden.value = picker.value;
+    search.value = picker.value ? option.textContent : '';
+    userEdited = false;
+    error.classList.toggle('d-none', !!picker.value);
+  });
 
   {% if prefill_student_label %}
   // The server already set student_id_hidden's value to the matched

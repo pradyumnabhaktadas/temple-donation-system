@@ -250,6 +250,11 @@ class TestAddToRosterLink:
         resp = client.get("/admin/bace-contributions")
         assert f"prefill_source_donation_id={source_donation.id}" in resp.get_data(as_text=True)
 
+        picker = client.get(f"/admin/bace-payments?prefill_source_donation_id={source_donation.id}")
+        picker_body = picker.get_data(as_text=True)
+        assert "Or choose from the BACE student list" in picker_body
+        assert "Selected Resident" in picker_body
+
         client.post("/admin/bace-payments", data={
             "student_id": str(selected.id), "for_month": "2026-08", "amount_paid": "6000",
             "source_donation_id": str(source_donation.id),
