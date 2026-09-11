@@ -1,0 +1,11 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}BACE Ledger — {{ student.full_name }}{% endblock %}
+{% block content %}
+<div class="admin-page-header">
+  <div><div class="eyebrow">Student rent ledger</div><h3>📒 {{ student.full_name }}</h3></div>
+  <div class="admin-page-actions"><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_students') }}">Students</a><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_payments', student_id=student.id) }}">Payments</a></div>
+</div>
+<p class="text-muted">{{ student.bace_property.name if student.bace_property else '-' }} · Monthly rent Rs. {{ '%.0f' | format(student.monthly_amount) }} · Joined {{ student.joined_month.strftime('%b %Y') }}</p>
+<div class="row g-3 mb-4"><div class="col-md-4"><div class="stat-card"><div class="stat-label">Total paid</div><div class="stat-value">Rs. {{ '%.0f' | format(summary.total_paid) }}</div></div></div><div class="col-md-4"><div class="stat-card"><div class="stat-label">Balance due</div><div class="stat-value text-danger">Rs. {{ '%.0f' | format(summary.balance_due) }}</div></div></div><div class="col-md-4"><div class="stat-card"><div class="stat-label">Months behind</div><div class="stat-value">{{ summary.months_behind }}</div></div></div></div>
+<div class="table-responsive"><table class="table table-sm table-striped align-middle"><thead><tr><th>Month</th><th>Expected (Rs)</th><th>Paid (Rs)</th><th>Status</th></tr></thead><tbody>{% for row in rows %}<tr><td>{{ row.month.strftime('%b %Y') }}</td><td>{{ '%.0f' | format(row.expected) }}</td><td>{{ '%.0f' | format(row.paid) }}</td><td>{% if row.status == bt.STATUS_PAID %}<span class="badge bg-success">Paid</span>{% elif row.status == bt.STATUS_PARTIAL %}<span class="badge bg-warning text-dark">Partial</span>{% elif row.status == bt.STATUS_PENDING %}<span class="badge bg-danger">Pending</span>{% else %}<span class="badge bg-secondary">{{ row.status }}</span>{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+{% endblock %}

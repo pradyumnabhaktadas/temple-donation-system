@@ -4742,12 +4742,62 @@ def bace_dashboard():
             "collected": b["collected"], "pending": b["expected"] - b["collected"], "pct": pct,
         })
 
+    # Reconciliation alerts: only successful BACE contributions that have
+    # not yet become a rent-payment row need staff attention.  Match them
+    # once as a batch so the dashboard distinguishes a one-click-ready
+    # match from a donation that needs a manual student choice.
+    campaign = _bace_campaign_or_none()
+    reconciliation = {"matched": 0, "unmatched": 0}
+    if campaign:
+        recorded_sources = db.session.query(BaceRentPayment.source_donation_id).filter(
+            BaceRentPayment.source_donation_id.isnot(None)
+        )
+        outstanding_contributions = Donation.query.filter(
+            Donation.campaign_id == campaign.id,
+            Donation.status == "success",
+            ~Donation.id.in_(recorded_sources),
+        ).all()
+        matched = bace_matching.match_students(outstanding_contributions)
+        reconciliation["matched"] = len(matched)
+        reconciliation["unmatched"] = len(outstanding_contributions) - len(matched)
+
     return render_template(
         "admin/bace_dashboard.html", today=today, this_month=this_month, summary=summary,
         active_count=len(students), expected=expected, collected=collected,
         pending_amount=pending_amount, fully_paid=fully_paid, partially_paid=partially_paid,
         not_paid=not_paid, not_due=not_due, base_rows=base_rows, bt=bace_tracker,
         ledger_count=ledger_count, ledger_created=ledger_created,
+        reconciliation=reconciliation,
+    )
+
+
+@bp.route("/bace-students/<int:student_id>/ledger")
+@login_required
+def bace_student_ledger(student_id):
+    """One student's charge/payment history, newest month first."""
+    student = BaceStudent.query.get_or_404(student_id)
+    today = now_ist().date()
+    _ensure_current_bace_rent_charges(today)
+    this_month = bace_tracker.month_start(today)
+    first_month = bace_tracker.month_start(student.joined_month)
+    months = bace_tracker.months_between(first_month, this_month)
+    payments = BaceRentPayment.query.filter_by(student_id=student.id).all()
+    charges = BaceRentCharge.query.filter_by(student_id=student.id).all()
+    [summary] = bace_tracker.build_rent_summary(
+        [student], payments, months, today=today, charges=charges,
+    )
+    rows = [
+        {
+            "month": month,
+            "expected": summary["expected_amounts"][month],
+            "paid": summary["paid_amounts"][month],
+            "status": summary["statuses"][month],
+        }
+        for month in reversed(months)
+    ]
+    return render_template(
+        "admin/bace_student_ledger.html", student=student, rows=rows,
+        summary=summary, bt=bace_tracker,
     )
 
 

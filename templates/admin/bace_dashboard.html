@@ -18,6 +18,11 @@
   <div class="col-md-3"><div class="stat-card bace-kpi is-collected"><div class="stat-label">Collected</div><div class="stat-value text-success">Rs. {{ '%.0f' | format(collected) }}</div></div></div>
   <div class="col-md-3"><div class="stat-card bace-kpi is-pending"><div class="stat-label">Pending</div><div class="stat-value text-danger">Rs. {{ '%.0f' | format(pending_amount) }}</div></div></div>
 </div>
+<div class="dashboard-panel-title"><h5>Needs attention</h5><span class="panel-note">BACE contribution reconciliation</span></div>
+<div class="row g-3 mb-4">
+  <div class="col-md-6"><a class="card card-body shadow-sm text-decoration-none" href="{{ url_for('admin.bace_contributions') }}"><div class="text-muted small">Ready to record</div><div class="fs-5 fw-bold text-success">{{ reconciliation.matched }} matched contribution{{ '' if reconciliation.matched == 1 else 's' }}</div><div class="small text-muted">Student match found; record in one click.</div></a></div>
+  <div class="col-md-6"><a class="card card-body shadow-sm text-decoration-none" href="{{ url_for('admin.bace_contributions') }}"><div class="text-muted small">Needs manual reconciliation</div><div class="fs-5 fw-bold text-warning">{{ reconciliation.unmatched }} unmatched contribution{{ '' if reconciliation.unmatched == 1 else 's' }}</div><div class="small text-muted">Choose the correct student or add them to the roster.</div></a></div>
+</div>
 <div class="row g-3 mb-4">
   <div class="col-md-3"><div class="card card-body shadow-sm text-center p-3"><div class="text-muted small">Fully Paid</div><div class="fs-5 fw-bold">{{ fully_paid }}</div></div></div>
   <div class="col-md-3"><div class="card card-body shadow-sm text-center p-3"><div class="text-muted small">Partially Paid</div><div class="fs-5 fw-bold">{{ partially_paid }}</div></div></div>
@@ -54,7 +59,7 @@
     <tbody>
       {% for row in summary %}
       <tr>
-        <td class="bace-lookup-name">{{ row.student.full_name }}</td>
+        <td class="bace-lookup-name"><a href="{{ url_for('admin.bace_student_ledger', student_id=row.student.id) }}">{{ row.student.full_name }}</a></td>
         <td>{{ row.student.bace_property.name if row.student.bace_property else '-' }}</td>
         <td>
           {% if row.this_month_status == bt.STATUS_PAID %}<span class="badge" style="background:#2e7d32;">Paid</span>

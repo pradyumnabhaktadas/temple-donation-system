@@ -84,6 +84,20 @@ class TestMonthlyRentLedger:
 
         assert BaceRentCharge.query.count() == 0
 
+    def test_student_ledger_shows_the_monthly_charge_and_payment_status(self, client, app):
+        prop_id = _property(app)
+        from utils import now_ist
+        month = now_ist().strftime("%Y-%m")
+        _add_student(client, prop_id, full_name="Ledger View", phone="9319880507", joined_month=month)
+        from models import BaceStudent
+        student = BaceStudent.query.filter_by(full_name="Ledger View").one()
+
+        response = client.get(f"/admin/bace-students/{student.id}/ledger")
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert "Student rent ledger" in body
+        assert "Pending" in body
+
     def test_blank_name_is_rejected(self, client, app):
         prop_id = _property(app)
         _add_student(client, prop_id, full_name="")

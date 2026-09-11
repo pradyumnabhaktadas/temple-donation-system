@@ -89,7 +89,7 @@
         <tbody>
           {% for s in students %}
           <tr>
-            <td>{{ s.full_name }}</td>
+            <td><a href="{{ url_for('admin.bace_student_ledger', student_id=s.id) }}">{{ s.full_name }}</a></td>
             <td>{{ s.bace_property.name if s.bace_property else '-' }}</td>
             <td>{{ s.phone or '-' }}</td>
             <td>{{ s.email or '-' }}</td>
