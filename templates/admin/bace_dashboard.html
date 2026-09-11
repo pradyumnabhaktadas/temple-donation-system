@@ -10,7 +10,7 @@
     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_pending_list') }}">Pending List</a>
   </div>
 </div>
-<div class="bace-shell mb-4 d-flex justify-content-between align-items-center flex-wrap gap-2"><span class="text-muted">As of {{ today.strftime('%d %b %Y') }}</span><strong>{{ this_month.strftime('%B %Y') }} collection cycle</strong></div>
+<div class="bace-shell mb-4 d-flex justify-content-between align-items-center flex-wrap gap-2"><span class="text-muted">As of {{ today.strftime('%d %b %Y') }}</span><strong>{{ this_month.strftime('%B %Y') }} collection cycle</strong><span class="text-muted small">Monthly ledger: {{ ledger_count }} expected-rent entries{% if ledger_created %} ({{ ledger_created }} created today){% endif %}</span></div>
 
 <div class="row g-3 mb-4">
   <div class="col-md-3"><div class="stat-card bace-kpi"><div class="stat-label">Active students</div><div class="stat-value">{{ active_count }}</div></div></div>

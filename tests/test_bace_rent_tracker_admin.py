@@ -52,6 +52,38 @@ class TestStudentsPage:
         assert student.joined_month == datetime.date(2026, 9, 1)
         assert student.status == "Active"
 
+
+class TestMonthlyRentLedger:
+    def test_dashboard_creates_one_current_month_charge_per_active_student(self, client, app):
+        prop_id = _property(app)
+        from utils import now_ist
+        month = now_ist().strftime("%Y-%m")
+        _add_student(client, prop_id, full_name="Ledger One", phone="9319880507", joined_month=month)
+        _add_student(client, prop_id, full_name="Ledger Two", phone="9319880508", joined_month=month)
+
+        client.get("/admin/bace-dashboard")
+
+        from models import BaceRentCharge
+        assert BaceRentCharge.query.count() == 2
+        assert {float(charge.amount_due) for charge in BaceRentCharge.query.all()} == {3000.0}
+
+        # Opening the dashboard again must not duplicate the month's ledger.
+        client.get("/admin/bace-dashboard")
+        assert BaceRentCharge.query.count() == 2
+
+    def test_dashboard_does_not_create_a_charge_for_an_inactive_student(self, client, app):
+        prop_id = _property(app)
+        from utils import now_ist
+        month = now_ist().strftime("%Y-%m")
+        _add_student(client, prop_id, full_name="Left Resident", phone="9319880507", joined_month=month)
+
+        from models import BaceStudent, BaceRentCharge
+        student = BaceStudent.query.filter_by(full_name="Left Resident").one()
+        client.post(f"/admin/bace-students/{student.id}/toggle", data={}, follow_redirects=True)
+        client.get("/admin/bace-dashboard")
+
+        assert BaceRentCharge.query.count() == 0
+
     def test_blank_name_is_rejected(self, client, app):
         prop_id = _property(app)
         _add_student(client, prop_id, full_name="")

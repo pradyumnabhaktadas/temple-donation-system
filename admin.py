@@ -22,7 +22,7 @@ from models import (
     Camp,
     Donor, Campaign, Donation, AdminUser, ReceiptCounter, BaceProperty, Festival, SevaType,
     LiveToGivePurpose, Preacher, AssociatedWith, AdminActivityLog, DailyReportRecipient,
-    BaceStudent, BaceRentPayment, BACE_PAYMENT_MODES,
+    BaceStudent, BaceRentCharge, BaceRentPayment, BACE_PAYMENT_MODES,
     REPORT_FREQUENCIES,
     DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES, DONATION_FREQUENCY_LABELS,
 )
@@ -4358,9 +4358,10 @@ def bace_student_edit(student_id):
 def bace_student_delete(student_id):
     student = BaceStudent.query.get_or_404(student_id)
     has_payments = BaceRentPayment.query.filter_by(student_id=student.id).first() is not None
-    if has_payments:
+    has_ledger_entries = BaceRentCharge.query.filter_by(student_id=student.id).first() is not None
+    if has_payments or has_ledger_entries:
         flash(
-            f"Can't delete '{student.full_name}' -- they have payments recorded. "
+            f"Can't delete '{student.full_name}' -- they have payment or monthly-ledger history. "
             "Set their status to Inactive instead so their history stays intact."
         )
         return redirect(url_for("admin.bace_students"))
@@ -4549,6 +4550,37 @@ def bace_payment_delete(payment_id):
     return redirect(url_for("admin.bace_payments"))
 
 
+def _ensure_current_bace_rent_charges(today=None):
+    """Create this month's ledger entries for active, due BACE students.
+
+    The ledger begins at rollout: it never manufactures historical charges
+    from a student's current rent amount. A unique constraint makes repeated
+    visits safe, while recording the expected amount protects this month's
+    accounting if a rent amount changes later.
+    """
+    today = today or now_ist().date()
+    month = bace_tracker.month_start(today)
+    students = BaceStudent.query.filter(
+        BaceStudent.status == "Active", BaceStudent.joined_month <= month,
+    ).all()
+    existing = {
+        student_id for (student_id,) in db.session.query(BaceRentCharge.student_id).filter(
+            BaceRentCharge.for_month == month,
+            BaceRentCharge.student_id.in_([s.id for s in students]),
+        ).all()
+    } if students else set()
+    created = 0
+    for student in students:
+        if student.id not in existing:
+            db.session.add(BaceRentCharge(
+                student_id=student.id, for_month=month, amount_due=student.monthly_amount,
+            ))
+            created += 1
+    if created:
+        db.session.commit()
+    return month, len(students), created
+
+
 def _bace_tracker_summary_from_request():
     """Shared by bace_tracker_grid() (the page) and export_bace_tracker()
     (its CSV) so the exported rows are always for exactly the date range
@@ -4586,8 +4618,12 @@ def _bace_tracker_summary_from_request():
     payments = BaceRentPayment.query.filter(
         BaceRentPayment.student_id.in_([s.id for s in students])
     ).all() if students else []
+    _ensure_current_bace_rent_charges(today)
+    charges = BaceRentCharge.query.filter(
+        BaceRentCharge.student_id.in_([s.id for s in students])
+    ).all() if students else []
 
-    summary = bace_tracker.build_rent_summary(students, payments, months, today=today)
+    summary = bace_tracker.build_rent_summary(students, payments, months, today=today, charges=charges)
     return summary, months, from_month, to_month, today, include_inactive, bace_property_id
 
 
@@ -4666,16 +4702,20 @@ def bace_dashboard():
     spreadsheet's Dashboard tab."""
     today = now_ist().date()
     this_month = bace_tracker.month_start(today)
+    _month, ledger_count, ledger_created = _ensure_current_bace_rent_charges(today)
 
     students = BaceStudent.query.filter_by(status="Active").all()
     payments = BaceRentPayment.query.filter(
         BaceRentPayment.student_id.in_([s.id for s in students]),
         BaceRentPayment.for_month == this_month,
     ).all() if students else []
-    summary = bace_tracker.build_rent_summary(students, payments, [this_month], today=today)
+    charges = BaceRentCharge.query.filter(
+        BaceRentCharge.student_id.in_([s.id for s in students]), BaceRentCharge.for_month == this_month,
+    ).all() if students else []
+    summary = bace_tracker.build_rent_summary(students, payments, [this_month], today=today, charges=charges)
 
     due_rows = [row for row in summary if row["this_month_status"] != bace_tracker.STATUS_NA]
-    expected = sum(float(row["student"].monthly_amount) for row in due_rows)
+    expected = sum(float(row["this_month_expected"]) for row in due_rows)
     collected = sum(
         float(row["student"].monthly_amount) - float(row["this_month_due"]) for row in due_rows
     )
@@ -4692,7 +4732,7 @@ def bace_dashboard():
         if row["this_month_status"] == bace_tracker.STATUS_NA:
             continue
         bucket["students"] += 1
-        bucket["expected"] += float(row["student"].monthly_amount)
+        bucket["expected"] += float(row["this_month_expected"])
         bucket["collected"] += float(row["student"].monthly_amount) - float(row["this_month_due"])
     base_rows = []
     for name, b in sorted(by_property.items()):
@@ -4707,6 +4747,7 @@ def bace_dashboard():
         active_count=len(students), expected=expected, collected=collected,
         pending_amount=pending_amount, fully_paid=fully_paid, partially_paid=partially_paid,
         not_paid=not_paid, not_due=not_due, base_rows=base_rows, bt=bace_tracker,
+        ledger_count=ledger_count, ledger_created=ledger_created,
     )
 
 
@@ -4722,13 +4763,17 @@ def bace_pending_list():
     to open a chat with it pre-filled and hit send yourself."""
     today = now_ist().date()
     this_month = bace_tracker.month_start(today)
+    _ensure_current_bace_rent_charges(today)
 
     students = BaceStudent.query.filter_by(status="Active").all()
     payments = BaceRentPayment.query.filter(
         BaceRentPayment.student_id.in_([s.id for s in students]),
         BaceRentPayment.for_month == this_month,
     ).all() if students else []
-    summary = bace_tracker.build_rent_summary(students, payments, [this_month], today=today)
+    charges = BaceRentCharge.query.filter(
+        BaceRentCharge.student_id.in_([s.id for s in students]), BaceRentCharge.for_month == this_month,
+    ).all() if students else []
+    summary = bace_tracker.build_rent_summary(students, payments, [this_month], today=today, charges=charges)
 
     from whatsapp_utils import _to_e164
 

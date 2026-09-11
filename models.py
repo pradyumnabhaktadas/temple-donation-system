@@ -927,6 +927,10 @@ class BaceStudent(db.Model):
         "BaceRentPayment", backref="student", lazy="dynamic",
         order_by="BaceRentPayment.for_month",
     )
+    rent_charges = db.relationship(
+        "BaceRentCharge", backref="student", lazy="dynamic",
+        order_by="BaceRentCharge.for_month",
+    )
 
     @property
     def is_active(self):
@@ -934,6 +938,27 @@ class BaceStudent(db.Model):
 
     def __repr__(self):
         return f"<BaceStudent {self.full_name}>"
+
+
+class BaceRentCharge(db.Model):
+    """One immutable expected-rent entry for a student and calendar month.
+
+    Charges begin with the monthly ledger rollout; historical months are
+    intentionally not backfilled because a student's current rent may not
+    represent an older rate. Payments remain separate and are compared with
+    the charge by the tracker.
+    """
+
+    __tablename__ = "bace_rent_charges"
+    __table_args__ = (
+        db.UniqueConstraint("student_id", "for_month", name="uq_bace_rent_charge_student_month"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey("bace_students.id"), nullable=False, index=True)
+    for_month = db.Column(db.Date, nullable=False, index=True)
+    amount_due = db.Column(db.Numeric(12, 2), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
 
 
 class BaceRentPayment(db.Model):

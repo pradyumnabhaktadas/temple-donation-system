@@ -72,6 +72,14 @@ def payments_by_student_month(payments):
     return totals
 
 
+def charges_by_student_month(charges):
+    """{student_id: {month: expected amount}} from monthly ledger entries."""
+    totals = {}
+    for charge in charges or []:
+        totals.setdefault(charge.student_id, {})[month_start(charge.for_month)] = Decimal(charge.amount_due)
+    return totals
+
+
 def status_for(monthly_amount, joined_month, month, paid, today=None):
     """Paid/Partial/Pending/Upcoming/N/A for one student-month. `paid` is
     the Decimal total already paid for that exact month (from
@@ -90,7 +98,7 @@ def status_for(monthly_amount, joined_month, month, paid, today=None):
     return STATUS_PENDING
 
 
-def build_rent_summary(students, payments, months, today=None):
+def build_rent_summary(students, payments, months, today=None, charges=None):
     """The whole tracker, computed once: a list of dicts, one per student
     in `students` order --
 
@@ -114,19 +122,24 @@ def build_rent_summary(students, payments, months, today=None):
     today = today or datetime.date.today()
     this_month = month_start(today)
     by_student = payments_by_student_month(payments)
+    expected_by_student = charges_by_student_month(charges)
 
     summary = []
     for student in students:
         paid_by_month = by_student.get(student.id, {})
+        charge_by_month = expected_by_student.get(student.id, {})
         joined = month_start(student.joined_month)
         monthly_amount = Decimal(student.monthly_amount)
 
         statuses = {}
         paid_amounts = {}
+        expected_amounts = {}
         for month in months:
             month_paid = paid_by_month.get(month_start(month), Decimal("0"))
-            statuses[month] = status_for(monthly_amount, joined, month, month_paid, today)
+            expected_amount = charge_by_month.get(month_start(month), monthly_amount)
+            statuses[month] = status_for(expected_amount, joined, month, month_paid, today)
             paid_amounts[month] = month_paid
+            expected_amounts[month] = expected_amount
 
         # Balance due / months behind: every month from joined through
         # this month, regardless of whether it's in the visible `months`
@@ -140,22 +153,25 @@ def build_rent_summary(students, payments, months, today=None):
         if joined <= this_month:
             for month in months_between(joined, this_month):
                 paid = paid_by_month.get(month, Decimal("0"))
-                short = monthly_amount - paid
+                expected_amount = charge_by_month.get(month, monthly_amount)
+                short = expected_amount - paid
                 if short > 0:
                     balance_due += short
                     months_behind += 1
                 if month == this_month:
-                    this_month_status = status_for(monthly_amount, joined, month, paid, today)
+                    this_month_status = status_for(expected_amount, joined, month, paid, today)
                     this_month_due = short if short > 0 else Decimal("0")
 
         summary.append({
             "student": student,
             "statuses": statuses,
             "paid_amounts": paid_amounts,
+            "expected_amounts": expected_amounts,
             "total_paid": total_paid,
             "balance_due": balance_due,
             "months_behind": months_behind,
             "this_month_status": this_month_status,
             "this_month_due": this_month_due,
+            "this_month_expected": charge_by_month.get(this_month, monthly_amount),
         })
     return summary
