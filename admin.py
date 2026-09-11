@@ -39,12 +39,32 @@ import bace_matching
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
-ADMIN_ROLES = ["staff", "manager", "admin"]
+ADMIN_ROLES = ["bace_viewer", "staff", "manager", "admin"]
 ADMIN_ROLE_LABELS = {
+    "bace_viewer": "BACE Viewer -- read-only access to the BACE rent tracker only",
     "staff": "Staff -- day-to-day work (log donations, view donors/reports)",
     "manager": "Manager -- staff permissions, same restrictions as staff for now",
     "admin": "Admin -- full access, including managing campaigns and other accounts",
 }
+
+# A BACE Viewer is intentionally much narrower than staff.  This is an
+# allow-list rather than relying on hiding navigation links: a viewer who
+# types any other admin URL is sent back to the tracker and cannot expose
+# donor/donation data or make a change through a direct request.
+BACE_VIEWER_ENDPOINTS = frozenset({
+    "admin.bace_tracker_grid", "admin.change_password", "admin.logout",
+})
+
+
+@bp.before_request
+def restrict_bace_viewer_access():
+    if (
+        current_user.is_authenticated
+        and current_user.role == "bace_viewer"
+        and request.endpoint not in BACE_VIEWER_ENDPOINTS
+    ):
+        flash("This account has read-only access to the BACE rent tracker.")
+        return redirect(url_for("admin.bace_tracker_grid"))
 
 
 def _generate_temp_password():
@@ -99,7 +119,10 @@ def admin_role_required(view):
     def wrapped(*args, **kwargs):
         if current_user.role != "admin":
             flash("That action requires an administrator account.")
-            return redirect(url_for("admin.dashboard"))
+            return redirect(
+                url_for("admin.bace_tracker_grid")
+                if current_user.role == "bace_viewer" else url_for("admin.dashboard")
+            )
         return view(*args, **kwargs)
     return wrapped
 
@@ -166,7 +189,10 @@ def login():
             if user.must_change_password:
                 flash("Please set a new password before continuing.")
                 return redirect(url_for("admin.change_password"))
-            return redirect(url_for("admin.dashboard"))
+            return redirect(
+                url_for("admin.bace_tracker_grid")
+                if current_user.role == "bace_viewer" else url_for("admin.dashboard")
+            )
 
         if user:
             max_attempts = current_app.config["LOGIN_MAX_ATTEMPTS"]

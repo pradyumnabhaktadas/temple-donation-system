@@ -22,6 +22,14 @@
       {% set programs_endpoints = iyf_camp_endpoints + bace_tracker_endpoints %}
       {% set donors_endpoints = ['admin.donors', 'admin.birthdays', 'admin.donor_insights', 'admin.donor_intelligence', 'admin.lapsed_donors', 'admin.duplicate_donors', 'admin.import_donors'] %}
       {% set settings_endpoints = ['admin.campaigns', 'admin.bace_properties', 'admin.bace_contributions', 'admin.festivals', 'admin.seva_types', 'admin.live_to_give_purposes', 'admin.preachers', 'admin.associated_withs', 'admin.associated_with_report', 'admin.dhoti_kurta_contributions', 'admin.data_backup', 'admin.manage_users', 'admin.activity_log', 'admin.daily_report_recipients'] %}
+      {% if current_user.is_authenticated and current_user.role == 'bace_viewer' %}
+      <div class="navbar-nav ms-auto flex-wrap align-items-lg-center">
+        <a class="nav-link {% if request.endpoint == 'admin.bace_tracker_grid' %}active{% endif %}" href="{{ url_for('admin.bace_tracker_grid') }}">BACE Rent Tracker</a>
+        <span class="nav-link text-muted small">Read-only</span>
+        <a class="nav-link" href="{{ url_for('admin.change_password') }}">Account</a>
+        <a class="nav-link" href="{{ url_for('admin.logout') }}">Logout</a>
+      </div>
+      {% else %}
       <div class="navbar-nav ms-auto flex-wrap">
         <a class="nav-link {% if request.endpoint == 'admin.dashboard' %}active{% endif %}" href="{{ url_for('admin.dashboard') }}">Dashboard</a>
         <a class="nav-link {% if request.endpoint == 'admin.analytics' %}active{% endif %}" href="{{ url_for('admin.analytics') }}">Analytics</a>
@@ -97,6 +105,7 @@
         </div>
         {% endif %}
       </div>
+      {% endif %}
     </div>
   </div>
 </nav>

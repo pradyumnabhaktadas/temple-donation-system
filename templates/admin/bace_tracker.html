@@ -3,16 +3,19 @@
 {% block content %}
 <div class="admin-page-header">
   <div><div class="eyebrow">Payment history &amp; arrears</div><h3>📊 BACE Tracker</h3></div>
+  {% if current_user.role != 'bace_viewer' %}
   <div class="admin-page-actions">
     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_dashboard') }}">Dashboard</a>
     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_students') }}">Students</a>
     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_payments') }}">Payments Log</a>
     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_pending_list') }}">Pending List</a>
   </div>
+  {% endif %}
 </div>
 <div class="bace-status-legend mb-3"><span><i class="bace-status-dot" style="background:#2e7d32"></i>Paid</span><span><i class="bace-status-dot" style="background:#c9a227"></i>Partial</span><span><i class="bace-status-dot" style="background:#b3261e"></i>Pending</span><span><i class="bace-status-dot" style="background:#9e9e9e"></i>Upcoming / N/A</span><span>Computed from the Payments Log</span></div>
 
 <form class="row g-2 mb-3 align-items-end">
+  {% if current_user.role != 'bace_viewer' %}
   <div class="col-auto">
     <label class="form-label small mb-1">BACE Property</label>
     <select name="bace_property_id" class="form-select form-select-sm" onchange="this.form.submit()">
@@ -41,6 +44,7 @@
       Export CSV
     </a>
   </div>
+  {% endif %}
 </form>
 
 <div class="table-responsive">
