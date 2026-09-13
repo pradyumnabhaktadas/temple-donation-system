@@ -85,6 +85,21 @@ class TestEnvelopeHandling:
         assert records == [] and key == "records"
 
 
+class TestEntriesEndpoint:
+    def test_entries_uses_the_forms_entries_endpoint(self):
+        """A wrong endpoint returns a 404 HTML page, not an empty form."""
+        with patch("zoho_api.get", return_value={"entries": [RECORD]}) as get:
+            records, key = zoho_api.entries(CONFIG, "DonationForm", start_index=21, limit=50)
+
+        assert records == [RECORD]
+        assert key == "entries"
+        get.assert_called_once_with(
+            CONFIG,
+            "/api/v1/form/DonationForm/entries",
+            params={"from": 21, "limit": 50},
+        )
+
+
 class TestConfiguration:
     def test_missing_credentials_say_which_ones(self):
         with pytest.raises(zoho_api.ZohoApiError) as exc:
