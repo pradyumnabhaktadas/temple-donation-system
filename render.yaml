@@ -171,14 +171,11 @@ services:
       - key: INTERNAL_TASK_TOKEN
         sync: false   # same value as the web service's INTERNAL_TASK_TOKEN (generated there)
 
-  # No automatic Zoho reconciliation cron any more (removed on request):
-  # receipts for Zoho Forms payments are now reviewed and issued by hand --
-  # see Admin > Zoho Reconcile (lists captured Razorpay payments still
-  # missing a donation for a given day) and Admin > Import Zoho Report
-  # (uploads that day's Zoho export to create the donations/receipts).
-  # The underlying scan (public.reconcile_zoho_submissions /
-  # zoho_reconcile.py / POST /internal/zoho-reconcile) still exists and is
-  # still tested, just nothing schedules it any more.
+  # Automatic Zoho receipt creation is disabled. The separately managed
+  # temple-zoho-reconcile job is intentionally retained only to identify
+  # Razorpay payment IDs that do not yet have receipts; it never issues
+  # receipts. Staff review and issue any needed receipts manually through
+  # Admin > Zoho Reconcile or Admin > Import Zoho Report.
 
 databases:
   - name: temple-donation-db
