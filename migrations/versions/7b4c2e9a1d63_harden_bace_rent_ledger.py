@@ -1,7 +1,7 @@
 """harden BACE rent history, close controls and viewer scopes
 
 Revision ID: 7b4c2e9a1d63
-Revises: 5f6a7b8c9d0e
+Revises: 5f6a7b8c9d0e, a6f0b2c9d4e1
 Create Date: 2026-09-13 17:00:00.000000
 """
 from alembic import op
@@ -9,7 +9,10 @@ import sqlalchemy as sa
 
 
 revision = "7b4c2e9a1d63"
-down_revision = "5f6a7b8c9d0e"
+# a6f0b2c9d4e1 is a no-op historical marker retained for databases that
+# briefly received the removed Zoho queue migration.  Merging it here keeps
+# both production histories valid and gives Alembic one unambiguous head.
+down_revision = ("5f6a7b8c9d0e", "a6f0b2c9d4e1")
 branch_labels = None
 depends_on = None
 

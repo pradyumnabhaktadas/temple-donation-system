@@ -1432,7 +1432,13 @@ def _handle_payment_captured(event):
     payment_id = payment_entity.get("id")
 
     if not order_id:
-        return jsonify({"error": "Missing order_id in payload"}), 400
+        # This Razorpay account also receives events for payment links and
+        # external forms.  Those can legitimately be captured without an
+        # order created by this site.  They cannot be reconciled to a local
+        # donation, but rejecting them causes needless webhook retries and
+        # does not make a receipt safer.  Acknowledge and log instead.
+        current_app.logger.info("Ignoring Razorpay payment event without order_id")
+        return jsonify({"ok": True, "ignored": "missing_order_id"}), 200
 
     donation = Donation.query.filter_by(razorpay_order_id=order_id).first()
     if donation is None:

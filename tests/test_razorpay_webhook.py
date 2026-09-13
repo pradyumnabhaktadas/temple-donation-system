@@ -110,6 +110,16 @@ class TestRazorpayWebhook:
         db.session.refresh(donation)
         assert donation.status == "pending"
 
+    def test_acknowledges_external_captured_event_without_an_order_id(self, app, client):
+        app.config["RAZORPAY_WEBHOOK_SECRET"] = "whsec_correct"
+        response = _post_webhook(
+            client, app,
+            {"event": "payment.captured", "payload": {"payment": {"entity": {"id": "pay_external"}}}},
+            secret="whsec_correct",
+        )
+        assert response.status_code == 200
+        assert response.get_json()["ignored"] == "missing_order_id"
+
     def test_finalizes_donation_on_valid_payment_captured_event(self, app, client):
         app.config["RAZORPAY_WEBHOOK_SECRET"] = "whsec_correct"
         donation = _make_pending_donation(app)
