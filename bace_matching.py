@@ -27,7 +27,7 @@ from flask_login import current_user
 from sqlalchemy import or_
 
 from extensions import db
-from models import BaceStudent, BaceRentPayment, AdminActivityLog
+from models import BaceStudent, BaceRentPayment, BaceRentMonthClose, AdminActivityLog
 from utils import to_ist
 import bace_tracker
 
@@ -95,9 +95,15 @@ def record_matched_donation(donation, student=None):
 
     donation_date = to_ist(donation.donation_date) if donation.payment_mode == "online" else donation.donation_date
     for_month = bace_tracker.month_start(donation_date.date())
+    # A verified month is a closed accounting period.  Leave a late-matched
+    # contribution in the reconciliation list until an admin deliberately
+    # reopens that month, rather than silently changing a final statement.
+    if BaceRentMonthClose.query.filter_by(for_month=for_month).first():
+        return None
 
     payment = BaceRentPayment(
         student_id=student.id,
+        bace_property_id=donation.bace_property_id or student.bace_property_id,
         for_month=for_month,
         amount_paid=donation.amount,
         date_paid=donation_date.date(),

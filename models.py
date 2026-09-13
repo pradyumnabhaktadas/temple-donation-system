@@ -787,6 +787,11 @@ class AdminUser(UserMixin, db.Model):
     must_change_password = db.Column(db.Boolean, default=False, nullable=False)
     failed_attempts = db.Column(db.Integer, default=0, nullable=False)
     locked_until = db.Column(db.DateTime, nullable=True)
+    # BACE viewers are deliberately limited to one property.  Keeping the
+    # scope on the account (rather than trusting a tracker query parameter)
+    # makes the restriction apply to every direct URL too.
+    bace_property_id = db.Column(db.Integer, db.ForeignKey("bace_properties.id"), index=True)
+    bace_property = db.relationship("BaceProperty")
 
     def is_locked(self):
         return bool(self.locked_until and self.locked_until > datetime.datetime.utcnow())
@@ -963,6 +968,10 @@ class BaceRentCharge(db.Model):
     student_id = db.Column(db.Integer, db.ForeignKey("bace_students.id"), nullable=False, index=True)
     for_month = db.Column(db.Date, nullable=False, index=True)
     amount_due = db.Column(db.Numeric(12, 2), nullable=False)
+    # Snapshot the home/base that owned this charge.  A later student move
+    # must not rewrite a historical statement.
+    bace_property_id = db.Column(db.Integer, db.ForeignKey("bace_properties.id"), index=True)
+    bace_property = db.relationship("BaceProperty")
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
 
 
@@ -991,6 +1000,9 @@ class BaceRentPayment(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey("bace_students.id"), nullable=False, index=True)
+    # Same historical property snapshot as BaceRentCharge.
+    bace_property_id = db.Column(db.Integer, db.ForeignKey("bace_properties.id"), index=True)
+    bace_property = db.relationship("BaceProperty")
     for_month = db.Column(db.Date, nullable=False, index=True)  # always the 1st of the month
     amount_paid = db.Column(db.Numeric(12, 2), nullable=False)
     date_paid = db.Column(db.Date, nullable=False)
@@ -1008,3 +1020,16 @@ class BaceRentPayment(db.Model):
 
     def __repr__(self):
         return f"<BaceRentPayment student={self.student_id} month={self.for_month}>"
+
+
+class BaceRentMonthClose(db.Model):
+    """A verified BACE month.  Closed months reject later payment edits,
+    deletes and automatic contribution matching until an administrator
+    explicitly reopens them."""
+
+    __tablename__ = "bace_rent_month_closes"
+
+    id = db.Column(db.Integer, primary_key=True)
+    for_month = db.Column(db.Date, nullable=False, unique=True, index=True)
+    closed_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    closed_by = db.Column(db.String(100), nullable=False)

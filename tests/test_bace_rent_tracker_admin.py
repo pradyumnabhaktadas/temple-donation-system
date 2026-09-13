@@ -177,6 +177,24 @@ class TestMonthlyRentLedger:
         assert "Expected this month" in dashboard
         assert "Rs. 5000" in dashboard
 
+    def test_dashboard_refreshes_a_stale_current_charge_after_an_earlier_rate_edit(self, client, app):
+        prop_id = _property(app)
+        from utils import now_ist
+        from extensions import db
+        from models import BaceStudent, BaceRentCharge
+
+        current_month = now_ist().strftime("%Y-%m")
+        _add_student(client, prop_id, full_name="Existing Rate Change", monthly_amount="5000", joined_month=current_month)
+        student = BaceStudent.query.filter_by(full_name="Existing Rate Change").one()
+        db.session.add(BaceRentCharge(
+            student_id=student.id, for_month=now_ist().date().replace(day=1), amount_due=6000,
+        ))
+        db.session.commit()
+
+        client.get("/admin/bace-dashboard")
+        charge = BaceRentCharge.query.filter_by(student_id=student.id).one()
+        assert float(charge.amount_due) == 5000
+
     def test_delete_is_blocked_once_a_payment_exists(self, client, app):
         prop_id = _property(app)
         _add_student(client, prop_id)
@@ -283,8 +301,53 @@ class TestPaymentsPage:
         assert BaceRentPayment.query.count() == 1
         assert "matching rent payment is already recorded" in response.get_data(as_text=True)
 
+    def test_reference_duplicate_is_blocked_even_if_amount_differs(self, client, app):
+        prop_id = _property(app)
+        _add_student(client, prop_id)
+        from models import BaceStudent, BaceRentPayment
+        student = BaceStudent.query.first()
+        first = {"student_id": str(student.id), "for_month": "2026-09", "amount_paid": "3000", "date_paid": "2026-09-05", "reference": "UTR-one"}
+        retry_with_typo = {**first, "amount_paid": "300"}
+        client.post("/admin/bace-payments", data=first, follow_redirects=True)
+        client.post("/admin/bace-payments", data=retry_with_typo, follow_redirects=True)
+        assert BaceRentPayment.query.count() == 1
+
+    def test_closed_month_rejects_payment_changes(self, client, app):
+        prop_id = _property(app)
+        _add_student(client, prop_id)
+        from extensions import db
+        from models import BaceStudent, BaceRentMonthClose, BaceRentPayment
+        student = BaceStudent.query.first()
+        month = datetime.date(2026, 8, 1)
+        db.session.add(BaceRentMonthClose(for_month=month, closed_by="testadmin"))
+        db.session.commit()
+        client.post("/admin/bace-payments", data={
+            "student_id": str(student.id), "for_month": "2026-08", "amount_paid": "3000",
+        }, follow_redirects=True)
+        assert BaceRentPayment.query.count() == 0
+
 
 class TestTrackerGrid:
+    def test_bace_viewer_is_forced_to_its_own_property(self, client, app):
+        prop_a = _property(app, name="Viewer Property")
+        prop_b = _property(app, name="Other Property")
+        _add_student(client, prop_a, full_name="Visible Student", phone="9111111101")
+        _add_student(client, prop_b, full_name="Hidden Student", phone="9111111102")
+        from extensions import db
+        from models import AdminUser
+        viewer = AdminUser(username="viewer", role="bace_viewer", bace_property_id=prop_a)
+        viewer.set_password("ViewerPass123!")
+        db.session.add(viewer)
+        db.session.commit()
+        client.get("/admin/logout")
+        login(client, "viewer", "ViewerPass123!")
+        # Directly asking for the other property cannot widen the scope.
+        response = client.get(f"/admin/bace-tracker?bace_property_id={prop_b}")
+        body = response.get_data(as_text=True)
+        assert "Visible Student" in body
+        assert "Hidden Student" not in body
+        assert "Phone" not in body
+
     def test_renders_with_correct_status(self, client, app):
         prop_id = _property(app)
         _add_student(client, prop_id, full_name="Fully Paid Student", joined_month="2026-09")

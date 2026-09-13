@@ -119,11 +119,14 @@
             <td>{{ p.reference or '-' }}</td>
             {% if current_user.role == 'admin' %}
             <td>
-              <form method="post" action="{{ url_for('admin.bace_payment_delete', payment_id=p.id) }}"
-                    data-confirm="Delete this Rs. {{ '%.2f' | format(p.amount_paid) }} payment from {{ p.student.full_name if p.student else 'this student' }}?">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button class="btn btn-sm btn-outline-danger">Delete</button>
-              </form>
+              <div class="d-flex gap-1">
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_payment_edit', payment_id=p.id) }}">Correct</a>
+                <form method="post" action="{{ url_for('admin.bace_payment_delete', payment_id=p.id) }}"
+                      data-confirm="Delete this Rs. {{ '%.2f' | format(p.amount_paid) }} payment from {{ p.student.full_name if p.student else 'this student' }}?">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button class="btn btn-sm btn-outline-danger">Delete</button>
+                </form>
+              </div>
             </td>
             {% endif %}
           </tr>

@@ -12,6 +12,16 @@
   </div>
 </div>
 <div class="bace-shell mb-4 d-flex justify-content-between align-items-center flex-wrap gap-2"><span class="text-muted">As of {{ today.strftime('%d %b %Y') }}</span><strong>{{ this_month.strftime('%B %Y') }} collection cycle</strong><span class="text-muted small">Monthly ledger: {{ ledger_count }} expected-rent entries{% if ledger_created %} ({{ ledger_created }} created today){% endif %}</span></div>
+{% if current_user.role == 'admin' and closeable_month %}
+<div class="alert alert-light border d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
+  <span><strong>{{ closeable_month.strftime('%B %Y') }}</strong> is {% if closed_month %}<span class="text-success">closed and verified</span>{% else %}open for final verification{% endif %}.</span>
+  {% if closed_month %}
+  <form method="post" action="{{ url_for('admin.reopen_bace_month', month=closeable_month.strftime('%Y-%m')) }}" data-confirm="Reopen {{ closeable_month.strftime('%B %Y') }} for corrections?"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-secondary">Reopen month</button></form>
+  {% else %}
+  <form method="post" action="{{ url_for('admin.close_bace_month', month=closeable_month.strftime('%Y-%m')) }}" data-confirm="Close {{ closeable_month.strftime('%B %Y') }}? Payments, edits, deletes and automatic matching will be locked until reopened."><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-gold">Close verified month</button></form>
+  {% endif %}
+</div>
+{% endif %}
 
 <div class="row g-3 mb-4">
   <div class="col-md-3"><div class="stat-card bace-kpi"><div class="stat-label">Active students</div><div class="stat-value">{{ active_count }}</div></div></div>

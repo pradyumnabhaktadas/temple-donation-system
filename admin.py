@@ -23,7 +23,7 @@ from models import (
     Camp,
     Donor, Campaign, Donation, AdminUser, ReceiptCounter, BaceProperty, Festival, SevaType,
     LiveToGivePurpose, Preacher, AssociatedWith, AdminActivityLog, DailyReportRecipient,
-    BaceStudent, BaceRentCharge, BaceRentPayment, BACE_PAYMENT_MODES,
+    BaceStudent, BaceRentCharge, BaceRentPayment, BaceRentMonthClose, BACE_PAYMENT_MODES,
     REPORT_FREQUENCIES,
     DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES, DONATION_FREQUENCY_LABELS,
 )
@@ -91,6 +91,21 @@ def _safe_bace_contributions_return_url(value):
     if parsed.path != url_for("admin.bace_contributions"):
         return None
     return value
+
+
+def _bace_month_is_closed(for_month):
+    """Return whether a verified BACE month is locked for corrections."""
+    return BaceRentMonthClose.query.filter_by(for_month=for_month).first() is not None
+
+
+def _reject_closed_bace_month(for_month, return_endpoint="admin.bace_payments"):
+    if _bace_month_is_closed(for_month):
+        flash(
+            f"{for_month.strftime('%B %Y')} has been closed after verification. "
+            "An administrator must reopen it before changing its payments."
+        )
+        return redirect(url_for(return_endpoint))
+    return None
 
 
 def log_activity(action, target_type=None, target_id=None, details=None):
@@ -244,9 +259,11 @@ def manage_users():
     way to do any of this was direct database/shell access (e.g. re-running
     seed.py), which doesn't scale past one admin."""
     users = AdminUser.query.order_by(AdminUser.role.desc(), AdminUser.username).all()
+    properties = BaceProperty.query.order_by(BaceProperty.name).all()
     return render_template(
         "admin/manage_users.html", users=users,
         admin_roles=ADMIN_ROLES, admin_role_labels=ADMIN_ROLE_LABELS,
+        properties=properties,
     )
 
 
@@ -262,12 +279,19 @@ def add_user():
         return redirect(url_for("admin.manage_users"))
     if role not in ADMIN_ROLES:
         role = "staff"
+    bace_property_id = request.form.get("bace_property_id", type=int)
+    if role == "bace_viewer":
+        if not bace_property_id or not BaceProperty.query.get(bace_property_id):
+            flash("Choose the BACE property this viewer may access.")
+            return redirect(url_for("admin.manage_users"))
+    else:
+        bace_property_id = None
     if AdminUser.query.filter_by(username=username).first():
         flash(f"Username '{username}' is already taken.")
         return redirect(url_for("admin.manage_users"))
 
     temp_password = _generate_temp_password()
-    user = AdminUser(username=username, role=role, must_change_password=True)
+    user = AdminUser(username=username, role=role, bace_property_id=bace_property_id, must_change_password=True)
     user.set_password(temp_password)
     db.session.add(user)
     db.session.flush()
@@ -337,9 +361,31 @@ def change_user_role(user_id):
 
     old_role = user.role
     user.role = new_role
+    if new_role != "bace_viewer":
+        user.bace_property_id = None
     log_activity("admin_user_role_change", target_type="admin_user", target_id=user.id, details=f"'{user.username}' role changed: {old_role} -> {new_role}")
     db.session.commit()
     flash(f"'{user.username}' is now {new_role}.")
+    return redirect(url_for("admin.manage_users"))
+
+
+@bp.route("/settings/users/<int:user_id>/bace-property", methods=["POST"])
+@login_required
+@admin_role_required
+def change_user_bace_property(user_id):
+    user = AdminUser.query.get_or_404(user_id)
+    if user.role != "bace_viewer":
+        flash("Only BACE Viewer accounts can have a property scope.")
+        return redirect(url_for("admin.manage_users"))
+    property_id = request.form.get("bace_property_id", type=int)
+    prop = BaceProperty.query.get(property_id) if property_id else None
+    if not prop:
+        flash("Choose a valid BACE property.")
+        return redirect(url_for("admin.manage_users"))
+    user.bace_property_id = prop.id
+    log_activity("admin_user_bace_scope", "admin_user", user.id, f"Scoped '{user.username}' to {prop.name}")
+    db.session.commit()
+    flash(f"'{user.username}' can now view {prop.name} only.")
     return redirect(url_for("admin.manage_users"))
 
 
@@ -4384,8 +4430,16 @@ def bace_student_edit(student_id):
                 current_charge.amount_due = monthly_amount
             else:
                 db.session.add(BaceRentCharge(
-                    student_id=student.id, for_month=current_month, amount_due=monthly_amount,
+                    student_id=student.id, bace_property_id=bace_property_id,
+                    for_month=current_month, amount_due=monthly_amount,
                 ))
+        # A property move takes effect in the open collection month.  Older
+        # charge/payment snapshots remain where they were earned.
+        current_charge = BaceRentCharge.query.filter_by(
+            student_id=student.id, for_month=current_month,
+        ).first()
+        if current_charge:
+            current_charge.bace_property_id = bace_property_id
         db.session.commit()
         log_activity("bace_student_edit", "bace_student", student.id, f"Edited BACE student '{student.full_name}'")
         db.session.commit()
@@ -4442,6 +4496,9 @@ def bace_payments():
         if error:
             flash(error)
             return redirect(url_for("admin.bace_payments"))
+        closed_redirect = _reject_closed_bace_month(for_month)
+        if closed_redirect:
+            return closed_redirect
 
         amount_paid, error = _parse_positive_amount(request.form.get("amount_paid"), "Amount")
         if error:
@@ -4475,12 +4532,16 @@ def bace_payments():
         # it was created in the last five minutes.
         reference = (request.form.get("reference") or "").strip()[:200] or None
         mode = (request.form.get("mode") or "").strip()[:30] or None
-        duplicate_query = BaceRentPayment.query.filter_by(
-            student_id=student_id, for_month=for_month, amount_paid=amount_paid,
-        )
         if reference:
-            duplicate = duplicate_query.filter(BaceRentPayment.reference == reference).first()
+            # A UTR/reference identifies the transfer, not its amount.  Do
+            # not let an accidental amount typo make the same transfer pass.
+            duplicate = BaceRentPayment.query.filter_by(
+                student_id=student_id, for_month=for_month, reference=reference,
+            ).first()
         else:
+            duplicate_query = BaceRentPayment.query.filter_by(
+                student_id=student_id, for_month=for_month, amount_paid=amount_paid,
+            )
             duplicate_cutoff = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
             duplicate = duplicate_query.filter(
                 BaceRentPayment.reference.is_(None),
@@ -4504,6 +4565,7 @@ def bace_payments():
             source_donation.bace_property_id = student.bace_property_id
         payment = BaceRentPayment(
             student_id=student_id,
+            bace_property_id=student.bace_property_id,
             for_month=for_month,
             amount_paid=amount_paid,
             date_paid=date_paid,
@@ -4648,7 +4710,9 @@ def export_bace_monthly_statement():
         expected = expected_by_student.get(student.id, 0.0)
         if not expected:
             continue
-        bucket = totals.setdefault(student.bace_property_id, {"expected": 0.0, "paid": 0.0, "students": 0})
+        charge = next((c for c in charges if c.student_id == student.id), None)
+        property_id = (charge.bace_property_id if charge and charge.bace_property_id else student.bace_property_id)
+        bucket = totals.setdefault(property_id, {"expected": 0.0, "paid": 0.0, "students": 0})
         bucket["students"] += 1
         bucket["expected"] += expected
         bucket["paid"] += float(paid_by_student.get(student.id, {}).get(month, 0))
@@ -4681,6 +4745,9 @@ def bace_payment_delete(payment_id):
     time), so deleting one just makes the tracker see less money paid --
     exactly the correction a genuine data-entry mistake needs."""
     payment = BaceRentPayment.query.get_or_404(payment_id)
+    closed_redirect = _reject_closed_bace_month(payment.for_month)
+    if closed_redirect:
+        return closed_redirect
     student_name = payment.student.full_name if payment.student else "(unknown)"
     detail = f"Rs. {payment.amount_paid:,.2f} from '{student_name}' for {payment.for_month.strftime('%b %Y')}"
     db.session.delete(payment)
@@ -4691,13 +4758,104 @@ def bace_payment_delete(payment_id):
     return redirect(url_for("admin.bace_payments"))
 
 
+@bp.route("/bace-payments/<int:payment_id>/edit", methods=["GET", "POST"])
+@login_required
+@admin_role_required
+def bace_payment_edit(payment_id):
+    """Correct a genuine entry mistake without deleting its audit trail."""
+    payment = BaceRentPayment.query.get_or_404(payment_id)
+    if request.method == "POST":
+        for_month, error = _parse_month(request.form.get("for_month"), "Month")
+        amount_paid, amount_error = _parse_positive_amount(request.form.get("amount_paid"), "Amount")
+        if error or amount_error:
+            flash(error or amount_error)
+            return redirect(url_for("admin.bace_payment_edit", payment_id=payment.id))
+        closed_redirect = _reject_closed_bace_month(payment.for_month)
+        if closed_redirect:
+            return closed_redirect
+        if for_month != payment.for_month:
+            closed_redirect = _reject_closed_bace_month(for_month)
+            if closed_redirect:
+                return closed_redirect
+        try:
+            date_paid = datetime.datetime.strptime(request.form.get("date_paid", ""), "%Y-%m-%d").date()
+        except ValueError:
+            flash("Date paid must use YYYY-MM-DD.")
+            return redirect(url_for("admin.bace_payment_edit", payment_id=payment.id))
+        reference = (request.form.get("reference") or "").strip()[:200] or None
+        mode = (request.form.get("mode") or "").strip()[:30] or None
+        if reference:
+            duplicate = BaceRentPayment.query.filter(
+                BaceRentPayment.id != payment.id,
+                BaceRentPayment.student_id == payment.student_id,
+                BaceRentPayment.for_month == for_month,
+                BaceRentPayment.reference == reference,
+            ).first()
+            if duplicate:
+                flash("That reference is already recorded for this student and month.")
+                return redirect(url_for("admin.bace_payment_edit", payment_id=payment.id))
+        before = f"{payment.for_month:%b %Y}, Rs. {payment.amount_paid:,.2f}, {payment.reference or 'no reference'}"
+        payment.for_month = for_month
+        payment.amount_paid = amount_paid
+        payment.date_paid = date_paid
+        payment.mode = mode
+        payment.reference = reference
+        log_activity(
+            "bace_payment_edit", "bace_rent_payment", payment.id,
+            f"Corrected payment for '{payment.student.full_name}': {before} -> "
+            f"{for_month:%b %Y}, Rs. {amount_paid:,.2f}, {reference or 'no reference'}",
+        )
+        db.session.commit()
+        flash("Payment corrected. The tracker has been recalculated.")
+        return redirect(url_for("admin.bace_payments"))
+    return render_template(
+        "admin/bace_payment_edit.html", payment=payment, payment_modes=BACE_PAYMENT_MODES,
+    )
+
+
+@bp.route("/bace-months/<month>/close", methods=["POST"])
+@login_required
+@admin_role_required
+def close_bace_month(month):
+    for_month, error = _parse_month(month, "Month")
+    current_month = bace_tracker.month_start(now_ist().date())
+    if error or for_month >= current_month:
+        flash("Only a completed month can be closed.")
+    elif _bace_month_is_closed(for_month):
+        flash(f"{for_month:%B %Y} is already closed.")
+    else:
+        db.session.add(BaceRentMonthClose(for_month=for_month, closed_by=current_user.username))
+        log_activity("bace_month_close", "bace_rent_month", None, f"Closed {for_month:%B %Y}")
+        db.session.commit()
+        flash(f"{for_month:%B %Y} is closed. Payments and matching are now locked.")
+    return redirect(url_for("admin.bace_dashboard"))
+
+
+@bp.route("/bace-months/<month>/reopen", methods=["POST"])
+@login_required
+@admin_role_required
+def reopen_bace_month(month):
+    for_month, error = _parse_month(month, "Month")
+    close = BaceRentMonthClose.query.filter_by(for_month=for_month).first() if not error else None
+    if not close:
+        flash("That month is not closed.")
+    else:
+        db.session.delete(close)
+        log_activity("bace_month_reopen", "bace_rent_month", None, f"Reopened {for_month:%B %Y}")
+        db.session.commit()
+        flash(f"{for_month:%B %Y} reopened for corrections.")
+    return redirect(url_for("admin.bace_dashboard"))
+
+
 def _ensure_current_bace_rent_charges(today=None):
     """Create this month's ledger entries for active, due BACE students.
 
     The ledger begins at rollout: it never manufactures historical charges
     from a student's current rent amount. A unique constraint makes repeated
     visits safe, while recording the expected amount protects this month's
-    accounting if a rent amount changes later.
+    accounting for historical months. The current month remains editable:
+    it always follows the student's current monthly amount, so a rate edit
+    made during this collection cycle is reflected immediately.
     """
     today = today or now_ist().date()
     month = bace_tracker.month_start(today)
@@ -4705,19 +4863,28 @@ def _ensure_current_bace_rent_charges(today=None):
         BaceStudent.status == "Active", BaceStudent.joined_month <= month,
     ).all()
     existing = {
-        student_id for (student_id,) in db.session.query(BaceRentCharge.student_id).filter(
+        charge.student_id: charge for charge in BaceRentCharge.query.filter(
             BaceRentCharge.for_month == month,
             BaceRentCharge.student_id.in_([s.id for s in students]),
         ).all()
-    } if students else set()
+    } if students else {}
     created = 0
+    updated = 0
     for student in students:
-        if student.id not in existing:
+        charge = existing.get(student.id)
+        if charge is None:
             db.session.add(BaceRentCharge(
-                student_id=student.id, for_month=month, amount_due=student.monthly_amount,
+                student_id=student.id, bace_property_id=student.bace_property_id,
+                for_month=month, amount_due=student.monthly_amount,
             ))
             created += 1
-    if created:
+        elif charge.amount_due != student.monthly_amount:
+            charge.amount_due = student.monthly_amount
+            updated += 1
+        if charge is not None and charge.bace_property_id != student.bace_property_id:
+            charge.bace_property_id = student.bace_property_id
+            updated += 1
+    if created or updated:
         db.session.commit()
     return month, len(students), created
 
@@ -4740,6 +4907,10 @@ def _bace_tracker_summary_from_request():
 
     include_inactive = request.args.get("include_inactive") == "yes"
     bace_property_id = request.args.get("bace_property_id", type=int)
+    # Scope is enforced server-side, not merely by hiding the dropdown.
+    if current_user.role == "bace_viewer":
+        bace_property_id = current_user.bace_property_id or -1
+        include_inactive = False
     query = BaceStudent.query
     if not include_inactive:
         query = query.filter_by(status="Active")
@@ -4783,7 +4954,10 @@ def bace_tracker_grid():
     summary, months, from_month, to_month, today, include_inactive, bace_property_id = (
         _bace_tracker_summary_from_request()
     )
-    properties = BaceProperty.query.order_by(BaceProperty.name).all()
+    properties_query = BaceProperty.query.order_by(BaceProperty.name)
+    if current_user.role == "bace_viewer":
+        properties_query = properties_query.filter_by(id=current_user.bace_property_id or -1)
+    properties = properties_query.all()
 
     return render_template(
         "admin/bace_tracker.html", summary=summary, months=months,
@@ -4909,6 +5083,8 @@ def bace_dashboard():
         not_paid=not_paid, not_due=not_due, base_rows=base_rows, bt=bace_tracker,
         ledger_count=ledger_count, ledger_created=ledger_created,
         reconciliation=reconciliation,
+        closeable_month=bace_tracker.add_months(this_month, -1),
+        closed_month=_bace_month_is_closed(bace_tracker.add_months(this_month, -1)),
     )
 
 
