@@ -332,10 +332,7 @@ class Config:
     ZOHO_CLIENT_SECRET = os.environ.get("ZOHO_CLIENT_SECRET", "")
     ZOHO_REFRESH_TOKEN = os.environ.get("ZOHO_REFRESH_TOKEN", "")
     ZOHO_ACCOUNTS_BASE = os.environ.get("ZOHO_ACCOUNTS_BASE", "https://accounts.zoho.in")
-    # Unlike the accounts endpoint, the public Zoho Forms API is served
-    # from forms.zoho.com even when the organisation's interactive Forms
-    # UI is on a regional domain such as forms.zoho.in.
-    ZOHO_API_BASE = os.environ.get("ZOHO_API_BASE", "https://forms.zoho.com")
+    ZOHO_API_BASE = os.environ.get("ZOHO_API_BASE", "https://forms.zoho.in")
     # The queue is off until its data mapping has been checked in production.
     # "shadow" stores and verifies entries but issues no receipts; "live" may
     # issue a receipt only after an exact captured Razorpay pay_ ID match.
