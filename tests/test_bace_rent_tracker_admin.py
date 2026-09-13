@@ -143,6 +143,40 @@ class TestMonthlyRentLedger:
         assert float(updated.monthly_amount) == 3500
         assert updated.joined_month == datetime.date(2026, 8, 1)
 
+    def test_editing_monthly_amount_refreshes_current_charge_and_dashboard_totals(self, client, app):
+        prop_id = _property(app)
+        from utils import now_ist
+        from models import BaceStudent, BaceRentCharge
+
+        current_month = now_ist().strftime("%Y-%m")
+        _add_student(
+            client, prop_id, full_name="Rate Change", monthly_amount="6000",
+            joined_month=current_month,
+        )
+        student = BaceStudent.query.filter_by(full_name="Rate Change").one()
+
+        # Opening the dashboard creates its first current-month charge at
+        # the old rate, exactly as happens in normal use.
+        client.get("/admin/bace-dashboard")
+        charge = BaceRentCharge.query.filter_by(student_id=student.id).one()
+        assert float(charge.amount_due) == 6000
+
+        client.post(
+            f"/admin/bace-students/{student.id}/edit",
+            data={
+                "full_name": "Rate Change", "phone": "9319880507",
+                "bace_property_id": str(prop_id), "monthly_amount": "5000",
+                "joined_month": current_month, "room_notes": "", "notes": "",
+            },
+            follow_redirects=True,
+        )
+
+        charge = BaceRentCharge.query.filter_by(student_id=student.id).one()
+        assert float(charge.amount_due) == 5000
+        dashboard = client.get("/admin/bace-dashboard").get_data(as_text=True)
+        assert "Expected this month" in dashboard
+        assert "Rs. 5000" in dashboard
+
     def test_delete_is_blocked_once_a_payment_exists(self, client, app):
         prop_id = _property(app)
         _add_student(client, prop_id)

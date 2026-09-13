@@ -945,12 +945,13 @@ class BaceStudent(db.Model):
 
 
 class BaceRentCharge(db.Model):
-    """One immutable expected-rent entry for a student and calendar month.
+    """One expected-rent entry for a student and calendar month.
 
     Charges begin with the monthly ledger rollout; historical months are
     intentionally not backfilled because a student's current rent may not
-    represent an older rate. Payments remain separate and are compared with
-    the charge by the tracker.
+    represent an older rate. Past charges are retained as historical facts;
+    an administrator's rate edit may update the current open month. Payments
+    remain separate and are compared with the charge by the tracker.
     """
 
     __tablename__ = "bace_rent_charges"

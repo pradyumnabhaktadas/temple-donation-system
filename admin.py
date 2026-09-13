@@ -4364,9 +4364,28 @@ def bace_student_edit(student_id):
         student.email = email
         student.bace_property_id = bace_property_id
         student.room_notes = (request.form.get("room_notes") or "").strip()[:200] or None
+        previous_monthly_amount = student.monthly_amount
         student.monthly_amount = monthly_amount
         student.joined_month = joined_month
         student.notes = (request.form.get("notes") or "").strip()[:300] or None
+
+        # A rate edit applies from the current collection month onwards.
+        # Past ledger rows deliberately retain the rate that was due at the
+        # time, but this month's open charge must follow the new monthly
+        # amount or the tracker/dashboard continues to report a stale
+        # balance.  A current charge may already exist because the dashboard
+        # or tracker was opened before this edit.
+        current_month = bace_tracker.month_start(now_ist().date())
+        if student.is_active and joined_month <= current_month and monthly_amount != previous_monthly_amount:
+            current_charge = BaceRentCharge.query.filter_by(
+                student_id=student.id, for_month=current_month,
+            ).first()
+            if current_charge:
+                current_charge.amount_due = monthly_amount
+            else:
+                db.session.add(BaceRentCharge(
+                    student_id=student.id, for_month=current_month, amount_due=monthly_amount,
+                ))
         db.session.commit()
         log_activity("bace_student_edit", "bace_student", student.id, f"Edited BACE student '{student.full_name}'")
         db.session.commit()
@@ -4839,7 +4858,7 @@ def bace_dashboard():
     due_rows = [row for row in summary if row["this_month_status"] != bace_tracker.STATUS_NA]
     expected = sum(float(row["this_month_expected"]) for row in due_rows)
     collected = sum(
-        float(row["student"].monthly_amount) - float(row["this_month_due"]) for row in due_rows
+        float(row["this_month_expected"]) - float(row["this_month_due"]) for row in due_rows
     )
     pending_amount = sum(float(row["this_month_due"]) for row in due_rows)
     fully_paid = sum(1 for row in due_rows if row["this_month_status"] == bace_tracker.STATUS_PAID)
@@ -4855,7 +4874,7 @@ def bace_dashboard():
             continue
         bucket["students"] += 1
         bucket["expected"] += float(row["this_month_expected"])
-        bucket["collected"] += float(row["student"].monthly_amount) - float(row["this_month_due"])
+        bucket["collected"] += float(row["this_month_expected"]) - float(row["this_month_due"])
     base_rows = []
     for name, b in sorted(by_property.items()):
         pct = (b["collected"] / b["expected"] * 100) if b["expected"] else 0
