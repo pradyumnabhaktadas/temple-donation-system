@@ -878,6 +878,54 @@ class ZohoForm(db.Model):
         return f"<ZohoForm {self.form_key}>"
 
 
+class ZohoEntryQueue(db.Model):
+    """A short-lived Zoho Forms entry awaiting exact Razorpay matching.
+
+    This is intentionally *not* a second donation ledger.  It holds only
+    the receipt fields required to finish a pending form payment, then its
+    personal data is scrubbed as soon as a receipt is issued or five days
+    pass.  The remaining row is a small idempotency/audit tombstone: it
+    proves what happened without retaining the donor's form submission.
+    """
+
+    __tablename__ = "zoho_entry_queue"
+
+    id = db.Column(db.Integer, primary_key=True)
+    form_key = db.Column(db.String(150), nullable=False, index=True)
+    # A stable hash of the API entry.  Zoho response envelopes differ by
+    # form/API version, so this safely deduplicates an entry even where an
+    # explicit Zoho record id is absent.
+    entry_fingerprint = db.Column(db.String(64), nullable=False, unique=True)
+    zoho_entry_id = db.Column(db.String(150), index=True)
+    razorpay_payment_id = db.Column(db.String(100), index=True)
+    razorpay_order_id = db.Column(db.String(100))
+    full_name = db.Column(db.String(200))
+    phone = db.Column(db.String(30))
+    email = db.Column(db.String(200))
+    pan = db.Column(db.String(20))
+    amount = db.Column(db.String(40))
+    received_at = db.Column(db.DateTime)
+    stored_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    status = db.Column(db.String(30), default="pending", nullable=False, index=True)
+    last_reason = db.Column(db.String(500))
+    checked_at = db.Column(db.DateTime)
+    resolved_at = db.Column(db.DateTime)
+    payload_purged_at = db.Column(db.DateTime)
+    donation_id = db.Column(db.Integer, db.ForeignKey("donations.id"))
+
+    donation = db.relationship("Donation")
+
+    def purge_payload(self, status, reason=None, donation_id=None):
+        """Erase temporary form data but retain a minimal audit tombstone."""
+        self.full_name = self.phone = self.email = self.pan = self.amount = None
+        self.razorpay_order_id = None
+        self.status = status
+        self.last_reason = (reason or "")[:500] or None
+        self.donation_id = donation_id
+        self.resolved_at = datetime.datetime.utcnow()
+        self.payload_purged_at = self.resolved_at
+
+
 # BaceRentPayment.mode values -- free text on the column (a payment mode
 # typed once and never validated against isn't worth a lookup table the
 # way BaceProperty/Festival are), but kept as one shared list so the

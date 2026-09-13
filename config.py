@@ -333,6 +333,12 @@ class Config:
     ZOHO_REFRESH_TOKEN = os.environ.get("ZOHO_REFRESH_TOKEN", "")
     ZOHO_ACCOUNTS_BASE = os.environ.get("ZOHO_ACCOUNTS_BASE", "https://accounts.zoho.in")
     ZOHO_API_BASE = os.environ.get("ZOHO_API_BASE", "https://forms.zoho.in")
+    # The queue is off until its data mapping has been checked in production.
+    # "shadow" stores and verifies entries but issues no receipts; "live" may
+    # issue a receipt only after an exact captured Razorpay pay_ ID match.
+    ZOHO_AUTOMATION_MODE = os.environ.get("ZOHO_AUTOMATION_MODE", "off").strip().lower()
+    ZOHO_ENTRY_RETENTION_DAYS = int(os.environ.get("ZOHO_ENTRY_RETENTION_DAYS", 5))
+    ZOHO_SYNC_MAX_ENTRIES_PER_RUN = int(os.environ.get("ZOHO_SYNC_MAX_ENTRIES_PER_RUN", 40))
 
     # --- Donor OTP login ---
     # No SMS provider is wired up yet (see sms_utils.py) -- OTPs are shown
