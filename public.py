@@ -1667,34 +1667,6 @@ def internal_zoho_reconcile():
     })
 
 
-@bp.route("/internal/zoho-entry-sync", methods=["POST"])
-@csrf.exempt
-@_safe_json_route
-def internal_zoho_entry_sync():
-    """Run the durable Zoho entry queue from a trusted scheduler only.
-
-    The endpoint deliberately accepts no form, transaction, or mode from
-    the caller.  Those choices stay in the database/configuration, so an
-    HTTP request can never inject a receipt or silently switch shadow mode
-    into live issuing.
-    """
-    expected_token = current_app.config.get("INTERNAL_TASK_TOKEN")
-    if not expected_token:
-        return jsonify({"error": "INTERNAL_TASK_TOKEN not configured"}), 503
-    if not hmac.compare_digest(request.headers.get("X-Internal-Token", ""), expected_token):
-        return jsonify({"error": "Unauthorized"}), 401
-
-    import zoho_queue
-    summary = zoho_queue.run(current_app.config)
-    if summary.get("error"):
-        return jsonify(summary), 503
-    if summary["staged"].get("errors"):
-        # The body preserves useful detail for Render logs; a non-2xx is
-        # essential so an API outage is visible rather than read as no data.
-        return jsonify(summary), 502
-    return jsonify(summary)
-
-
 @bp.route("/internal/daily-report/send", methods=["POST"])
 @csrf.exempt
 @_safe_json_route

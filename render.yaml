@@ -104,17 +104,6 @@ services:
         sync: false
       - key: BACKUP_EMAIL
         sync: false
-      # Zoho Forms durable reconciliation. Keep automation in shadow mode
-      # first; the app will not issue receipts until this is explicitly
-      # changed to "live" after the matched entries have been checked.
-      - key: ZOHO_CLIENT_ID
-        sync: false
-      - key: ZOHO_CLIENT_SECRET
-        sync: false
-      - key: ZOHO_REFRESH_TOKEN
-        sync: false
-      - key: ZOHO_AUTOMATION_MODE
-        sync: false   # set shadow first, then explicitly change to live
 
   # Runs backup_data.py weekly -- exports donors/donations/lookup lists to
   # a CSV zip and emails it to BACKUP_EMAIL (or ORG_CONTACT_EMAIL) if SMTP
@@ -182,22 +171,14 @@ services:
       - key: INTERNAL_TASK_TOKEN
         sync: false   # same value as the web service's INTERNAL_TASK_TOKEN (generated there)
 
-  # Durable Zoho entry pull. This job is only a signed trigger; it never
-  # holds Zoho/Razorpay credentials and the web app controls whether the
-  # queue is off, shadow-verifying, or live-receipting. Begin with
-  # ZOHO_AUTOMATION_MODE=shadow and change to live only after reviewing a
-  # few exact matches in the response/logs.
-  - type: cron
-    name: temple-zoho-sync
-    runtime: python
-    schedule: "*/15 * * * *"
-    buildCommand: pip install -r requirements.txt
-    startCommand: python zoho_reconcile.py
-    envVars:
-      - key: PUBLIC_BASE_URL
-        sync: false
-      - key: INTERNAL_TASK_TOKEN
-        sync: false
+  # No automatic Zoho reconciliation cron any more (removed on request):
+  # receipts for Zoho Forms payments are now reviewed and issued by hand --
+  # see Admin > Zoho Reconcile (lists captured Razorpay payments still
+  # missing a donation for a given day) and Admin > Import Zoho Report
+  # (uploads that day's Zoho export to create the donations/receipts).
+  # The underlying scan (public.reconcile_zoho_submissions /
+  # zoho_reconcile.py / POST /internal/zoho-reconcile) still exists and is
+  # still tested, just nothing schedules it any more.
 
 databases:
   - name: temple-donation-db
