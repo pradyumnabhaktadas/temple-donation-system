@@ -188,11 +188,7 @@ def entries(config, form_link_name, start_index=1, limit=200):
     inside the network layer where it's hardest to test."""
     body = get(
         config,
-        # Zoho Forms exposes submitted data as entries.  The old
-        # ``/api/<form>/records`` route is not a Forms API route and
-        # returns an HTML 404, which previously made every queued sync
-        # fail before it could inspect a payment ID.
-        f"/api/v1/form/{form_link_name}/entries",
+        f"/api/{form_link_name}/records",
         params={"from": start_index, "limit": limit},
     )
     return _records_from(body)
