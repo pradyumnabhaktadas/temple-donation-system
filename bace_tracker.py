@@ -25,6 +25,7 @@ STATUS_UPCOMING = "Upcoming"
 STATUS_PAID = "Paid"
 STATUS_PARTIAL = "Partial"
 STATUS_PENDING = "Pending"
+STATUS_WAIVED = "Waived"
 
 # What counts as "still owed" for the Dashboard / Pending List -- N/A and
 # Upcoming are never owed (too early either way), Paid is settled.
@@ -72,6 +73,26 @@ def payments_by_student_month(payments):
     return totals
 
 
+def payment_rows_by_student_month(payments):
+    """{student_id: {month: [payment rows]}} for tracker hover details.
+
+    Rows are kept chronologically so a payment split into two or more
+    installments is explained in the same order it was received.  This is
+    intentionally separate from payments_by_student_month(): the latter is
+    the accounting total, while this one preserves the human-readable
+    audit detail displayed only to staff/admin users on the tracker.
+    """
+    rows = {}
+    for payment in payments:
+        by_month = rows.setdefault(payment.student_id, {})
+        month = month_start(payment.for_month)
+        by_month.setdefault(month, []).append(payment)
+    for by_month in rows.values():
+        for month_rows in by_month.values():
+            month_rows.sort(key=lambda payment: (payment.date_paid, getattr(payment, "id", 0) or 0))
+    return rows
+
+
 def charges_by_student_month(charges):
     """{student_id: {month: expected amount}} from monthly ledger entries."""
     totals = {}
@@ -80,7 +101,21 @@ def charges_by_student_month(charges):
     return totals
 
 
-def status_for(monthly_amount, joined_month, month, paid, today=None):
+def adjustments_by_student_month(adjustments):
+    """{student_id: {month: adjustment row}} for monthly waivers/remarks.
+
+    There is one adjustment row per student/month, enforced by the database
+    constraint.  Keeping the row (rather than only a numeric total) lets the
+    tracker expose the authorised waiver and its explanation in the hover
+    detail without ever treating waived rent as received money.
+    """
+    rows = {}
+    for adjustment in adjustments or []:
+        rows.setdefault(adjustment.student_id, {})[month_start(adjustment.for_month)] = adjustment
+    return rows
+
+
+def status_for(monthly_amount, joined_month, month, paid, waived=0, today=None):
     """Paid/Partial/Pending/Upcoming/N/A for one student-month. `paid` is
     the Decimal total already paid for that exact month (from
     payments_by_student_month) -- 0 if nothing was found."""
@@ -91,14 +126,17 @@ def status_for(monthly_amount, joined_month, month, paid, today=None):
     if month > month_start(today):
         return STATUS_UPCOMING
     paid = Decimal(paid or 0)
+    waived = Decimal(waived or 0)
     if paid >= Decimal(monthly_amount):
         return STATUS_PAID
+    if paid + waived >= Decimal(monthly_amount) and waived > 0:
+        return STATUS_WAIVED
     if paid > 0:
         return STATUS_PARTIAL
     return STATUS_PENDING
 
 
-def build_rent_summary(students, payments, months, today=None, charges=None):
+def build_rent_summary(students, payments, months, today=None, charges=None, adjustments=None):
     """The whole tracker, computed once: a list of dicts, one per student
     in `students` order --
 
@@ -116,29 +154,37 @@ def build_rent_summary(students, payments, months, today=None, charges=None):
     follow for Razorpay.
 
     Also returns paid_amounts ({month: Decimal actually paid that month}),
+    waived_amounts ({month: Decimal formally excused that month}),
     alongside statuses -- the Tracker grid shows this instead of the bare
     "Paid" label for Paid/Partial cells, so a glance at the row shows how
     much came in each month, not just whether it cleared."""
     today = today or datetime.date.today()
     this_month = month_start(today)
     by_student = payments_by_student_month(payments)
+    payment_rows = payment_rows_by_student_month(payments)
     expected_by_student = charges_by_student_month(charges)
+    adjustments_by_student = adjustments_by_student_month(adjustments)
 
     summary = []
     for student in students:
         paid_by_month = by_student.get(student.id, {})
         charge_by_month = expected_by_student.get(student.id, {})
+        adjustment_by_month = adjustments_by_student.get(student.id, {})
         joined = month_start(student.joined_month)
         monthly_amount = Decimal(student.monthly_amount)
 
         statuses = {}
         paid_amounts = {}
+        waived_amounts = {}
         expected_amounts = {}
         for month in months:
             month_paid = paid_by_month.get(month_start(month), Decimal("0"))
+            adjustment = adjustment_by_month.get(month_start(month))
+            waived_amount = Decimal(adjustment.amount_waived or 0) if adjustment else Decimal("0")
             expected_amount = charge_by_month.get(month_start(month), monthly_amount)
-            statuses[month] = status_for(expected_amount, joined, month, month_paid, today)
+            statuses[month] = status_for(expected_amount, joined, month, month_paid, waived_amount, today)
             paid_amounts[month] = month_paid
+            waived_amounts[month] = waived_amount
             expected_amounts[month] = expected_amount
 
         # Balance due / months behind: every month from joined through
@@ -146,6 +192,10 @@ def build_rent_summary(students, payments, months, today=None, charges=None):
         # window -- a Tracker filtered to "just this quarter" must not
         # under-report what a student actually owes.
         total_paid = sum(paid_by_month.values(), Decimal("0"))
+        total_waived = sum(
+            (Decimal(adjustment.amount_waived or 0) for adjustment in adjustment_by_month.values()),
+            Decimal("0"),
+        )
         balance_due = Decimal("0")
         months_behind = 0
         this_month_status = STATUS_NA
@@ -153,21 +203,27 @@ def build_rent_summary(students, payments, months, today=None, charges=None):
         if joined <= this_month:
             for month in months_between(joined, this_month):
                 paid = paid_by_month.get(month, Decimal("0"))
+                adjustment = adjustment_by_month.get(month)
+                waived = Decimal(adjustment.amount_waived or 0) if adjustment else Decimal("0")
                 expected_amount = charge_by_month.get(month, monthly_amount)
-                short = expected_amount - paid
+                short = expected_amount - paid - waived
                 if short > 0:
                     balance_due += short
                     months_behind += 1
                 if month == this_month:
-                    this_month_status = status_for(expected_amount, joined, month, paid, today)
+                    this_month_status = status_for(expected_amount, joined, month, paid, waived, today)
                     this_month_due = short if short > 0 else Decimal("0")
 
         summary.append({
             "student": student,
             "statuses": statuses,
             "paid_amounts": paid_amounts,
+            "waived_amounts": waived_amounts,
+            "payment_rows": payment_rows.get(student.id, {}),
+            "adjustments": adjustment_by_month,
             "expected_amounts": expected_amounts,
             "total_paid": total_paid,
+            "total_waived": total_waived,
             "balance_due": balance_due,
             "months_behind": months_behind,
             "this_month_status": this_month_status,

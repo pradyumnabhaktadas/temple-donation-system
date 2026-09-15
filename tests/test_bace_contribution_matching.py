@@ -90,6 +90,46 @@ def _insert_legacy_bace_donation(prop_id, full_name="Legacy Donor", phone="93198
     return donation
 
 
+class TestManualContributionAllocation:
+    def test_one_contribution_can_be_split_between_students_and_months(self, client, app):
+        prop_id = _property(app)
+        _add_student(client, prop_id, full_name="Brother One", phone="9111111101")
+        _add_student(client, prop_id, full_name="Brother Two", phone="9111111102")
+        from models import BaceStudent, BaceRentPayment
+        first, second = BaceStudent.query.order_by(BaceStudent.full_name).all()
+        donation = _insert_legacy_bace_donation(prop_id, full_name="Shared Family Phone", phone="9000000000", amount=16000)
+
+        response = client.post(
+            f"/admin/bace-contributions/{donation.id}/allocate-rent",
+            data={
+                "student_id": [str(first.id), str(second.id)],
+                "for_month": ["2026-09", "2026-10"],
+                "amount_paid": ["8000", "8000"],
+            }, follow_redirects=True,
+        )
+        allocations = BaceRentPayment.query.filter_by(source_donation_id=donation.id).all()
+        assert response.status_code == 200
+        assert len(allocations) == 2
+        assert sum(float(payment.amount_paid) for payment in allocations) == 16000
+        assert {payment.student_id for payment in allocations} == {first.id, second.id}
+        assert {payment.for_month for payment in allocations} == {datetime.date(2026, 9, 1), datetime.date(2026, 10, 1)}
+
+    def test_allocation_cannot_exceed_the_original_contribution(self, client, app):
+        prop_id = _property(app)
+        _add_student(client, prop_id, full_name="Allocation Student", phone="9111111101")
+        from models import BaceStudent, BaceRentPayment
+        student = BaceStudent.query.one()
+        donation = _insert_legacy_bace_donation(prop_id, amount=1000)
+
+        response = client.post(
+            f"/admin/bace-contributions/{donation.id}/allocate-rent",
+            data={"student_id": [str(student.id)], "for_month": ["2026-09"], "amount_paid": ["1001"]},
+            follow_redirects=True,
+        )
+        assert BaceRentPayment.query.filter_by(source_donation_id=donation.id).count() == 0
+        assert "remains available" in response.get_data(as_text=True)
+
+
 class TestAutoRecordOnDonation:
     """The main path now: a donation to a donor already on the roster
     records its own rent payment the instant it succeeds -- nobody has

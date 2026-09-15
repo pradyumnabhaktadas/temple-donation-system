@@ -1,0 +1,56 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Allocate BACE Contribution{% endblock %}
+{% block content %}
+<div class="admin-page-header mb-3">
+  <div><div class="eyebrow">Manual rent allocation</div><h3>Assign or split a BACE contribution</h3></div>
+  <a class="btn btn-sm btn-outline-secondary" href="{{ return_to or url_for('admin.bace_contributions') }}">Back to Contribution Logs</a>
+</div>
+
+<div class="alert alert-light border" style="max-width:900px">
+  <div class="row g-2">
+    <div class="col-md-4"><span class="text-muted small d-block">Donor</span><strong>{{ donation.donor.full_name }}</strong></div>
+    <div class="col-md-3"><span class="text-muted small d-block">Contribution / receipt</span><strong>Rs. {{ '%.2f' | format(donation.amount) }}</strong>{% if donation.receipt_number %}<br><span class="small">{{ donation.receipt_number }}</span>{% endif %}</div>
+    <div class="col-md-2"><span class="text-muted small d-block">Already allocated</span><strong>Rs. {{ '%.2f' | format(allocated_total) }}</strong></div>
+    <div class="col-md-3"><span class="text-muted small d-block">Available to allocate</span><strong class="{% if remaining > 0 %}text-success{% endif %}">Rs. {{ '%.2f' | format(remaining) }}</strong></div>
+  </div>
+</div>
+
+{% if allocations %}
+<div class="card card-body shadow-sm mb-3" style="max-width:900px">
+  <h6>Existing allocations</h6>
+  <div class="table-responsive"><table class="table table-sm mb-0"><thead><tr><th>Student</th><th>Property</th><th>Rent month</th><th>Amount</th><th>Payment date</th><th></th></tr></thead><tbody>
+  {% for payment in allocations %}<tr><td>{{ payment.student.full_name if payment.student else '(deleted student)' }}</td><td>{{ payment.bace_property.name if payment.bace_property else '-' }}</td><td>{{ payment.for_month.strftime('%b %Y') }}</td><td>Rs. {{ '%.2f' | format(payment.amount_paid) }}</td><td>{{ payment.date_paid.strftime('%d %b %Y') }}</td><td><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_payment_edit', payment_id=payment.id) }}">Correct</a></td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+{% endif %}
+
+{% if remaining > 0 %}
+<div class="card card-body shadow-sm" style="max-width:900px">
+  <h6 class="mb-1">New allocation</h6>
+  <p class="small text-muted">Use one row for one student/month. Add rows to split this one contribution between family members or across rent months. The total cannot exceed the remaining amount.</p>
+  <form method="post" id="allocation-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% if return_to %}<input type="hidden" name="return_to" value="{{ return_to }}">{% endif %}
+    <div id="allocation-rows">
+      <div class="row g-2 allocation-row mb-2">
+        <div class="col-md-5"><label class="form-label small">Student</label><select class="form-select" name="student_id" required><option value="">Choose student…</option>{% for student in students %}<option value="{{ student.id }}">{{ student.full_name }} — {{ student.bace_property.name if student.bace_property else '?' }}</option>{% endfor %}</select></div>
+        <div class="col-md-3"><label class="form-label small">Rent month</label><input class="form-control" type="month" name="for_month" value="{{ today.strftime('%Y-%m') }}" required></div>
+        <div class="col-md-3"><label class="form-label small">Amount (Rs)</label><input class="form-control" type="number" name="amount_paid" min="1" step="1" max="{{ remaining }}" required></div>
+        <div class="col-md-1 d-flex align-items-end"><button type="button" class="btn btn-outline-danger remove-row d-none">×</button></div>
+      </div>
+    </div>
+    <div class="d-flex gap-2 align-items-center mt-2"><button type="button" id="add-allocation-row" class="btn btn-sm btn-outline-secondary">＋ Add another student/month</button><button class="btn btn-gold">Save allocation</button></div>
+  </form>
+</div>
+<template id="allocation-row-template"><div class="row g-2 allocation-row mb-2"><div class="col-md-5"><select class="form-select" name="student_id" required><option value="">Choose student…</option>{% for student in students %}<option value="{{ student.id }}">{{ student.full_name }} — {{ student.bace_property.name if student.bace_property else '?' }}</option>{% endfor %}</select></div><div class="col-md-3"><input class="form-control" type="month" name="for_month" value="{{ today.strftime('%Y-%m') }}" required></div><div class="col-md-3"><input class="form-control" type="number" name="amount_paid" min="1" step="1" max="{{ remaining }}" required></div><div class="col-md-1"><button type="button" class="btn btn-outline-danger remove-row">×</button></div></div></template>
+<script>
+(() => {
+  const rows = document.getElementById('allocation-rows');
+  document.getElementById('add-allocation-row').addEventListener('click', () => rows.append(document.getElementById('allocation-row-template').content.cloneNode(true)));
+  rows.addEventListener('click', (event) => { if (event.target.classList.contains('remove-row')) event.target.closest('.allocation-row').remove(); });
+})();
+</script>
+{% else %}
+<div class="alert alert-success" style="max-width:900px">This contribution has been fully allocated.</div>
+{% endif %}
+{% endblock %}

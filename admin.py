@@ -5,6 +5,7 @@ import re
 import secrets
 import datetime
 import threading
+from decimal import Decimal
 from urllib.parse import urlsplit
 from collections import defaultdict
 from functools import wraps
@@ -23,7 +24,7 @@ from models import (
     Camp,
     Donor, Campaign, Donation, AdminUser, ReceiptCounter, BaceProperty, Festival, SevaType,
     LiveToGivePurpose, Preacher, AssociatedWith, AdminActivityLog, DailyReportRecipient,
-    BaceStudent, BaceRentCharge, BaceRentPayment, BaceRentMonthClose, BACE_PAYMENT_MODES,
+    BaceStudent, BaceRentCharge, BaceRentPayment, BaceRentAdjustment, BaceRentMonthClose, BACE_PAYMENT_MODES,
     REPORT_FREQUENCIES,
     DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES, DONATION_FREQUENCY_LABELS,
 )
@@ -89,6 +90,18 @@ def _safe_bace_contributions_return_url(value):
     if parsed.scheme or parsed.netloc:
         return None
     if parsed.path != url_for("admin.bace_contributions"):
+        return None
+    return value
+
+
+def _safe_bace_tracker_return_url(value):
+    """Return a validated Tracker URL, or None, for monthly adjustments."""
+    if not value:
+        return None
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc:
+        return None
+    if parsed.path != url_for("admin.bace_tracker_grid"):
         return None
     return value
 
@@ -4328,9 +4341,17 @@ def bace_students():
         return redirect(url_for("admin.bace_students"))
 
     q = (request.args.get("q") or "").strip()
+    bace_property_id = request.args.get("bace_property_id", type=int)
     query = BaceStudent.query
     if q:
-        query = query.filter(BaceStudent.full_name.ilike(f"%{q}%"))
+        like = f"%{q}%"
+        query = query.filter(
+            BaceStudent.full_name.ilike(like)
+            | BaceStudent.phone.ilike(like)
+            | BaceStudent.email.ilike(like)
+        )
+    if bace_property_id:
+        query = query.filter_by(bace_property_id=bace_property_id)
     students = query.order_by(BaceStudent.status, BaceStudent.full_name).all()
     properties = BaceProperty.query.filter_by(is_active=True).order_by(BaceProperty.name).all()
 
@@ -4341,6 +4362,8 @@ def bace_students():
     # is created automatically.
     return render_template(
         "admin/bace_students.html", students=students, properties=properties, q=q,
+        bace_property_id=bace_property_id,
+        show_add_form=(request.args.get("add") == "yes" or bool(request.args.get("prefill_full_name"))),
         prefill_full_name=request.args.get("prefill_full_name"),
         prefill_phone=request.args.get("prefill_phone"),
         prefill_email=request.args.get("prefill_email"),
@@ -4702,34 +4725,43 @@ def export_bace_monthly_statement():
         BaceRentPayment.for_month == month,
         BaceRentPayment.student_id.in_(student_ids),
     ).all() if student_ids else []
+    adjustments = BaceRentAdjustment.query.filter(
+        BaceRentAdjustment.for_month == month,
+        BaceRentAdjustment.student_id.in_(student_ids),
+    ).all() if student_ids else []
     expected_by_student = {charge.student_id: float(charge.amount_due) for charge in charges}
     paid_by_student = bace_tracker.payments_by_student_month(payments)
+    adjustment_by_student = bace_tracker.adjustments_by_student_month(adjustments)
 
-    totals = {prop.id: {"expected": 0.0, "paid": 0.0, "students": 0} for prop in properties}
+    totals = {prop.id: {"expected": 0.0, "paid": 0.0, "waived": 0.0, "students": 0} for prop in properties}
     for student in students:
         expected = expected_by_student.get(student.id, 0.0)
         if not expected:
             continue
         charge = next((c for c in charges if c.student_id == student.id), None)
         property_id = (charge.bace_property_id if charge and charge.bace_property_id else student.bace_property_id)
-        bucket = totals.setdefault(property_id, {"expected": 0.0, "paid": 0.0, "students": 0})
+        bucket = totals.setdefault(property_id, {"expected": 0.0, "paid": 0.0, "waived": 0.0, "students": 0})
         bucket["students"] += 1
         bucket["expected"] += expected
         bucket["paid"] += float(paid_by_student.get(student.id, {}).get(month, 0))
+        adjustment = adjustment_by_student.get(student.id, {}).get(month)
+        bucket["waived"] += float(adjustment.amount_waived if adjustment else 0)
 
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["BACE monthly accounting statement", month.strftime("%B %Y")])
-    writer.writerow(["Property", "Students due", "Expected rent (Rs)", "Received (Rs)", "Balance due (Rs)"])
-    grand_expected = grand_paid = 0.0
+    writer.writerow(["Property", "Students due", "Expected rent (Rs)", "Received (Rs)", "Waived (Rs)", "Balance due (Rs)"])
+    grand_expected = grand_paid = grand_waived = 0.0
     for prop in properties:
         bucket = totals.get(prop.id, {})
         expected = bucket.get("expected", 0.0)
         paid = bucket.get("paid", 0.0)
+        waived = bucket.get("waived", 0.0)
         grand_expected += expected
         grand_paid += paid
-        writer.writerow(csv_safe_row([prop.name, bucket.get("students", 0), expected, paid, expected - paid]))
-    writer.writerow(["Total", "", grand_expected, grand_paid, grand_expected - grand_paid])
+        grand_waived += waived
+        writer.writerow(csv_safe_row([prop.name, bucket.get("students", 0), expected, paid, waived, expected - paid - waived]))
+    writer.writerow(["Total", "", grand_expected, grand_paid, grand_waived, grand_expected - grand_paid - grand_waived])
     return Response(
         output.getvalue(), mimetype="text/csv",
         headers={"Content-Disposition": f"attachment;filename=BACE_Monthly_Statement_{month:%Y-%m}.csv"},
@@ -4934,9 +4966,102 @@ def _bace_tracker_summary_from_request():
     charges = BaceRentCharge.query.filter(
         BaceRentCharge.student_id.in_([s.id for s in students])
     ).all() if students else []
+    adjustments = BaceRentAdjustment.query.filter(
+        BaceRentAdjustment.student_id.in_([s.id for s in students])
+    ).all() if students else []
 
-    summary = bace_tracker.build_rent_summary(students, payments, months, today=today, charges=charges)
+    summary = bace_tracker.build_rent_summary(
+        students, payments, months, today=today, charges=charges, adjustments=adjustments,
+    )
     return summary, months, from_month, to_month, today, include_inactive, bace_property_id
+
+
+@bp.route("/bace-tracker/<int:student_id>/<month>/adjust", methods=["GET", "POST"])
+@login_required
+@admin_role_required
+def bace_rent_adjustment(student_id, month):
+    """Record a monthly note and/or approved waiver without faking payment.
+
+    A payment remains a payment row; this separate, one-row-per-month record
+    only reduces the amount still due.  That separation keeps collection
+    totals truthful while allowing an approved concession to settle a month.
+    """
+    for_month, error = _parse_month(month, "Rent month")
+    if error:
+        abort(404)
+    student = BaceStudent.query.get_or_404(student_id)
+    today = now_ist().date()
+    if for_month < bace_tracker.month_start(student.joined_month) or for_month > bace_tracker.month_start(today):
+        flash("Remarks and waivers can only be recorded for a due month in this student's stay.")
+        return redirect(url_for("admin.bace_tracker_grid"))
+
+    return_to = _safe_bace_tracker_return_url(request.values.get("return_to"))
+    adjustment_query = BaceRentAdjustment.query.filter_by(student_id=student.id, for_month=for_month)
+    if request.method == "POST":
+        adjustment_query = adjustment_query.with_for_update()
+    adjustment = adjustment_query.first()
+
+    charge = BaceRentCharge.query.filter_by(student_id=student.id, for_month=for_month).first()
+    expected_amount = Decimal(charge.amount_due if charge else student.monthly_amount)
+    paid_amount = db.session.query(func.coalesce(func.sum(BaceRentPayment.amount_paid), 0)).filter_by(
+        student_id=student.id, for_month=for_month,
+    ).scalar()
+    paid_amount = Decimal(paid_amount or 0)
+
+    if request.method == "POST":
+        closed_redirect = _reject_closed_bace_month(for_month, "admin.bace_tracker_grid")
+        if closed_redirect:
+            return closed_redirect
+        raw_waived = (request.form.get("amount_waived") or "0").strip()
+        try:
+            waived_amount = Decimal(raw_waived)
+        except Exception:
+            flash("Waived amount must be a valid number.")
+            return redirect(url_for("admin.bace_rent_adjustment", student_id=student.id, month=for_month.strftime("%Y-%m")))
+        if not waived_amount.is_finite() or waived_amount < 0:
+            flash("Waived amount cannot be negative.")
+            return redirect(url_for("admin.bace_rent_adjustment", student_id=student.id, month=for_month.strftime("%Y-%m")))
+        remaining_before_waiver = max(expected_amount - paid_amount, Decimal("0"))
+        if waived_amount > remaining_before_waiver:
+            flash(
+                f"The waiver cannot exceed the remaining Rs. {remaining_before_waiver:,.2f} "
+                f"after actual payments for {for_month:%B %Y}."
+            )
+            return redirect(url_for("admin.bace_rent_adjustment", student_id=student.id, month=for_month.strftime("%Y-%m")))
+        remarks = (request.form.get("remarks") or "").strip()[:500] or None
+        if not waived_amount and not remarks:
+            if adjustment:
+                db.session.delete(adjustment)
+                log_activity(
+                    "bace_rent_adjustment_delete", "bace_rent_adjustment", adjustment.id,
+                    f"Cleared adjustment for '{student.full_name}' in {for_month:%b %Y}",
+                )
+                db.session.commit()
+            flash("Monthly remark/waiver cleared.")
+        else:
+            if not adjustment:
+                adjustment = BaceRentAdjustment(
+                    student_id=student.id, bace_property_id=student.bace_property_id,
+                    for_month=for_month, recorded_by=current_user.username,
+                )
+                db.session.add(adjustment)
+            adjustment.amount_waived = waived_amount
+            adjustment.remarks = remarks
+            adjustment.recorded_by = current_user.username
+            log_activity(
+                "bace_rent_adjustment_save", "bace_rent_adjustment", adjustment.id,
+                f"Set Rs. {waived_amount:,.2f} waiver for '{student.full_name}' in {for_month:%b %Y}"
+                + (f": {remarks}" if remarks else ""),
+            )
+            db.session.commit()
+            flash("Monthly remark and waiver saved. The tracker has been recalculated.")
+        return redirect(return_to or url_for("admin.bace_tracker_grid"))
+
+    return render_template(
+        "admin/bace_rent_adjustment.html", student=student, for_month=for_month,
+        expected_amount=expected_amount, paid_amount=paid_amount, adjustment=adjustment,
+        remaining_before_waiver=max(expected_amount - paid_amount, Decimal("0")), return_to=return_to,
+    )
 
 
 @bp.route("/bace-tracker")
@@ -4984,7 +5109,7 @@ def export_bace_tracker():
     writer.writerow(
         ["Student", "Property", "Phone", "Email", "Monthly (Rs)"]
         + [m.strftime("%b %Y") for m in months]
-        + ["Total Paid (Rs)", "Balance Due (Rs)", "Months Behind"]
+        + ["Total Paid (Rs)", "Total Waived (Rs)", "Balance Due (Rs)", "Months Behind"]
     )
     for row in summary:
         student = row["student"]
@@ -4997,7 +5122,10 @@ def export_bace_tracker():
                 float(student.monthly_amount),
             ]
             + [row["statuses"][m] for m in months]
-            + [float(row["total_paid"]), float(row["balance_due"]), row["months_behind"]]
+            + [
+                float(row["total_paid"]), float(row["total_waived"]),
+                float(row["balance_due"]), row["months_behind"],
+            ]
         ))
 
     filename = f"BACE_Tracker_{from_month.strftime('%Y-%m')}_to_{to_month.strftime('%Y-%m')}.csv"
@@ -5027,15 +5155,22 @@ def bace_dashboard():
     charges = BaceRentCharge.query.filter(
         BaceRentCharge.student_id.in_([s.id for s in students]), BaceRentCharge.for_month == this_month,
     ).all() if students else []
-    summary = bace_tracker.build_rent_summary(students, payments, [this_month], today=today, charges=charges)
+    adjustments = BaceRentAdjustment.query.filter(
+        BaceRentAdjustment.student_id.in_([s.id for s in students]), BaceRentAdjustment.for_month == this_month,
+    ).all() if students else []
+    summary = bace_tracker.build_rent_summary(
+        students, payments, [this_month], today=today, charges=charges, adjustments=adjustments,
+    )
 
     due_rows = [row for row in summary if row["this_month_status"] != bace_tracker.STATUS_NA]
     expected = sum(float(row["this_month_expected"]) for row in due_rows)
-    collected = sum(
-        float(row["this_month_expected"]) - float(row["this_month_due"]) for row in due_rows
-    )
+    collected = sum(float(row["paid_amounts"].get(this_month, 0)) for row in due_rows)
+    waived_amount = sum(float(row["waived_amounts"].get(this_month, 0)) for row in due_rows)
     pending_amount = sum(float(row["this_month_due"]) for row in due_rows)
-    fully_paid = sum(1 for row in due_rows if row["this_month_status"] == bace_tracker.STATUS_PAID)
+    fully_paid = sum(
+        1 for row in due_rows
+        if row["this_month_status"] in (bace_tracker.STATUS_PAID, bace_tracker.STATUS_WAIVED)
+    )
     partially_paid = sum(1 for row in due_rows if row["this_month_status"] == bace_tracker.STATUS_PARTIAL)
     not_paid = sum(1 for row in due_rows if row["this_month_status"] == bace_tracker.STATUS_PENDING)
     not_due = len(summary) - len(due_rows)
@@ -5043,18 +5178,23 @@ def bace_dashboard():
     by_property = {}
     for row in summary:
         prop_name = row["student"].bace_property.name if row["student"].bace_property else "(no property)"
-        bucket = by_property.setdefault(prop_name, {"students": 0, "expected": 0.0, "collected": 0.0})
+        bucket = by_property.setdefault(
+            prop_name, {"students": 0, "expected": 0.0, "collected": 0.0, "waived": 0.0},
+        )
         if row["this_month_status"] == bace_tracker.STATUS_NA:
             continue
         bucket["students"] += 1
         bucket["expected"] += float(row["this_month_expected"])
-        bucket["collected"] += float(row["this_month_expected"]) - float(row["this_month_due"])
+        bucket["collected"] += float(row["paid_amounts"].get(this_month, 0))
+        bucket["waived"] += float(row["waived_amounts"].get(this_month, 0))
     base_rows = []
     for name, b in sorted(by_property.items()):
-        pct = (b["collected"] / b["expected"] * 100) if b["expected"] else 0
+        settled = b["collected"] + b["waived"]
+        pct = (settled / b["expected"] * 100) if b["expected"] else 0
         base_rows.append({
             "name": name, "students": b["students"], "expected": b["expected"],
-            "collected": b["collected"], "pending": b["expected"] - b["collected"], "pct": pct,
+            "collected": b["collected"], "waived": b["waived"],
+            "pending": b["expected"] - settled, "pct": pct,
         })
 
     # Reconciliation alerts: only successful BACE contributions that have
@@ -5079,7 +5219,7 @@ def bace_dashboard():
     return render_template(
         "admin/bace_dashboard.html", today=today, this_month=this_month, summary=summary,
         active_count=len(students), expected=expected, collected=collected,
-        pending_amount=pending_amount, fully_paid=fully_paid, partially_paid=partially_paid,
+        waived_amount=waived_amount, pending_amount=pending_amount, fully_paid=fully_paid, partially_paid=partially_paid,
         not_paid=not_paid, not_due=not_due, base_rows=base_rows, bt=bace_tracker,
         ledger_count=ledger_count, ledger_created=ledger_created,
         reconciliation=reconciliation,
@@ -5100,14 +5240,17 @@ def bace_student_ledger(student_id):
     months = bace_tracker.months_between(first_month, this_month)
     payments = BaceRentPayment.query.filter_by(student_id=student.id).all()
     charges = BaceRentCharge.query.filter_by(student_id=student.id).all()
+    adjustments = BaceRentAdjustment.query.filter_by(student_id=student.id).all()
     [summary] = bace_tracker.build_rent_summary(
-        [student], payments, months, today=today, charges=charges,
+        [student], payments, months, today=today, charges=charges, adjustments=adjustments,
     )
     rows = [
         {
             "month": month,
             "expected": summary["expected_amounts"][month],
             "paid": summary["paid_amounts"][month],
+            "waived": summary["waived_amounts"][month],
+            "adjustment": summary["adjustments"].get(month),
             "status": summary["statuses"][month],
         }
         for month in reversed(months)
@@ -5145,7 +5288,12 @@ def bace_pending_list():
     charges = BaceRentCharge.query.filter(
         BaceRentCharge.student_id.in_([s.id for s in students]), BaceRentCharge.for_month == this_month,
     ).all() if students else []
-    summary = bace_tracker.build_rent_summary(students, payments, [this_month], today=today, charges=charges)
+    adjustments = BaceRentAdjustment.query.filter(
+        BaceRentAdjustment.student_id.in_([s.id for s in students]), BaceRentAdjustment.for_month == this_month,
+    ).all() if students else []
+    summary = bace_tracker.build_rent_summary(
+        students, payments, [this_month], today=today, charges=charges, adjustments=adjustments,
+    )
 
     from whatsapp_utils import _to_e164
 
@@ -5439,6 +5587,108 @@ def record_bace_rent_payment(donation_id):
     return redirect(contribution_logs)
 
 
+@bp.route("/bace-contributions/<int:donation_id>/allocate-rent", methods=["GET", "POST"])
+@login_required
+@admin_role_required
+def allocate_bace_contribution_rent(donation_id):
+    """Explicitly allocate one BACE contribution across students/months.
+
+    Shared family phones and a payer paying rent on someone else's behalf
+    are normal, so automatic donor matching must never be the only route.
+    Each allocation creates a normal BaceRentPayment linked to the one
+    source donation; the source amount is a hard ceiling, while the
+    donation/receipt itself remains unmodified.
+    """
+    # Only the write path needs a row lock.  It serializes concurrent
+    # allocation submissions so two administrators cannot both spend the
+    # same remaining contribution balance, without holding a lock while an
+    # administrator simply reviews the allocation screen.
+    donation_query = Donation.query.filter_by(id=donation_id)
+    if request.method == "POST":
+        donation_query = donation_query.with_for_update()
+    donation = donation_query.first_or_404()
+    campaign = _bace_campaign_or_none()
+    if donation.status != "success" or not campaign or donation.campaign_id != campaign.id:
+        abort(404)
+
+    return_to = _safe_bace_contributions_return_url(request.values.get("return_to"))
+    allocations = BaceRentPayment.query.filter_by(source_donation_id=donation.id).order_by(
+        BaceRentPayment.for_month, BaceRentPayment.date_paid, BaceRentPayment.id,
+    ).all()
+    allocated_total = sum((Decimal(payment.amount_paid) for payment in allocations), Decimal("0"))
+    remaining = Decimal(donation.amount) - allocated_total
+
+    if request.method == "POST":
+        student_ids = request.form.getlist("student_id")
+        for_months = request.form.getlist("for_month")
+        amounts = request.form.getlist("amount_paid")
+        if not student_ids or not (len(student_ids) == len(for_months) == len(amounts)):
+            flash("Add at least one complete student, month and amount allocation.")
+            return redirect(url_for("admin.allocate_bace_contribution_rent", donation_id=donation.id))
+
+        new_rows = []
+        for student_id_raw, for_month_raw, amount_raw in zip(student_ids, for_months, amounts):
+            try:
+                student_id = int(student_id_raw)
+            except (TypeError, ValueError):
+                flash("Choose a BACE student for every allocation.")
+                return redirect(url_for("admin.allocate_bace_contribution_rent", donation_id=donation.id))
+            student = BaceStudent.query.get(student_id)
+            for_month, month_error = _parse_month(for_month_raw, "Rent month")
+            amount_paid, amount_error = _parse_positive_amount(amount_raw, "Allocation amount")
+            if not student or month_error or amount_error:
+                flash(month_error or amount_error or "Choose a valid BACE student.")
+                return redirect(url_for("admin.allocate_bace_contribution_rent", donation_id=donation.id))
+            if _bace_month_is_closed(for_month):
+                flash(
+                    f"{for_month:%B %Y} has been closed after verification. "
+                    "Reopen it before allocating a contribution to that month."
+                )
+                return redirect(url_for("admin.allocate_bace_contribution_rent", donation_id=donation.id))
+            new_rows.append((student, for_month, Decimal(str(amount_paid))))
+
+        new_total = sum((amount for _student, _month, amount in new_rows), Decimal("0"))
+        if new_total > remaining + Decimal("0.005"):
+            flash(
+                f"These allocations total Rs. {new_total:,.2f}, but only Rs. {remaining:,.2f} "
+                "of this contribution remains available."
+            )
+            return redirect(url_for("admin.allocate_bace_contribution_rent", donation_id=donation.id))
+
+        donation_date = to_ist(donation.donation_date) if donation.payment_mode == "online" else donation.donation_date
+        source_reference = f"BACE Contribution {donation.receipt_number or ('#' + str(donation.id))}"
+        for student, for_month, amount_paid in new_rows:
+            payment = BaceRentPayment(
+                student_id=student.id,
+                bace_property_id=student.bace_property_id,
+                for_month=for_month,
+                amount_paid=amount_paid,
+                date_paid=donation_date.date(),
+                mode="Online (givetokrishna.com)" if donation.payment_mode == "online" else donation.payment_mode.replace("_", " ").title(),
+                recorded_by=current_user.username,
+                reference=source_reference,
+                source_donation_id=donation.id,
+            )
+            db.session.add(payment)
+            log_activity(
+                "bace_contribution_allocate", "bace_rent_payment", None,
+                f"Allocated Rs. {amount_paid:,.2f} from contribution {donation.receipt_number or donation.id} "
+                f"to '{student.full_name}' for {for_month:%b %Y}",
+            )
+        db.session.commit()
+        flash(f"Allocated Rs. {new_total:,.2f}. Rs. {remaining - new_total:,.2f} remains from this contribution.")
+        return redirect(return_to or url_for("admin.allocate_bace_contribution_rent", donation_id=donation.id))
+
+    students = BaceStudent.query.filter_by(status="Active").join(BaceProperty).order_by(
+        BaceProperty.name, BaceStudent.full_name,
+    ).all()
+    return render_template(
+        "admin/bace_contribution_allocate.html", donation=donation, allocations=allocations,
+        allocated_total=allocated_total, remaining=remaining, students=students,
+        today=now_ist().date(), return_to=return_to,
+    )
+
+
 @bp.route("/bace-contributions/record-all-matched", methods=["POST"])
 @login_required
 @admin_role_required
@@ -5531,12 +5781,16 @@ def bace_contributions():
     # against them -- record_bace_rent_payment() sets source_donation_id,
     # so this is how the page tells "already recorded" apart from
     # "matched but not recorded yet" instead of offering the action again.
-    already_recorded = {
-        p.source_donation_id: p
-        for p in BaceRentPayment.query.filter(
+    already_recorded = defaultdict(list)
+    if pagination.items:
+        for payment in BaceRentPayment.query.filter(
             BaceRentPayment.source_donation_id.in_([d.id for d in pagination.items])
-        ).all()
-    } if pagination.items else {}
+        ).order_by(BaceRentPayment.for_month, BaceRentPayment.id).all():
+            already_recorded[payment.source_donation_id].append(payment)
+    allocation_totals = {
+        donation_id: sum((Decimal(payment.amount_paid) for payment in payments), Decimal("0"))
+        for donation_id, payments in already_recorded.items()
+    }
 
     # For each matched, successful, not-yet-recorded donation: the exact
     # month record_bace_rent_payment() would use (derived from the
@@ -5620,6 +5874,7 @@ def bace_contributions():
         "admin/bace_contributions.html", campaign=campaign, properties=properties,
         donations=pagination.items, pagination=pagination, summary=summary,
         matched_students=matched_students, already_recorded=already_recorded,
+        allocation_totals=allocation_totals,
         recordable_month=recordable_month, edit_before_saving_links=edit_before_saving_links,
         add_to_roster_links=add_to_roster_links,
         manual_record_links=manual_record_links,

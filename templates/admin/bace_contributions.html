@@ -122,10 +122,23 @@
       </td>
       <td class="small">
         {% set matched = matched_students.get(d.id) %}
-        {% set recorded = already_recorded.get(d.id) %}
-        {% if recorded %}
-        {{ recorded.student.full_name if recorded.student else '' }}<br>
-        <span class="text-success">✓ Recorded: Rs. {{ '%.0f' | format(recorded.amount_paid) }} for {{ recorded.for_month.strftime('%b %Y') }}</span>
+        {% set allocations = already_recorded.get(d.id, []) %}
+        {% if allocations %}
+        {% set allocation_total = allocation_totals.get(d.id, 0) %}
+        {% if allocations|length == 1 and allocation_total == d.amount %}
+        {# Preserve the familiar wording for the ordinary one-donation,
+           one-student flow.  "Allocated" is reserved for partial/split payments. #}
+        {{ allocations[0].student.full_name if allocations[0].student else '(deleted student)' }}
+        <span class="text-success">✓ Recorded: Rs. {{ '%.0f' | format(allocation_total) }} for {{ allocations[0].for_month.strftime('%b %Y') }}</span>
+        {% else %}
+        <span class="text-success">✓ Allocated: Rs. {{ '%.0f' | format(allocation_total) }} of Rs. {{ '%.0f' | format(d.amount) }}</span>
+        {% for payment in allocations %}
+        <br>{{ payment.student.full_name if payment.student else '(deleted student)' }}: Rs. {{ '%.0f' | format(payment.amount_paid) }} for {{ payment.for_month.strftime('%b %Y') }}
+        {% endfor %}
+        {% endif %}
+        {% if current_user.role == 'admin' %}
+        <br><a href="{{ url_for('admin.allocate_bace_contribution_rent', donation_id=d.id, return_to=contribution_logs_return_url) }}">{% if allocation_total < d.amount %}Allocate remaining / split payment{% else %}View allocations{% endif %}</a>
+        {% endif %}
         {% elif matched %}
         {{ matched.full_name }} ({{ matched.bace_property.name if matched.bace_property else '?' }})
         {% if current_user.role == 'admin' %}
@@ -143,11 +156,15 @@
         {% endif %}
         {% endif %}
         {% endif %}
+        {% if current_user.role == 'admin' %}
+        <br><a href="{{ url_for('admin.allocate_bace_contribution_rent', donation_id=d.id, return_to=contribution_logs_return_url) }}">Assign / split rent payment</a>
+        {% endif %}
         {% else %}
         <span class="text-muted">no match</span>
         {% if current_user.role == 'admin' %}
           {% if add_to_roster_links.get(d.id) %}<br><a href="{{ add_to_roster_links[d.id] }}">Add to roster</a>{% endif %}
           {% if manual_record_links.get(d.id) %}<br><a href="{{ manual_record_links[d.id] }}">Record as rent payment manually</a>{% endif %}
+          <br><a href="{{ url_for('admin.allocate_bace_contribution_rent', donation_id=d.id, return_to=contribution_logs_return_url) }}">Assign / split rent payment</a>
         {% endif %}
         {% endif %}
       </td>

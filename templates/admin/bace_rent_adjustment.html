@@ -1,0 +1,36 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}BACE Monthly Adjustment{% endblock %}
+{% block content %}
+<div class="admin-page-header mb-3">
+  <div><div class="eyebrow">Monthly exception record</div><h3>Remark or waive rent balance</h3></div>
+  <a class="btn btn-sm btn-outline-secondary" href="{{ return_to or url_for('admin.bace_tracker_grid') }}">Back to Tracker</a>
+</div>
+
+<div class="alert alert-light border" style="max-width:720px">
+  <div class="row g-2">
+    <div class="col-md-5"><span class="text-muted small d-block">Student</span><strong>{{ student.full_name }}</strong><br><span class="small text-muted">{{ student.bace_property.name if student.bace_property else '-' }}</span></div>
+    <div class="col-md-3"><span class="text-muted small d-block">Rent month</span><strong>{{ for_month.strftime('%B %Y') }}</strong></div>
+    <div class="col-md-2"><span class="text-muted small d-block">Expected</span><strong>Rs. {{ '%.2f' | format(expected_amount) }}</strong></div>
+    <div class="col-md-2"><span class="text-muted small d-block">Actually paid</span><strong class="text-success">Rs. {{ '%.2f' | format(paid_amount) }}</strong></div>
+  </div>
+</div>
+
+<div class="card card-body shadow-sm" style="max-width:720px">
+  <p class="small text-muted mb-3">A waiver settles only the unpaid balance for this month. It is kept separate from money received, so collection reports remain accurate. Leave the waiver at Rs. 0 when you only want to add a remark.</p>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% if return_to %}<input type="hidden" name="return_to" value="{{ return_to }}">{% endif %}
+    <div class="mb-3">
+      <label class="form-label">Waive remaining balance (Rs)</label>
+      <input class="form-control" type="number" name="amount_waived" min="0" step="0.01" max="{{ remaining_before_waiver }}" value="{{ adjustment.amount_waived if adjustment else 0 }}">
+      <div class="form-text">Maximum available to waive: Rs. {{ '%.2f' | format(remaining_before_waiver) }}.</div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Remark for {{ for_month.strftime('%B %Y') }}</label>
+      <textarea class="form-control" name="remarks" rows="3" maxlength="500" placeholder="For example: approved concession after discussion with the BACE coordinator.">{{ adjustment.remarks if adjustment and adjustment.remarks else '' }}</textarea>
+      <div class="form-text">Visible in the Tracker hover detail. This does not change the student's permanent notes.</div>
+    </div>
+    <button class="btn btn-gold">Save monthly adjustment</button>
+  </form>
+</div>
+{% endblock %}

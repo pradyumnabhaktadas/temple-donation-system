@@ -1022,6 +1022,40 @@ class BaceRentPayment(db.Model):
         return f"<BaceRentPayment student={self.student_id} month={self.for_month}>"
 
 
+class BaceRentAdjustment(db.Model):
+    """An approved adjustment for one student's rent in one month.
+
+    A waiver is never stored as a payment: money received and an amount
+    excused must remain separately auditable.  The optional remarks field
+    also gives the rent team one place to record the reason for a monthly
+    exception without changing the student's permanent roster notes.
+    """
+
+    __tablename__ = "bace_rent_adjustments"
+    __table_args__ = (
+        db.UniqueConstraint("student_id", "for_month", name="uq_bace_rent_adjustment_student_month"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey("bace_students.id"), nullable=False, index=True)
+    bace_property_id = db.Column(db.Integer, db.ForeignKey("bace_properties.id"), index=True)
+    for_month = db.Column(db.Date, nullable=False, index=True)
+    amount_waived = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    remarks = db.Column(db.String(500))
+    recorded_by = db.Column(db.String(100), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.datetime.utcnow,
+        onupdate=datetime.datetime.utcnow, nullable=False,
+    )
+
+    student = db.relationship("BaceStudent")
+    bace_property = db.relationship("BaceProperty")
+
+    def __repr__(self):
+        return f"<BaceRentAdjustment student={self.student_id} month={self.for_month}>"
+
+
 class BaceRentMonthClose(db.Model):
     """A verified BACE month.  Closed months reject later payment edits,
     deletes and automatic contribution matching until an administrator

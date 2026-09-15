@@ -25,10 +25,20 @@ class _Student:
 
 
 class _Payment:
-    def __init__(self, student_id, for_month, amount_paid):
+    def __init__(self, student_id, for_month, amount_paid, date_paid=None, id=0):
         self.student_id = student_id
         self.for_month = for_month
         self.amount_paid = amount_paid
+        self.date_paid = date_paid or for_month
+        self.id = id
+
+
+class _Adjustment:
+    def __init__(self, student_id, for_month, amount_waived, remarks=None):
+        self.student_id = student_id
+        self.for_month = for_month
+        self.amount_waived = amount_waived
+        self.remarks = remarks
 
 
 class TestMonthMath:
@@ -115,6 +125,24 @@ class TestBuildRentSummary:
         assert row["balance_due"] == 1800
         assert row["months_behind"] == 1
 
+    def test_a_partial_payment_plus_approved_waiver_is_not_pending(self):
+        student = _Student(1, 5000, _d(2026, 9, 1))
+        payments = [_Payment(1, _d(2026, 9, 1), 3000)]
+        adjustments = [_Adjustment(1, _d(2026, 9, 1), 2000, "Approved concession")]
+        months = [_d(2026, 9, 1)]
+
+        [row] = bt.build_rent_summary(
+            [student], payments, months, today=_d(2026, 9, 10), adjustments=adjustments,
+        )
+
+        assert row["statuses"][_d(2026, 9, 1)] == bt.STATUS_WAIVED
+        assert row["paid_amounts"][_d(2026, 9, 1)] == 3000
+        assert row["waived_amounts"][_d(2026, 9, 1)] == 2000
+        assert row["total_paid"] == 3000
+        assert row["total_waived"] == 2000
+        assert row["balance_due"] == 0
+        assert row["months_behind"] == 0
+
     def test_a_month_before_joining_never_counts_toward_balance_due(self):
         student = _Student(1, 3000, _d(2026, 9, 1))
         months = bt.months_between(_d(2026, 1, 1), _d(2026, 9, 1))
@@ -150,6 +178,7 @@ class TestBuildRentSummary:
 
         assert row["this_month_status"] == bt.STATUS_PAID
         assert row["total_paid"] == 3000
+        assert [payment.amount_paid for payment in row["payment_rows"][_d(2026, 9, 1)]] == [1000, 2000]
 
     def test_payments_for_a_different_student_never_cross_over(self):
         s1 = _Student(1, 3000, _d(2026, 9, 1))

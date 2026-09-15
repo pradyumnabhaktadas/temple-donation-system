@@ -12,7 +12,7 @@
   </div>
   {% endif %}
 </div>
-<div class="bace-status-legend mb-3"><span><i class="bace-status-dot" style="background:#2e7d32"></i>Paid</span><span><i class="bace-status-dot" style="background:#c9a227"></i>Partial</span><span><i class="bace-status-dot" style="background:#b3261e"></i>Pending</span><span><i class="bace-status-dot" style="background:#9e9e9e"></i>Upcoming / N/A</span><span>Computed from the Payments Log</span></div>
+<div class="bace-status-legend mb-3"><span><i class="bace-status-dot" style="background:#2e7d32"></i>Paid</span><span><i class="bace-status-dot" style="background:#c9a227"></i>Partial</span><span><i class="bace-status-dot" style="background:#5f4b8b"></i>Waived / settled</span><span><i class="bace-status-dot" style="background:#b3261e"></i>Pending</span><span><i class="bace-status-dot" style="background:#9e9e9e"></i>Upcoming / N/A</span><span>Waivers are shown separately from actual payments</span></div>
 
 <form class="row g-2 mb-3 align-items-end">
   {% if current_user.role != 'bace_viewer' %}
@@ -52,10 +52,12 @@
     <thead>
       <tr>
         <th>Student</th>
+        {% if current_user.role != 'bace_viewer' %}<th>Mobile</th>{% endif %}
         <th>Property</th>
         <th>Monthly (Rs)</th>
         {% for m in months %}<th class="text-center">{{ m.strftime('%b %y') }}</th>{% endfor %}
         <th class="text-end">Total Paid</th>
+        <th class="text-end">Waived</th>
         <th class="text-end">Balance Due</th>
         <th class="text-center">Months Behind</th>
       </tr>
@@ -63,9 +65,10 @@
     <tbody>
       {% for prop_name, rows in summary|groupby('student.bace_property.name') %}
       <tr class="table-secondary">
-        <td colspan="{{ 6 + months|length }}">
+        <td colspan="{{ 7 + months|length + (0 if current_user.role == 'bace_viewer' else 1) }}">
           <strong>{{ prop_name }}</strong> -- {{ rows|length }} student{{ '' if rows|length == 1 else 's' }},
           Rs. {{ '%.2f' | format(rows|sum(attribute='total_paid')) }} paid,
+          Rs. {{ '%.2f' | format(rows|sum(attribute='total_waived')) }} waived,
           Rs. {{ '%.2f' | format(rows|sum(attribute='balance_due')) }} balance due
         </td>
       </tr>
@@ -73,24 +76,29 @@
       {% set s = row.student %}
       <tr>
         <td class="tracker-student">{{ s.full_name }}{% if not s.is_active %} <span class="badge bg-secondary">Inactive</span>{% endif %}</td>
+        {% if current_user.role != 'bace_viewer' %}<td class="tracker-mobile">{{ s.phone or '-' }}</td>{% endif %}
         <td class="tracker-property">{{ s.bace_property.name if s.bace_property else '-' }}</td>
         <td>{{ '%.0f' | format(s.monthly_amount) }}</td>
         {% for m in months %}
         {% set status = row.statuses[m] %}
+        {% set installments = row.payment_rows.get(m, []) %}
+        {% set adjustment = row.adjustments.get(m) %}
         <td class="text-center text-white tracker-status" style="background:
           {%- if status == bt.STATUS_PAID -%}#2e7d32
           {%- elif status == bt.STATUS_PARTIAL -%}#c9a227
+          {%- elif status == bt.STATUS_WAIVED -%}#5f4b8b
           {%- elif status == bt.STATUS_PENDING -%}#b3261e
           {%- else -%}#9e9e9e
-          {%- endif -%};" title="{{ status }}">{% if status in (bt.STATUS_PAID, bt.STATUS_PARTIAL) %}{{ '%.0f' | format(row.paid_amounts[m]) }}{% else %}{{ status }}{% endif %}</td>
+          {%- endif -%};" title="{{ status }} — Expected Rs. {{ '%.0f' | format(row.expected_amounts[m]) }}; received Rs. {{ '%.0f' | format(row.paid_amounts[m]) }}{% if adjustment and adjustment.amount_waived %}; waived Rs. {{ '%.0f' | format(adjustment.amount_waived) }}{% endif %}{% if adjustment and adjustment.remarks %}&#10;Remark: {{ adjustment.remarks }}{% endif %}{% if current_user.role != 'bace_viewer' %}{% if installments %}. {{ installments|length }} installment{{ '' if installments|length == 1 else 's' }}:{% for payment in installments %}&#10;{{ loop.index }}. Rs. {{ '%.0f' | format(payment.amount_paid) }} on {{ payment.date_paid.strftime('%d %b %Y') }} · {{ payment.mode or 'Mode not recorded' }}{% if payment.reference %} · {{ payment.reference }}{% endif %}{% endfor %}{% else %} · No payment recorded{% endif %}{% endif %}">{% if status in (bt.STATUS_PAID, bt.STATUS_PARTIAL, bt.STATUS_WAIVED) %}{{ '%.0f' | format(row.paid_amounts[m]) }}{% else %}{{ status }}{% endif %}{% if adjustment and adjustment.amount_waived %}<br><small>+{{ '%.0f' | format(adjustment.amount_waived) }} waived</small>{% endif %}{% if current_user.role == 'admin' and m >= s.joined_month and m <= bt.month_start(today) %}<br><a class="text-white small" href="{{ url_for('admin.bace_rent_adjustment', student_id=s.id, month=m.strftime('%Y-%m'), return_to=request.full_path) }}" aria-label="Add remark or waiver">✎</a>{% endif %}</td>
         {% endfor %}
         <td class="text-end">{{ '%.2f' | format(row.total_paid) }}</td>
+        <td class="text-end">{{ '%.2f' | format(row.total_waived) }}</td>
         <td class="text-end {% if row.balance_due > 0 %}text-danger fw-bold{% endif %}">{{ '%.2f' | format(row.balance_due) }}</td>
         <td class="text-center">{{ row.months_behind }}</td>
       </tr>
       {% endfor %}
       {% else %}
-      <tr><td colspan="{{ 6 + months|length }}" class="text-muted">No students to show.</td></tr>
+      <tr><td colspan="{{ 7 + months|length + (0 if current_user.role == 'bace_viewer' else 1) }}" class="text-muted">No students to show.</td></tr>
       {% endfor %}
     </tbody>
   </table>

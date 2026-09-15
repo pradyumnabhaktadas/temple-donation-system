@@ -52,6 +52,18 @@ class TestStudentsPage:
         assert student.joined_month == datetime.date(2026, 9, 1)
         assert student.status == "Active"
 
+    def test_students_can_be_filtered_by_bace_property(self, client, app):
+        first_property = _property(app, "Nandgaon BACE")
+        second_property = _property(app, "Yogapitha BACE")
+        _add_student(client, first_property, full_name="Nandgaon Student", phone="9111111101")
+        _add_student(client, second_property, full_name="Yogapitha Student", phone="9111111102")
+
+        response = client.get(f"/admin/bace-students?bace_property_id={second_property}")
+        body = response.get_data(as_text=True)
+        assert "Yogapitha Student" in body
+        assert "Nandgaon Student" not in body
+        assert "All BACE properties" in body
+
 
 class TestMonthlyRentLedger:
     def test_dashboard_creates_one_current_month_charge_per_active_student(self, client, app):
@@ -362,9 +374,77 @@ class TestTrackerGrid:
         body = resp.get_data(as_text=True)
         assert "Fully Paid Student" in body
         # A Paid cell shows the amount actually paid that month, not the
-        # bare word "Paid" -- title="Paid" (a tooltip) is still there for
-        # anyone hovering, but the visible cell text is the number.
-        assert 'title="Paid">3000<' in body
+        # bare word "Paid" -- the native hover detail retains the status,
+        # expected amount and payment history, while the visible cell is
+        # still the amount actually received.
+        assert 'title="Paid — Expected Rs. 3000; received Rs. 3000' in body
+
+    def test_admin_tracker_shows_student_mobile_numbers(self, client, app):
+        prop_id = _property(app)
+        _add_student(client, prop_id, full_name="Mobile Student", phone="9111111101")
+        response = client.get("/admin/bace-tracker")
+        body = response.get_data(as_text=True)
+        assert "Mobile" in body
+        assert "9111111101" in body
+
+    def test_tracker_hover_detail_lists_payment_installments(self, client, app):
+        prop_id = _property(app)
+        from utils import now_ist
+        month = now_ist().strftime("%Y-%m")
+        _add_student(client, prop_id, full_name="Installment Student", phone="9111111101", monthly_amount="3000", joined_month=month)
+        from models import BaceStudent
+        student = BaceStudent.query.filter_by(full_name="Installment Student").one()
+        for amount, date_paid, reference in (("1000", "2026-09-02", "UTR-first"), ("2000", "2026-09-05", "UTR-second")):
+            client.post("/admin/bace-payments", data={
+                "student_id": str(student.id), "for_month": month, "amount_paid": amount,
+                "date_paid": date_paid, "mode": "UPI", "reference": reference,
+            }, follow_redirects=True)
+        body = client.get(f"/admin/bace-tracker?from={month}&to={month}").get_data(as_text=True)
+        assert "2 installments" in body
+        assert "UTR-first" in body and "UTR-second" in body
+
+    def test_monthly_waiver_and_remark_settle_a_partial_rent(self, client, app):
+        prop_id = _property(app)
+        from utils import now_ist
+        month = now_ist().strftime("%Y-%m")
+        _add_student(
+            client, prop_id, full_name="Concession Student", phone="9111111199",
+            monthly_amount="5000", joined_month=month,
+        )
+        from models import BaceStudent, BaceRentAdjustment
+        student = BaceStudent.query.filter_by(full_name="Concession Student").one()
+        client.post("/admin/bace-payments", data={
+            "student_id": student.id, "for_month": month, "amount_paid": "3000",
+            "date_paid": now_ist().date().isoformat(), "mode": "UPI", "reference": "PARTIAL-1",
+        })
+
+        response = client.post(
+            f"/admin/bace-tracker/{student.id}/{month}/adjust",
+            data={"amount_waived": "2000", "remarks": "Approved concession"},
+            follow_redirects=True,
+        )
+        adjustment = BaceRentAdjustment.query.filter_by(student_id=student.id).one()
+        assert float(adjustment.amount_waived) == 2000
+        assert adjustment.remarks == "Approved concession"
+        body = response.get_data(as_text=True)
+        assert "Waived" in body
+        assert "Approved concession" in body
+        assert "+2000 waived" in body
+
+    def test_monthly_waiver_cannot_exceed_actual_balance(self, client, app):
+        prop_id = _property(app)
+        from utils import now_ist
+        month = now_ist().strftime("%Y-%m")
+        _add_student(client, prop_id, full_name="Waiver Limit", phone="9111111198", monthly_amount="5000", joined_month=month)
+        from models import BaceStudent, BaceRentAdjustment
+        student = BaceStudent.query.filter_by(full_name="Waiver Limit").one()
+
+        response = client.post(
+            f"/admin/bace-tracker/{student.id}/{month}/adjust",
+            data={"amount_waived": "5001", "remarks": "Too much"}, follow_redirects=True,
+        )
+        assert BaceRentAdjustment.query.count() == 0
+        assert "cannot exceed the remaining" in response.get_data(as_text=True)
 
     def test_inactive_students_hidden_by_default(self, client, app):
         prop_id = _property(app)
@@ -655,7 +735,7 @@ class TestBaceAutomation:
         body = response.get_data(as_text=True)
         assert response.mimetype == "text/csv"
         assert "Statement BACE" in body
-        assert "3000.0,1000.0,2000.0" in body
+        assert "3000.0,1000.0,0.0,2000.0" in body
 
     def test_personal_link_binds_a_successful_payment_to_its_student(self, client, app):
         prop_id = _property(app, name="Linked BACE")

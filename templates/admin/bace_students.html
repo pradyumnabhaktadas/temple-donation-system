@@ -8,22 +8,37 @@
     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_payments') }}">Payments Log</a>
     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_tracker_grid') }}">Tracker</a>
     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_pending_list') }}">Pending List</a>
+    {% if current_user.role == 'admin' %}
+    <a class="btn btn-sm btn-gold" href="{{ url_for('admin.bace_students', add='yes', q=q, bace_property_id=bace_property_id) }}#add-student">＋ Add student</a>
+    {% endif %}
   </div>
 </div>
 <p class="text-muted">The roster the rent tracker is built from. Add one row per student; when a student leaves, set them Inactive rather than deleting -- deleting is only possible once they have no payments recorded, so their history stays intact.</p>
 
 <form class="row g-2 mb-3">
   <div class="col-auto">
-    <input type="search" name="q" class="form-control" style="min-width:220px" placeholder="Search by name" value="{{ q or '' }}">
+    <input type="search" name="q" class="form-control" style="min-width:260px" placeholder="Search name, phone or email" value="{{ q or '' }}">
+  </div>
+  <div class="col-auto">
+    <select name="bace_property_id" class="form-select" onchange="this.form.submit()" aria-label="Filter by BACE property">
+      <option value="">All BACE properties</option>
+      {% for p in properties %}
+      <option value="{{ p.id }}" {% if bace_property_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+      {% endfor %}
+    </select>
   </div>
   <div class="col-auto"><button class="btn btn-sm btn-outline-secondary">Search</button></div>
+  {% if q or bace_property_id %}
+  <div class="col-auto"><a class="btn btn-sm btn-link" href="{{ url_for('admin.bace_students') }}">Clear filters</a></div>
+  {% endif %}
 </form>
 
 <div class="row">
-  {% if current_user.role == 'admin' %}
+  {% if current_user.role == 'admin' and show_add_form %}
   <div class="col-md-4">
-    <div class="card card-body shadow-sm mb-3 p-3">
+    <div id="add-student" class="card card-body shadow-sm mb-3 p-3">
       <h6 class="mb-3">Add a student</h6>
+      <a class="small text-muted mb-2" href="{{ url_for('admin.bace_students', q=q, bace_property_id=bace_property_id) }}">Cancel</a>
       {% if prefill_full_name %}
       <p class="small text-muted">Pre-filled from a BACE Contribution donation -- check the details, then set a monthly amount and joined month before adding.</p>
       {% endif %}
@@ -71,7 +86,8 @@
     </div>
   </div>
   {% endif %}
-  <div class="{% if current_user.role == 'admin' %}col-md-8{% else %}col-12{% endif %}">
+  <div class="{% if current_user.role == 'admin' and show_add_form %}col-md-8{% else %}col-12{% endif %}">
+    <p class="small text-muted mb-2">{{ students|length }} student{{ '' if students|length == 1 else 's' }} shown{% if bace_property_id %} for the selected BACE property{% endif %}.</p>
     <div class="table-responsive">
       <table class="table table-sm table-striped align-middle">
         <thead>
