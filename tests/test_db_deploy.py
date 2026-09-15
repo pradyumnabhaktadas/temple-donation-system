@@ -20,22 +20,42 @@ import pytest
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
-def _run_deploy(db_path):
-    """Run db_deploy.py as a subprocess, the way Render does.
+def _prod_env(db_path, **overrides):
+    """The environment a production *database* process runs with.
 
-    A subprocess, not an import: Alembic and create_app both carry global
-    state, and the point is to test the command as it actually runs.
+    MIGRATIONS_ONLY=1 because every helper here builds an app purely to get
+    an application context to inspect or seed a database through -- none of
+    them serve a request, which is exactly what that flag means (see
+    create_app()'s docstring in app.py). Without it they'd have to satisfy
+    the live-traffic guards: real Razorpay credentials, and Flask-Limiter
+    installed -- and Flask-Limiter deliberately isn't, in the sandbox this
+    suite is expected to run in (see CLAUDE.md), so no amount of
+    environment could satisfy that one.
+
+    Pass MIGRATIONS_ONLY="" to get an environment for a genuinely serving
+    app, as TestRuntimeConfigDoesNotBlockMigrations does.
     """
     env = dict(os.environ)
     env.update({
         "DATABASE_URL": f"sqlite:///{db_path}",
         "FLASK_ENV": "production",          # the path production takes
         "SECRET_KEY": "x" * 40,             # required in production
+        "MIGRATIONS_ONLY": "1",
         "PYTHONDONTWRITEBYTECODE": "1",
     })
+    env.update(overrides)
+    return env
+
+
+def _run_deploy(db_path, env=None):
+    """Run db_deploy.py as a subprocess, the way Render does.
+
+    A subprocess, not an import: Alembic and create_app both carry global
+    state, and the point is to test the command as it actually runs.
+    """
     return subprocess.run(
         [sys.executable, "db_deploy.py"],
-        cwd=REPO, env=env, capture_output=True, text=True, timeout=300,
+        cwd=REPO, env=env or _prod_env(db_path), capture_output=True, text=True, timeout=300,
     )
 
 
@@ -55,10 +75,7 @@ def _inspect(db_path):
         ".scalar() if 'alembic_version' in tables else None\n"
         "    print(repr((tables, cols, ver)))\n"
     )
-    env = dict(os.environ)
-    env.update({"DATABASE_URL": f"sqlite:///{db_path}", "FLASK_ENV": "production",
-                "SECRET_KEY": "x" * 40, "PYTHONDONTWRITEBYTECODE": "1"})
-    out = subprocess.run([sys.executable, "-c", script], cwd=REPO, env=env,
+    out = subprocess.run([sys.executable, "-c", script], cwd=REPO, env=_prod_env(db_path),
                          capture_output=True, text=True, timeout=300)
     assert out.returncode == 0, out.stderr
     return eval(out.stdout.strip().splitlines()[-1])
@@ -141,6 +158,14 @@ class TestExistingDatabase:
             "                  'DROP INDEX ix_donations_status',\n"
             "                  'DROP INDEX ix_donations_donation_date',\n"
             "                  'DROP INDEX ix_donations_razorpay_order_id',\n"
+            # Before the batch drop_column of bace_student_id below:
+            # Alembic's batch mode recreates every index it reflected on
+            # the table, including one on a column that is no longer there
+            # ("no such column: bace_student_id").
+            "                  'DROP INDEX ix_donations_bace_student_id',\n"
+            # admin_users.bace_property_id + its index arrive with the BACE
+            # rent ledger work, also after this baseline.
+            "                  'DROP INDEX ix_admin_users_bace_property_id',\n"
             "                  'DROP INDEX ix_donations_razorpay_payment_id'):\n"
             "            conn.execute(sa.text(s))\n"
             "    # associated_with_id carries a foreign key, which plain ALTER\n"
@@ -155,6 +180,15 @@ class TestExistingDatabase:
             "        alembic_op = Operations(ctx)\n"
             "        with alembic_op.batch_alter_table('donations') as batch_op:\n"
             "            batch_op.drop_column('associated_with_id')\n"
+            # bace_student_id carries a foreign key to bace_students, which
+            # is dropped below as a post-baseline table. Leaving the column
+            # behind leaves a foreign key pointing at nothing, and SQLite's
+            # batch mode reflects every FK on a table it recreates -- so
+            # the *earlier* f4a08d3c6e12 migration, which batch-alters
+            # donations, died with NoSuchTableError: bace_students. Same
+            # class of problem as associated_with_id above, one table
+            # further out.
+            "            batch_op.drop_column('bace_student_id')\n"
             "    with db.engine.begin() as conn:\n"
             "        conn.execute(sa.text('DROP TABLE camps'))\n"
             "        conn.execute(sa.text('DROP TABLE associated_withs'))\n"
@@ -175,13 +209,19 @@ class TestExistingDatabase:
             "        # would collide. Drop the payments table first -- it carries a\n"
             "        # foreign key to bace_students.\n"
             "        conn.execute(sa.text('DROP TABLE bace_rent_payments'))\n"
+            "        # The rest of the BACE rent ledger, added after this baseline\n"
+            "        # too: bace_rent_charges / bace_rent_month_closes\n"
+            "        # (7b4c2e9a1d63) and bace_rent_adjustments (8c5d1e7a2b94).\n"
+            "        # All three hold foreign keys to bace_students, so they go\n"
+            "        # before it.\n"
+            "        conn.execute(sa.text('DROP TABLE bace_rent_charges'))\n"
+            "        conn.execute(sa.text('DROP TABLE bace_rent_month_closes'))\n"
+            "        conn.execute(sa.text('DROP TABLE bace_rent_adjustments'))\n"
             "        conn.execute(sa.text('DROP TABLE bace_students'))\n"
 
             f"    stamp(revision='{revision}')\n"
         )
-        env = dict(os.environ)
-        env.update({"DATABASE_URL": f"sqlite:///{db_path}", "FLASK_ENV": "production",
-                    "SECRET_KEY": "x" * 40, "PYTHONDONTWRITEBYTECODE": "1"})
+        env = _prod_env(db_path)
         out = subprocess.run([sys.executable, "-c", script], cwd=REPO, env=env,
                              capture_output=True, text=True, timeout=300)
         assert out.returncode == 0, out.stderr
@@ -213,9 +253,7 @@ class TestExistingDatabase:
             "    d = Donation.query.one()\n"
             "    print(repr((d.donor.full_name, d.receipt_number, float(d.amount))))\n"
         )
-        env = dict(os.environ)
-        env.update({"DATABASE_URL": f"sqlite:///{db_path}", "FLASK_ENV": "production",
-                    "SECRET_KEY": "x" * 40, "PYTHONDONTWRITEBYTECODE": "1"})
+        env = _prod_env(db_path)
         out = subprocess.run([sys.executable, "-c", script], cwd=REPO, env=env,
                              capture_output=True, text=True, timeout=300)
         assert out.returncode == 0, out.stderr
@@ -243,9 +281,7 @@ class TestAmbiguousDatabase:
             "with app.app_context():\n"
             "    db.create_all()\n"
         )
-        env = dict(os.environ)
-        env.update({"DATABASE_URL": f"sqlite:///{db_path}", "FLASK_ENV": "production",
-                    "SECRET_KEY": "x" * 40, "PYTHONDONTWRITEBYTECODE": "1"})
+        env = _prod_env(db_path)
         subprocess.run([sys.executable, "-c", script], cwd=REPO, env=env,
                        capture_output=True, text=True, timeout=300)
 
@@ -253,3 +289,45 @@ class TestAmbiguousDatabase:
         assert result.returncode == 1, "should refuse, not proceed on a guess"
         assert "Refusing" in result.stderr
         assert "flask db stamp" in result.stderr, "should say how to resolve it"
+
+
+class TestRuntimeConfigDoesNotBlockMigrations:
+    """create_app() refuses to build a *serving* app in production without
+    Razorpay credentials and Flask-Limiter (app.py). That guard is right
+    for a web dyno and wrong for the pre-deploy step, which serves nothing.
+
+    This shipped the wrong way round once: db_deploy.py's own create_app()
+    tripped the guard, so `python db_deploy.py` died with "Razorpay
+    credentials are required in production" before touching the database --
+    failing every deploy on a host where the keys weren't set yet, which is
+    exactly the bootstrap order render.yaml documents."""
+
+    def test_deploy_works_before_razorpay_is_configured(self, tmp_path):
+        """db_deploy.py sets MIGRATIONS_ONLY for itself, so this holds even
+        from an environment that says nothing about it -- which is what
+        Render's pre-deploy step actually passes."""
+        db_path = tmp_path / "fresh.db"
+        env = _prod_env(db_path, MIGRATIONS_ONLY="")
+        env.pop("RAZORPAY_KEY_ID", None)
+        env.pop("RAZORPAY_KEY_SECRET", None)
+
+        result = _run_deploy(db_path, env=env)
+
+        assert result.returncode == 0, result.stderr
+        assert "Razorpay" not in result.stderr
+
+    def test_a_serving_app_still_refuses_without_razorpay(self, tmp_path):
+        """The guard itself must stay intact -- the fix scopes it, it
+        doesn't remove it."""
+        db_path = tmp_path / "serving.db"
+        env = _prod_env(db_path, MIGRATIONS_ONLY="")
+        env.pop("RAZORPAY_KEY_ID", None)
+        env.pop("RAZORPAY_KEY_SECRET", None)
+
+        out = subprocess.run(
+            [sys.executable, "-c", "from app import create_app; create_app()"],
+            cwd=REPO, env=env, capture_output=True, text=True, timeout=300,
+        )
+
+        assert out.returncode != 0
+        assert "required in production" in out.stderr

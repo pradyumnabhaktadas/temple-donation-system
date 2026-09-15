@@ -35,7 +35,8 @@ from models import (
     Camp, Donation, Donor, Campaign, BaceProperty, Festival, SevaType,
     LiveToGivePurpose, Preacher, AssociatedWith, ReceiptCounter, DonorLoginOTP,
     AdminActivityLog, AdminUser, DailyReportRecipient, ZohoForm,
-    BaceRentPayment, BaceStudent,
+    BaceRentPayment, BaceStudent, BaceRentCharge, BaceRentMonthClose,
+    BaceRentAdjustment,
 )
 
 CONFIRMATION_PHRASE = "DELETE ALL DATA"
@@ -61,8 +62,11 @@ MODELS_IN_DELETE_ORDER = [
     Donor,
     Campaign,
     # Before BaceProperty -- BaceStudent holds a foreign key to it, and
-    # BaceRentPayment holds a foreign key to BaceStudent.
+    # the whole rent ledger below holds foreign keys to BaceStudent.
     BaceRentPayment,
+    BaceRentCharge,
+    BaceRentMonthClose,
+    BaceRentAdjustment,
     BaceStudent,
     BaceProperty,
     Festival,

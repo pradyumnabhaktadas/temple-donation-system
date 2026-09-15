@@ -12,11 +12,33 @@ from models import AdminUser
 from utils import HIGH_VALUE_PAN_THRESHOLD, format_inr, normalize_phone, to_ist, receipt_access_token, mask_pan
 
 
-def create_app(test_config=None):
+def create_app(test_config=None, serving=None):
     """test_config lets the test suite (see tests/conftest.py) point the app
     at an in-memory database and disable CSRF before db.init_app() /
     db.create_all() run, instead of only being able to override config
-    after the real database file has already been created."""
+    after the real database file has already been created.
+
+    serving=False is for processes that build an app only to get an
+    application context -- db_deploy.py running migrations as Render's
+    pre-deploy command, chiefly. Those never answer an HTTP request, so the
+    live-traffic guards below (Razorpay configured, rate limiting
+    installed) must not apply to them: enforcing those during pre-deploy
+    meant a database that was otherwise perfectly fine could not be
+    migrated at all until payment credentials happened to be set, which
+    breaks the exact bootstrap path render.yaml documents (create the
+    service, deploy, then add secrets).
+
+    Left as None, it reads the MIGRATIONS_ONLY environment variable
+    instead. That indirection is needed because this module creates an app
+    at import time (`app = create_app()` at the bottom -- gunicorn's
+    `app:app` entry point needs a real WSGI object there). So merely doing
+    `from app import create_app`, as db_deploy.py does, already runs one
+    default-argument create_app() before the caller gets a chance to pass
+    anything: setting MIGRATIONS_ONLY=1 before that import is the only way
+    to opt that first call out of the guards."""
+    if serving is None:
+        serving = os.environ.get("MIGRATIONS_ONLY", "").strip().lower() not in ("1", "true", "yes")
+
     app = Flask(__name__)
     app.config.from_object(Config)
     if test_config:
@@ -47,10 +69,18 @@ def create_app(test_config=None):
                 "before deploying -- sessions, CSRF tokens and receipt download "
                 "links are all signed with it."
             )
-        if not app.config["RAZORPAY_ENABLED"]:
-            raise RuntimeError("Razorpay credentials are required in production; refusing to enable demo payments.")
-        if not LIMITER_AVAILABLE:
-            raise RuntimeError("Flask-Limiter is required in production.")
+        # Only for a process that will actually serve donors -- see the
+        # `serving` argument in this function's docstring. A failed
+        # *deploy* is the right outcome for a web dyno that would come up
+        # offering demo payments or no rate limiting; it is the wrong
+        # outcome for a migration run, which touches neither.
+        if serving:
+            if not app.config["RAZORPAY_ENABLED"]:
+                raise RuntimeError(
+                    "Razorpay credentials are required in production; refusing to enable demo payments."
+                )
+            if not LIMITER_AVAILABLE:
+                raise RuntimeError("Flask-Limiter is required in production.")
 
     if app.config.get("IS_PRODUCTION"):
         # Render (and most PaaS hosts) puts a reverse proxy in front of the

@@ -41,6 +41,7 @@ weren't. This refuses to act and explains the two ways out. On a
 database holding donation records and issued 80G receipts, stopping is
 the right answer.
 """
+import os
 import sys
 
 
@@ -50,12 +51,22 @@ _CORE_TABLES = {"donors", "donations", "campaigns"}
 
 
 def main():
+    # Set before importing app: this process only needs an application
+    # context to run migrations against -- it never serves a request, so
+    # create_app()'s live-traffic guards (Razorpay configured,
+    # Flask-Limiter installed) would only stop a perfectly valid database
+    # from being migrated. It has to be an environment variable rather than
+    # just the create_app(serving=False) argument below, because importing
+    # app.py at all runs its own module-level `app = create_app()` first --
+    # see create_app()'s docstring.
+    os.environ["MIGRATIONS_ONLY"] = "1"
+
     from flask_migrate import stamp, upgrade
 
     from app import create_app
     from extensions import db
 
-    app = create_app()
+    app = create_app(serving=False)
     with app.app_context():
         tables = set(db.inspect(db.engine).get_table_names())
 
