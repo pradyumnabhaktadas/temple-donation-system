@@ -42,6 +42,7 @@ from flask import (
     send_file, current_app, flash, session, abort,
 )
 from flask_login import current_user
+from sqlalchemy import update as sa_update, or_ as sa_or_
 from werkzeug.exceptions import HTTPException
 
 from extensions import db, csrf, limiter
@@ -940,10 +941,39 @@ def _finalize_success(donation, send_notifications=True):
     try:
         campaign = donation.campaign
         receipt_number, fy = ReceiptCounter.next_receipt_number(donation.effective_is_80g, donation.donation_date)
-        donation.receipt_number = receipt_number
-        donation.financial_year = fy
-        donation.status = "success"
+        # A conditional UPDATE (not donation.receipt_number = ...; commit())
+        # deliberately duplicates the with_for_update() guard above rather
+        # than trusting it alone: on 2026-09-15, donation 15328 was
+        # finalized twice 23ms apart despite that lock, issuing two receipt
+        # numbers (500684, 500685) and silently overwriting the first with
+        # the second -- the exact "lost update" this function's docstring
+        # says the lock prevents. Root cause unconfirmed (every call site
+        # was re-checked and each looks correctly guarded on its own), so
+        # this makes the write itself atomic and self-checking instead of
+        # relying solely on the row lock being honoured end-to-end: if
+        # another transaction already flipped this donation to "success"
+        # between our lock and this statement, rowcount is 0 and the
+        # receipt_number just issued becomes an intentional gap (the same
+        # kind of gap ReceiptCounter's own docstring already tolerates for
+        # a losing concurrent caller) rather than a second write winning
+        # and burying the first one's number.
+        result = db.session.execute(
+            sa_update(Donation)
+            .where(
+                Donation.id == donation.id,
+                sa_or_(Donation.status != "success", Donation.receipt_number.is_(None)),
+            )
+            .values(receipt_number=receipt_number, financial_year=fy, status="success")
+        )
         db.session.commit()
+        if result.rowcount == 0:
+            current_app.logger.warning(
+                "_finalize_success: donation %s was already finalized by a concurrent call; "
+                "receipt %s issued by this call is now an unused gap in the sequence",
+                donation.id, receipt_number,
+            )
+            donation = Donation.query.filter_by(id=donation.id).one()
+            campaign = donation.campaign
     except Exception:
         db.session.rollback()
         current_app.logger.exception("Failed to issue receipt number for donation %s", donation.id)

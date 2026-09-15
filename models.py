@@ -994,9 +994,35 @@ class BaceRentPayment(db.Model):
 
     A student paying two months at once gets two rows; a partial payment
     just gets that lesser amount entered here and the tracker marks the
-    month Partial rather than Paid."""
+    month Partial rather than Paid.
+
+    Auto-created rows (source_donation_id set, recorded_by == "auto-match")
+    are the exception to "a person's say-so" above -- see bace_matching.py's
+    module docstring for every entry point that can create one without a
+    staff click. Exactly one of those may ever exist per donation -- unlike
+    the admin's "Allocate across students/months" screen (admin.py's
+    allocate_bace_contribution_rent), which deliberately creates several
+    BaceRentPayment rows sharing one source_donation_id
+    (recorded_by=<admin username>) when one contribution is split. The
+    partial unique index below is scoped to recorded_by == "auto-match"
+    specifically so it doesn't break that split-allocation feature -- it's
+    the hard backstop for exactly one incident (2026-09-15):
+    _finalize_success() finalized the same donation twice, 23ms apart, and
+    record_matched_donation()'s own idempotency check -- an unlocked
+    SELECT -- didn't catch the second call before it inserted a duplicate
+    auto-matched row. This constraint makes that structurally impossible
+    now, whatever caused the double finalization."""
 
     __tablename__ = "bace_rent_payments"
+    __table_args__ = (
+        db.Index(
+            "uq_bace_rent_payments_auto_match_source_donation_id",
+            "source_donation_id",
+            unique=True,
+            postgresql_where=db.text("recorded_by = 'auto-match'"),
+            sqlite_where=db.text("recorded_by = 'auto-match'"),
+        ),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey("bace_students.id"), nullable=False, index=True)

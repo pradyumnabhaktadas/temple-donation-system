@@ -25,6 +25,7 @@ from collections import defaultdict
 from flask import current_app
 from flask_login import current_user
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 
 from extensions import db
 from models import BaceStudent, BaceRentPayment, BaceRentMonthClose, AdminActivityLog
@@ -81,6 +82,18 @@ def record_matched_donation(donation, student=None):
     paid even if this runs later. recorded_by is the literal string
     "auto-match" (never an admin username) so the Payments Log always
     shows, at a glance, which rows nobody typed in by hand.
+
+    The filter_by(source_donation_id=...).first() check below is only the
+    fast path, not the real guarantee -- it's a plain SELECT with no lock,
+    so two near-simultaneous callers for the same donation (the online
+    finalize path racing an admin's "Record matched" click, or a genuine
+    double-finalization -- see the 2026-09-15 incident noted on
+    BaceRentPayment's docstring in models.py) can both see "not recorded
+    yet" before either has inserted. The real guarantee is the database's
+    own partial unique index on source_donation_id: db.session.flush()
+    below will raise IntegrityError if another transaction won the race
+    and already committed a row for this donation, and that's treated the
+    same as the fast-path check finding one -- a no-op, not an error.
     """
     if donation.status != "success" or not donation.bace_property_id:
         return None
@@ -112,8 +125,24 @@ def record_matched_donation(donation, student=None):
         reference=f"BACE Contribution {donation.receipt_number or ('#' + str(donation.id))}",
         source_donation_id=donation.id,
     )
-    db.session.add(payment)
-    db.session.flush()
+    # SAVEPOINT (begin_nested), not a plain flush: if the database's own
+    # unique index below catches a race the fast-path check above missed,
+    # only this one insert needs to unwind -- record_all_matched() calls
+    # this in a loop sharing one transaction across many donations, and a
+    # plain flush()'s IntegrityError would poison that whole transaction
+    # (Postgres refuses any further statement on it until a rollback),
+    # silently losing every other donation in the same batch too.
+    try:
+        with db.session.begin_nested():
+            db.session.add(payment)
+            db.session.flush()
+    except IntegrityError:
+        current_app.logger.info(
+            "record_matched_donation: donation %s was already recorded by a concurrent "
+            "call (unique index on source_donation_id) -- treating as a no-op",
+            donation.id,
+        )
+        return None
 
     # Same activity-log convention as admin.py's log_activity() (falls
     # back to "system" when there's no logged-in admin -- true for the

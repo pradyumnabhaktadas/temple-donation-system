@@ -631,3 +631,94 @@ class TestEditBeforeSavingFallback:
         }, follow_redirects=True)
 
         assert BaceRentPayment.query.filter_by(source_donation_id=donation.id).count() == 1
+
+
+class TestConcurrentDoubleRecordingIsBlocked:
+    """2026-09-15 incident: a donation got finalized twice, 23ms apart, and
+    record_matched_donation()'s own idempotency check -- a plain unlocked
+    SELECT -- didn't catch the second call before it inserted a duplicate
+    BaceRentPayment for the same donation. Fixed with a database-level
+    partial unique index on source_donation_id (see models.py /
+    migrations/versions/9a2f7c4e8b31_*) plus a nested-transaction retry in
+    bace_matching.record_matched_donation() so hitting that constraint is a
+    quiet no-op, not an unhandled IntegrityError.
+
+    These tests simulate the race directly (patch the fast-path check to
+    miss an already-recorded donation, the way two genuinely concurrent
+    requests would each see "not recorded yet") rather than relying on
+    real thread timing, which would make the test flaky."""
+
+    def test_a_missed_race_does_not_create_a_duplicate_payment(self, client, app):
+        prop_id = _property(app)
+        _add_student(client, prop_id, full_name="Race Condition", phone="9319880507")
+        donation = _insert_legacy_bace_donation(prop_id, full_name="Race Condition", phone="9319880507")
+
+        import bace_matching
+        from models import BaceStudent, BaceRentPayment
+
+        student = BaceStudent.query.filter_by(full_name="Race Condition").one()
+        first = bace_matching.record_matched_donation(donation, student=student)
+        from extensions import db
+        db.session.commit()
+        assert first is not None
+
+        # Simulate the fast-path SELECT losing the race: it reports "not
+        # recorded yet" even though the row from the call above is already
+        # committed -- exactly what two near-simultaneous real callers
+        # would each see before either had inserted.
+        with patch.object(bace_matching.BaceRentPayment.query, "filter_by") as mocked:
+            mocked.return_value.first.return_value = None
+            second = bace_matching.record_matched_donation(donation, student=student)
+
+        assert second is None
+        assert BaceRentPayment.query.filter_by(source_donation_id=donation.id).count() == 1
+
+    def test_the_database_itself_refuses_a_duplicate_source_donation_id(self, app):
+        """Defense in depth, independent of bace_matching.py's own retry
+        logic: the constraint exists at the schema level."""
+        from extensions import db
+        from models import BaceStudent, BaceRentPayment
+        from sqlalchemy.exc import IntegrityError
+
+        prop_id = _property(app)
+        student = BaceStudent(
+            full_name="Schema Level", phone="9111111111", bace_property_id=prop_id,
+            monthly_amount=3000, joined_month=datetime.date(2026, 9, 1),
+        )
+        db.session.add(student)
+        db.session.commit()
+
+        db.session.add(BaceRentPayment(
+            student_id=student.id, bace_property_id=prop_id, for_month=datetime.date(2026, 9, 1),
+            amount_paid=3000, date_paid=datetime.date(2026, 9, 15), source_donation_id=99999,
+            recorded_by="auto-match",
+        ))
+        db.session.commit()
+
+        db.session.add(BaceRentPayment(
+            student_id=student.id, bace_property_id=prop_id, for_month=datetime.date(2026, 9, 1),
+            amount_paid=3000, date_paid=datetime.date(2026, 9, 15), source_donation_id=99999,
+            recorded_by="auto-match",
+        ))
+        with pytest.raises(IntegrityError):
+            db.session.commit()
+        db.session.rollback()
+
+        assert BaceRentPayment.query.filter_by(source_donation_id=99999).count() == 1
+
+        # The admin's "Allocate across students/months" screen deliberately
+        # creates several rows sharing one source_donation_id -- those are
+        # recorded_by=<admin username>, never "auto-match", and must stay
+        # unaffected by this constraint.
+        db.session.add(BaceRentPayment(
+            student_id=student.id, bace_property_id=prop_id, for_month=datetime.date(2026, 10, 1),
+            amount_paid=1000, date_paid=datetime.date(2026, 9, 15), source_donation_id=99999,
+            recorded_by="testadmin",
+        ))
+        db.session.add(BaceRentPayment(
+            student_id=student.id, bace_property_id=prop_id, for_month=datetime.date(2026, 11, 1),
+            amount_paid=1000, date_paid=datetime.date(2026, 9, 15), source_donation_id=99999,
+            recorded_by="testadmin",
+        ))
+        db.session.commit()
+        assert BaceRentPayment.query.filter_by(source_donation_id=99999, recorded_by="testadmin").count() == 2
