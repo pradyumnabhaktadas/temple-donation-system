@@ -55,6 +55,11 @@
 </div>
 
 <form class="row g-2 mb-3">
+  <div class="col-md-4">
+    <label class="visually-hidden" for="bace-contribution-search">Search</label>
+    <input type="search" id="bace-contribution-search" name="q" class="form-control"
+           value="{{ q }}" placeholder="Search donor, phone, receipt or payment ID">
+  </div>
   <div class="col-auto">
     <select name="bace_property_id" class="form-select" onchange="this.form.submit()">
       <option value="">All BACE Properties</option>
@@ -80,7 +85,7 @@
   </div>
   <div class="col-auto">
     <button type="submit" class="btn btn-outline-secondary">Filter</button>
-    {% if bace_property_id or date_from or date_to or status != 'success' %}
+    {% if q or bace_property_id or date_from or date_to or status != 'success' %}
     <a href="{{ url_for('admin.bace_contributions') }}" class="btn btn-link btn-sm">Clear filters</a>
     {% endif %}
   </div>

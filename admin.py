@@ -5347,6 +5347,22 @@ def _apply_bace_contribution_filters(query):
     if bace_property_id:
         query = query.filter_by(bace_property_id=bace_property_id)
 
+    # Find a contribution by the information an administrator is most
+    # likely to receive in a call: donor name/phone, receipt number, or a
+    # Razorpay payment/order ID. Keeping this in the shared filter means
+    # the CSV export always matches the on-screen result.
+    q = (request.args.get("q") or "").strip()
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            Donation.donor.has(Donor.full_name.ilike(like))
+            | Donation.donor.has(Donor.phone.ilike(like))
+            | Donation.donor.has(Donor.email.ilike(like))
+            | Donation.receipt_number.ilike(like)
+            | Donation.razorpay_payment_id.ilike(like)
+            | Donation.razorpay_order_id.ilike(like)
+        )
+
     date_from_raw = request.args.get("date_from") or ""
     date_to_raw = request.args.get("date_to") or ""
     try:
@@ -5361,7 +5377,7 @@ def _apply_bace_contribution_filters(query):
 
     return query, {
         "status": status, "bace_property_id": bace_property_id,
-        "date_from": date_from_raw, "date_to": date_to_raw,
+        "q": q, "date_from": date_from_raw, "date_to": date_to_raw,
     }
 
 
@@ -5479,7 +5495,7 @@ def bace_contributions():
         return render_template(
             "admin/bace_contributions.html", campaign=None, properties=properties,
             donations=[], pagination=None, summary=[], status="success", bace_property_id=None,
-            date_from="", date_to="", matched_students={}, already_recorded={},
+            q="", date_from="", date_to="", matched_students={}, already_recorded={},
             recordable_month={}, edit_before_saving_links={}, add_to_roster_links={},
         )
 
@@ -5538,6 +5554,7 @@ def bace_contributions():
         page=page,
         bace_property_id=filters["bace_property_id"],
         status=filters["status"],
+        q=filters["q"],
         date_from=filters["date_from"],
         date_to=filters["date_to"],
     )

@@ -141,6 +141,18 @@ class TestAutoRecordOnDonation:
         assert "Recorded: Rs. 1234" in body
         assert "/record-rent-payment" not in body
 
+    def test_contribution_log_searches_donor_and_receipt(self, client, app):
+        prop_id = _property(app)
+        first = _insert_legacy_bace_donation(prop_id, full_name="Searchable Donor", phone="9319880507")
+        _insert_legacy_bace_donation(prop_id, full_name="Other Donor", phone="9319880508")
+
+        by_name = client.get("/admin/bace-contributions?q=Searchable")
+        assert "Searchable Donor" in by_name.get_data(as_text=True)
+        assert "Other Donor" not in by_name.get_data(as_text=True)
+
+        by_receipt = client.get(f"/admin/bace-contributions?q={first.receipt_number}")
+        assert "Searchable Donor" in by_receipt.get_data(as_text=True)
+
     def test_an_ambiguous_match_does_not_auto_record(self, client, app):
         """A wrong guess here would misattribute someone else's rent, so a
         donor whose phone matches two students is left unrecorded."""
