@@ -1,15 +1,23 @@
 {% extends "admin/base_admin.html" %}
-{% block title %}Correct BACE Payment{% endblock %}
+{% block title %}Correct or Reassign BACE Payment{% endblock %}
 {% block content %}
 <div class="admin-page-header mb-3">
-  <div><div class="eyebrow">Audit-preserving correction</div><h3>Correct BACE payment</h3></div>
+  <div><div class="eyebrow">Audit-preserving correction</div><h3>Correct or reassign BACE payment</h3></div>
   <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.bace_payments') }}">Back to Payments Log</a>
 </div>
 <div class="card card-body shadow-sm" style="max-width:560px">
-  <p class="text-muted small">Correcting a payment is logged in the activity history. Closed months must be reopened first.</p>
+  <p class="text-muted small">Correcting or moving a payment is logged in the activity history. Choose the resident whose rent this payment actually covers; the BACE property follows that resident automatically. Closed months must be reopened first.</p>
   <form method="post" class="row g-3">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <div class="col-12"><strong>{{ payment.student.full_name if payment.student else 'Student' }}</strong></div>
+    <div class="col-12">
+      <label class="form-label">Assign payment to student</label>
+      <select class="form-select" name="student_id" required>
+        {% for student in students %}
+        <option value="{{ student.id }}" {% if student.id == payment.student_id %}selected{% endif %}>{{ student.full_name }} — {{ student.bace_property.name if student.bace_property else '?' }}{% if not student.is_active %} (Inactive){% endif %}</option>
+        {% endfor %}
+      </select>
+      <div class="form-text">Use this for a parent/sibling payment or when money was originally assigned to the wrong resident or BACE property.</div>
+    </div>
     <div class="col-md-6"><label class="form-label">For month</label><input class="form-control" type="month" name="for_month" value="{{ payment.for_month.strftime('%Y-%m') }}" required></div>
     <div class="col-md-6"><label class="form-label">Amount paid (Rs)</label><input class="form-control" type="number" name="amount_paid" step="1" min="1" value="{{ payment.amount_paid }}" required></div>
     <div class="col-md-6"><label class="form-label">Date paid</label><input class="form-control" type="date" name="date_paid" value="{{ payment.date_paid.isoformat() }}" required></div>

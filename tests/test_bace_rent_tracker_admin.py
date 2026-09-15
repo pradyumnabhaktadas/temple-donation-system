@@ -298,6 +298,35 @@ class TestPaymentsPage:
 
         assert BaceRentPayment.query.count() == 0
 
+    def test_payment_correction_can_reassign_student_and_property(self, client, app):
+        first_property = _property(app, "Nandgaon BACE")
+        second_property = _property(app, "Yogapitha BACE")
+        _add_student(client, first_property, full_name="Original Student", phone="9111111101")
+        _add_student(client, second_property, full_name="Correct Student", phone="9111111102")
+        from models import AdminActivityLog, BaceRentPayment, BaceStudent
+        original = BaceStudent.query.filter_by(full_name="Original Student").one()
+        corrected = BaceStudent.query.filter_by(full_name="Correct Student").one()
+        client.post("/admin/bace-payments", data={
+            "student_id": str(original.id), "for_month": "2026-09", "amount_paid": "6000",
+            "date_paid": "2026-09-15", "mode": "Online (givetokrishna.com)", "reference": "Shared-family-payment",
+        })
+        payment = BaceRentPayment.query.one()
+
+        edit_page = client.get(f"/admin/bace-payments/{payment.id}/edit")
+        assert "Assign payment to student" in edit_page.get_data(as_text=True)
+        response = client.post(f"/admin/bace-payments/{payment.id}/edit", data={
+            "student_id": str(corrected.id), "for_month": "2026-10", "amount_paid": "6000",
+            "date_paid": "2026-09-15", "mode": "Online (givetokrishna.com)", "reference": "Shared-family-payment",
+        }, follow_redirects=True)
+
+        payment = BaceRentPayment.query.one()
+        assert payment.student_id == corrected.id
+        assert payment.bace_property_id == second_property
+        assert payment.for_month == datetime.date(2026, 10, 1)
+        activity = AdminActivityLog.query.filter_by(action="bace_payment_edit").order_by(AdminActivityLog.id.desc()).first()
+        assert "Original Student" in activity.details and "Correct Student" in activity.details
+        assert "Payment corrected" in response.get_data(as_text=True)
+
     def test_same_reference_cannot_be_recorded_twice(self, client, app):
         prop_id = _property(app)
         _add_student(client, prop_id)

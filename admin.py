@@ -4794,9 +4794,21 @@ def bace_payment_delete(payment_id):
 @login_required
 @admin_role_required
 def bace_payment_edit(payment_id):
-    """Correct a genuine entry mistake without deleting its audit trail."""
+    """Correct or reassign a payment without deleting its audit trail.
+
+    A payer's name/phone can belong to a parent or sibling, not the resident
+    whose rent it covers.  The payment is therefore allowed to move to a
+    different roster student (and consequently a different BACE property),
+    while retaining the same payment row, source donation link and activity
+    history.
+    """
     payment = BaceRentPayment.query.get_or_404(payment_id)
     if request.method == "POST":
+        student_id, student_error = _validated_id_from_form(request.form, "student_id", BaceStudent, "student")
+        if student_error or not student_id:
+            flash(student_error or "Choose the student this payment should be assigned to.")
+            return redirect(url_for("admin.bace_payment_edit", payment_id=payment.id))
+        student = BaceStudent.query.get(student_id)
         for_month, error = _parse_month(request.form.get("for_month"), "Month")
         amount_paid, amount_error = _parse_positive_amount(request.form.get("amount_paid"), "Amount")
         if error or amount_error:
@@ -4819,14 +4831,21 @@ def bace_payment_edit(payment_id):
         if reference:
             duplicate = BaceRentPayment.query.filter(
                 BaceRentPayment.id != payment.id,
-                BaceRentPayment.student_id == payment.student_id,
+                BaceRentPayment.student_id == student.id,
                 BaceRentPayment.for_month == for_month,
                 BaceRentPayment.reference == reference,
             ).first()
             if duplicate:
                 flash("That reference is already recorded for this student and month.")
                 return redirect(url_for("admin.bace_payment_edit", payment_id=payment.id))
-        before = f"{payment.for_month:%b %Y}, Rs. {payment.amount_paid:,.2f}, {payment.reference or 'no reference'}"
+        before = (
+            f"{payment.student.full_name if payment.student else '(deleted student)'}, "
+            f"{payment.bace_property.name if payment.bace_property else '(no property)'}, "
+            f"{payment.for_month:%b %Y}, Rs. {payment.amount_paid:,.2f}, "
+            f"{payment.reference or 'no reference'}"
+        )
+        payment.student_id = student.id
+        payment.bace_property_id = student.bace_property_id
         payment.for_month = for_month
         payment.amount_paid = amount_paid
         payment.date_paid = date_paid
@@ -4834,14 +4853,19 @@ def bace_payment_edit(payment_id):
         payment.reference = reference
         log_activity(
             "bace_payment_edit", "bace_rent_payment", payment.id,
-            f"Corrected payment for '{payment.student.full_name}': {before} -> "
+            f"Corrected payment: {before} -> {student.full_name}, "
+            f"{student.bace_property.name if student.bace_property else '(no property)'}, "
             f"{for_month:%b %Y}, Rs. {amount_paid:,.2f}, {reference or 'no reference'}",
         )
         db.session.commit()
         flash("Payment corrected. The tracker has been recalculated.")
         return redirect(url_for("admin.bace_payments"))
+    students = BaceStudent.query.join(BaceProperty).order_by(
+        BaceProperty.name, BaceStudent.status, BaceStudent.full_name,
+    ).all()
     return render_template(
         "admin/bace_payment_edit.html", payment=payment, payment_modes=BACE_PAYMENT_MODES,
+        students=students,
     )
 
 
