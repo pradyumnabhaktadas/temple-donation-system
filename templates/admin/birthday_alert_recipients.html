@@ -1,0 +1,30 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Birthday Alert Recipients{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h3 class="mb-0">🎂 Birthday Alert Recipients</h3>
+  <form method="post" action="{{ url_for('admin.send_birthday_alert_now') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn btn-gold btn-sm" data-confirm="Send today's birthday alert to every active recipient now? This sends real email and WhatsApp messages where configured.">Send Today's Alert</button>
+  </form>
+</div>
+<p class="text-muted">
+  At 3:30 AM IST each day, active contacts receive the names of donors whose own birthday is that day. No message is sent when there are no birthdays. These are administrator reminders only; donors are never messaged by this feature.
+</p>
+<div class="alert alert-info small">
+  Email uses the existing SMTP setup. WhatsApp becomes active after Airtel approves a dedicated birthday template and <code>WHATSAPP_BIRTHDAY_ALERT_TEMPLATE_ID</code> is added in Render.
+</div>
+<div class="row">
+  <div class="col-md-5"><div class="card card-body shadow-sm mb-3 p-4">
+    <h6 class="mb-3">Add Recipient</h6>
+    <form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="mb-2"><label class="form-label" for="contact_type">Send via</label><select class="form-select" name="contact_type" id="contact_type"><option value="email">Email</option><option value="whatsapp">WhatsApp</option></select></div>
+      <div class="mb-2"><label class="form-label" for="value">Email address or mobile number</label><input class="form-control" type="text" name="value" id="value" placeholder="treasurer@example.com or 9876543210" required></div>
+      <button class="btn btn-gold btn-sm">Add</button>
+    </form>
+  </div></div>
+  <div class="col-md-7">
+  {% for r in recipients %}<div class="card card-body shadow-sm mb-3 p-3"><div class="d-flex justify-content-between align-items-center gap-2"><div><div class="fw-bold">{{ r.value }}</div><div class="text-muted small">{{ 'Email' if r.contact_type == 'email' else 'WhatsApp' }} · {% if r.is_active %}<span class="badge bg-success">Active</span>{% else %}<span class="badge bg-secondary">Inactive</span>{% endif %}</div></div><div class="d-flex gap-2"><form method="post" action="{{ url_for('admin.toggle_birthday_alert_recipient', recipient_id=r.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-secondary">{{ 'Deactivate' if r.is_active else 'Activate' }}</button></form><form method="post" action="{{ url_for('admin.birthday_alert_recipient_delete', recipient_id=r.id) }}" data-confirm="Remove '{{ r.value }}' from birthday alerts?"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-danger">Delete</button></form></div></div></div>{% else %}<p class="text-muted">No recipients yet — add an email address or WhatsApp number.</p>{% endfor %}
+  </div>
+</div>
+{% endblock %}

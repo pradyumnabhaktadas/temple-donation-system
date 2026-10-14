@@ -14,6 +14,7 @@ uses only Python's built-in smtplib/email modules.
 """
 import smtplib
 import ssl
+from html import escape
 from email.message import EmailMessage
 
 from flask import current_app
@@ -256,6 +257,48 @@ def send_daily_report_email(cfg, to_addresses, report_data, org_name):
         return True, None
     except Exception as exc:
         current_app.logger.exception("Failed to email daily report to %s", to_addresses)
+        return False, str(exc)
+
+
+def send_birthday_alert_email(cfg, to_addresses, birthday_data, org_name):
+    """BCC the daily donor-birthday list to admin recipients, never donors."""
+    if not to_addresses or not cfg.get("SMTP_HOST"):
+        return False, None
+    try:
+        alert_date = birthday_data["alert_date"]
+        names = [d.full_name or "Unnamed donor" for d in birthday_data["donors"]]
+        msg = EmailMessage()
+        msg["Subject"] = f"Birthday Reminder - {alert_date.strftime('%d %b %Y')}"
+        msg["From"] = _from_header(cfg)
+        msg["To"] = _from_header(cfg) or to_addresses[0]
+        msg["Bcc"] = ", ".join(to_addresses)
+        lines = "\n".join(f"• {name}" for name in names)
+        msg.set_content(
+            f"Hare Krishna,\n\nToday ({alert_date.strftime('%d %B %Y')}) is the birthday of:\n{lines}\n\n"
+            f"Please reach out personally on behalf of {org_name}.\n\nHare Krishna"
+        )
+        # A donor's name is user-entered data; escape it before including it
+        # in the HTML alternative (the plain-text body above needs no such
+        # treatment).
+        rows = "".join(f"<li>{escape(name)}</li>" for name in names)
+        msg.add_alternative(
+            f"<p>Hare Krishna,</p><p>Today, <strong>{alert_date.strftime('%d %B %Y')}</strong>, "
+            f"is the birthday of:</p><ul>{rows}</ul><p>Please reach out personally on behalf of {org_name}.</p>"
+            "<p>Hare Krishna</p>", subtype="html"
+        )
+        def _send():
+            with smtplib.SMTP(cfg["SMTP_HOST"], int(cfg.get("SMTP_PORT", 587)), timeout=30) as server:
+                if cfg.get("SMTP_USE_TLS", True):
+                    server.starttls(context=ssl.create_default_context())
+                if cfg.get("SMTP_USERNAME"):
+                    server.login(cfg.get("SMTP_USERNAME"), cfg.get("SMTP_PASSWORD"))
+                server.send_message(msg)
+        retry(_send, on_retry=lambda attempt, exc: current_app.logger.warning(
+            "Birthday alert email attempt %d failed, retrying: %s", attempt, exc
+        ))
+        return True, None
+    except Exception as exc:
+        current_app.logger.exception("Failed to email birthday alert to %s", to_addresses)
         return False, str(exc)
 
 

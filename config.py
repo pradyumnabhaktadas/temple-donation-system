@@ -268,6 +268,11 @@ class Config:
     # that one is the receipt template (3 donor-facing variables + a PDF
     # attachment), which doesn't fit a 5-number internal report.
     WHATSAPP_REPORT_TEMPLATE_ID = os.environ.get("WHATSAPP_REPORT_TEMPLATE_ID", "01m16jfj9pg8zs0rxwk2p54g8j")
+    # A separate admin-only birthday reminder template. Keep blank until
+    # Airtel has approved it; unlike the receipt template it must not be
+    # repurposed because WhatsApp only permits approved template wording.
+    # Variable order: organisation, date, birthday count, donor names.
+    WHATSAPP_BIRTHDAY_ALERT_TEMPLATE_ID = os.environ.get("WHATSAPP_BIRTHDAY_ALERT_TEMPLATE_ID", "")
     # Approved donor-facing cancellation notice. Its Airtel variable order
     # is donor name, amount, receipt number, organisation name, reason.
     # Template IDs are not credentials; the Airtel username/password above

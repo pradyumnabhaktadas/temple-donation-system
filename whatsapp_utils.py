@@ -248,6 +248,41 @@ def send_daily_report_whatsapp(cfg, phone, report_data, org_name):
         return False, str(exc)
 
 
+def send_birthday_alert_whatsapp(cfg, phone, birthday_data, org_name):
+    """Send the approved admin-only daily birthday template through Airtel.
+
+    Its variables must be approved in this order: organisation, date, count,
+    names. Until that template ID is configured this intentionally remains a
+    harmless no-op, while email alerts continue to work.
+    """
+    username = cfg.get("WHATSAPP_AIRTEL_USERNAME")
+    password = cfg.get("WHATSAPP_AIRTEL_PASSWORD")
+    from_number = cfg.get("WHATSAPP_FROM_NUMBER")
+    template_id = cfg.get("WHATSAPP_BIRTHDAY_ALERT_TEMPLATE_ID")
+    if not phone or not (username and password and from_number and template_id):
+        return False, None
+    try:
+        names = [d.full_name or "Unnamed donor" for d in birthday_data["donors"]]
+        shown = ", ".join(names[:20])
+        if len(names) > 20:
+            shown += f" +{len(names) - 20} more"
+        payload = {"templateId": template_id, "to": _to_e164(phone), "from": _to_e164(from_number),
+                   "message": {"variables": [org_name[:60], birthday_data["alert_date"].strftime("%d-%b-%Y"),
+                                             str(len(names)), shown[:450]]}}
+        def _send():
+            resp = requests.post(cfg.get("WHATSAPP_AIRTEL_BASE_URL") or DEFAULT_AIRTEL_BASE_URL,
+                                 headers=_headers(cfg), auth=(username, password), json=payload, timeout=15)
+            if not resp.ok:
+                raise RuntimeError(f"{resp.status_code} {resp.text[:500]}")
+        retry(_send, on_retry=lambda attempt, exc: current_app.logger.warning(
+            "Birthday alert WhatsApp attempt %d to %s failed, retrying: %s", attempt, phone, exc
+        ))
+        return True, None
+    except Exception as exc:
+        current_app.logger.exception("Failed to send birthday alert WhatsApp to %s", phone)
+        return False, str(exc)
+
+
 def send_cancellation_whatsapp(donation, donor, org_cfg):
     """Send the approved cancellation template through Airtel IQ.
 

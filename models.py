@@ -276,6 +276,30 @@ class DailyReportRecipient(db.Model):
         return f"<DailyReportRecipient {self.contact_type}:{self.value} ({self.frequency})>"
 
 
+class BirthdayAlertRecipient(db.Model):
+    """An administrator contact who receives the daily donor-birthday list.
+
+    This deliberately has its own list rather than reusing collection-report
+    recipients: birthday reminders are relationship follow-up, and an office
+    may reasonably send them to a different group of devotees.
+    """
+
+    __tablename__ = "birthday_alert_recipients"
+
+    id = db.Column(db.Integer, primary_key=True)
+    contact_type = db.Column(db.String(20), nullable=False)  # "email" / "whatsapp"
+    value = db.Column(db.String(150), nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("contact_type", "value", name="uq_birthday_alert_recipient_type_value"),
+    )
+
+    def __repr__(self):
+        return f"<BirthdayAlertRecipient {self.contact_type}:{self.value}>"
+
+
 class Festival(db.Model):
     """A specific festival/occasion -- e.g. "Janmashtami 2026",
     "Radhashtami". Donations against the "Festivals" campaign record which

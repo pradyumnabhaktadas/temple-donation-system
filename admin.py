@@ -23,7 +23,7 @@ from extensions import db, limiter
 from models import (
     Camp,
     Donor, Campaign, Donation, AdminUser, ReceiptCounter, BaceProperty, Festival, SevaType,
-    LiveToGivePurpose, Preacher, AssociatedWith, AdminActivityLog, DailyReportRecipient,
+    LiveToGivePurpose, Preacher, AssociatedWith, AdminActivityLog, DailyReportRecipient, BirthdayAlertRecipient,
     BaceStudent, BaceRentCharge, BaceRentPayment, BaceRentAdjustment, BaceRentMonthClose, BACE_PAYMENT_MODES,
     REPORT_FREQUENCIES,
     DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES, DONATION_FREQUENCY_LABELS,
@@ -1231,6 +1231,195 @@ def donors():
         donor_type=donor_type, preacher_id=preacher_id, donation_frequency=donation_frequency,
         preachers=preachers_list, donor_types=DONOR_TYPES, donor_type_labels=DONOR_TYPE_LABELS,
         donation_frequencies=DONATION_FREQUENCIES, donation_frequency_labels=DONATION_FREQUENCY_LABELS,
+    )
+
+
+DONOR_GIVING_PER_PAGE = 50
+_DONOR_GIVING_SORT_KEYS = ("total", "name", "count", "largest") + tuple(f"m{n}" for n in range(1, 13))
+
+
+class _ListPagination:
+    """Just enough of Flask-SQLAlchemy's Pagination for _pagination.html,
+    for a list that was built and sorted in Python (a pivot can't be paged
+    by the database -- the sort order depends on the aggregated totals)."""
+
+    def __init__(self, total, page, per_page):
+        self.total = total
+        self.per_page = per_page
+        self.pages = max(1, -(-total // per_page))
+        self.page = min(max(page, 1), self.pages)
+        self.has_prev = self.page > 1
+        self.has_next = self.page < self.pages
+        self.prev_num = self.page - 1 if self.has_prev else None
+        self.next_num = self.page + 1 if self.has_next else None
+
+
+def _parse_money_arg(raw):
+    raw = (raw or "").replace(",", "").strip()
+    if not raw:
+        return None
+    try:
+        value = Decimal(raw)
+    except Exception:
+        return None
+    return value if value >= 0 else None
+
+
+def _donor_giving_report():
+    """Everything behind the Donor Giving page and its CSV export, so the
+    two can never disagree about what a filter means.
+
+    One row per donor who gave in the chosen year, one column per month,
+    plus the year's total. Only status == "success" counts (pending, failed
+    and cancelled money was never received). Months are IST calendar
+    months: donation_date is stored UTC-naive, and a donation at 11 PM IST
+    on the 31st is already the 1st in UTC -- bucketing the raw value would
+    push it into the wrong month (and a 31 March night donation into the
+    wrong financial year). The year range is therefore converted to UTC
+    bounds with ist_day_bounds_utc(), and each row's own month is read from
+    to_ist(donation_date).
+
+    "Year" is the Indian financial year (Apr-Mar, the one receipts and
+    Form 10BD use) by default; basis=cy switches to the calendar year.
+    """
+    args = request.args
+    today = now_ist().date()
+    basis = "cy" if args.get("basis") == "cy" else "fy"
+    default_year = today.year if basis == "cy" or today.month >= 4 else today.year - 1
+    year = args.get("year", type=int) or default_year
+    year = min(max(year, 2000), today.year + 1)
+
+    first_month = 1 if basis == "cy" else 4
+    start_day = datetime.date(year, first_month, 1)
+    end_day = datetime.date(year + 1, first_month, 1)
+    start_utc, _ = ist_day_bounds_utc(start_day)
+    end_utc, _ = ist_day_bounds_utc(end_day)
+    # (calendar month number, label) in column order.
+    month_cols = []
+    for i in range(12):
+        m = (first_month - 1 + i) % 12 + 1
+        y = year + ((first_month - 1 + i) // 12)
+        month_cols.append((m, datetime.date(y, m, 1).strftime("%b '%y")))
+
+    q = args.get("q", "").strip()
+    campaign_id = args.get("campaign_id", type=int)
+    sort = args.get("sort", "total_desc")
+    key, _sep, order = sort.partition("_")
+    if key not in _DONOR_GIVING_SORT_KEYS or order not in ("asc", "desc"):
+        key, order, sort = "total", "desc", "total_desc"
+    min_total = _parse_money_arg(args.get("min_total"))
+    max_total = _parse_money_arg(args.get("max_total"))
+
+    query = (
+        db.session.query(Donor.id, Donor.full_name, Donor.phone, Donation.amount, Donation.donation_date)
+        .join(Donation, Donation.donor_id == Donor.id)
+        .filter(Donation.status == "success", Donation.donation_date >= start_utc,
+                Donation.donation_date < end_utc)
+    )
+    if campaign_id:
+        query = query.filter(Donation.campaign_id == campaign_id)
+    if q:
+        like = f"%{q}%"
+        query = query.filter(Donor.full_name.ilike(like) | Donor.phone.ilike(like) | Donor.email.ilike(like))
+
+    donors_by_id = {}
+    for donor_id, name, phone, amount, donated_at in query:
+        row = donors_by_id.get(donor_id)
+        if row is None:
+            row = donors_by_id[donor_id] = {
+                "id": donor_id, "name": name, "phone": phone,
+                "months": {m: Decimal(0) for m, _label in month_cols},
+                "total": Decimal(0), "count": 0, "largest": Decimal(0),
+            }
+        amount = Decimal(amount)
+        row["months"][to_ist(donated_at).month] += amount
+        row["total"] += amount
+        row["count"] += 1
+        row["largest"] = max(row["largest"], amount)
+
+    rows = list(donors_by_id.values())
+    if min_total is not None:
+        rows = [r for r in rows if r["total"] >= min_total]
+    if max_total is not None:
+        rows = [r for r in rows if r["total"] <= max_total]
+
+    def sort_value(r):
+        if key == "name":
+            return (r["name"] or "").lower()
+        if key.startswith("m"):
+            return r["months"][int(key[1:])]
+        return r[key]
+
+    # Name as the tiebreak so equal totals come out in a stable, predictable order.
+    rows.sort(key=lambda r: ((r["name"] or "").lower(), r["id"]))
+    rows.sort(key=sort_value, reverse=(order == "desc"))
+
+    totals = {
+        "months": {m: sum((r["months"][m] for r in rows), Decimal(0)) for m, _label in month_cols},
+        "total": sum((r["total"] for r in rows), Decimal(0)),
+        "count": sum(r["count"] for r in rows),
+        "donors": len(rows),
+    }
+    return {
+        "rows": rows, "totals": totals, "month_cols": month_cols, "basis": basis, "year": year,
+        "year_label": f"{year}-{str(year + 1)[-2:]}" if basis == "fy" else str(year),
+        "q": q, "campaign_id": campaign_id, "sort": sort, "sort_key": key, "sort_order": order,
+        "min_total": args.get("min_total", "").strip(), "max_total": args.get("max_total", "").strip(),
+        "this_year": default_year,
+    }
+
+
+@bp.route("/donor-giving")
+@login_required
+def donor_giving():
+    """Donor-wise monthly giving: a row per donor, a column per month, and
+    the year's total at the end -- filterable and sortable. See
+    _donor_giving_report()."""
+    report = _donor_giving_report()
+    page = request.args.get("page", 1, type=int) or 1
+    pagination = _ListPagination(len(report["rows"]), page, DONOR_GIVING_PER_PAGE)
+    start = (pagination.page - 1) * pagination.per_page
+    campaigns = Campaign.query.order_by(Campaign.name).all()
+    first_donation = db.session.query(func.min(Donation.donation_date)).filter(
+        Donation.status == "success"
+    ).scalar()
+    first_year = to_ist(first_donation).year if first_donation else report["this_year"]
+    years = list(range(report["this_year"], min(first_year, report["this_year"]) - 1, -1))
+    if report["year"] not in years:
+        years.append(report["year"])
+        years.sort(reverse=True)
+    return render_template(
+        "admin/donor_giving.html", report=report, rows=report["rows"][start:start + pagination.per_page],
+        pagination=pagination, campaigns=campaigns, years=years,
+    )
+
+
+@bp.route("/donor-giving/export")
+@login_required
+def export_donor_giving():
+    """CSV of the whole filtered/sorted result (not just the page on screen)."""
+    report = _donor_giving_report()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        ["Donor", "Phone"] + [label for _m, label in report["month_cols"]]
+        + [f"Total {report['year_label']} (Rs)", "Donations", "Largest Donation (Rs)"]
+    )
+    for r in report["rows"]:
+        writer.writerow(csv_safe_row(
+            [r["name"], r["phone"] or ""]
+            + [float(r["months"][m]) for m, _label in report["month_cols"]]
+            + [float(r["total"]), r["count"], float(r["largest"])]
+        ))
+    t = report["totals"]
+    writer.writerow(csv_safe_row(
+        ["TOTAL", ""] + [float(t["months"][m]) for m, _label in report["month_cols"]]
+        + [float(t["total"]), t["count"], ""]
+    ))
+    basis = "FY" if report["basis"] == "fy" else "CY"
+    return Response(
+        output.getvalue(), mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment;filename=Donor_Giving_{basis}_{report['year_label']}.csv"},
     )
 
 
@@ -5496,6 +5685,91 @@ def send_daily_report_now():
 
     flash("Daily report send triggered -- check Activity Log in a few seconds for the result.")
     return redirect(url_for("admin.daily_report_recipients"))
+
+
+@bp.route("/birthday-alert-recipients", methods=["GET", "POST"])
+@login_required
+@admin_role_required
+def birthday_alert_recipients():
+    """Manage the contacts who receive the daily donor birthday reminder."""
+    if request.method == "POST":
+        contact_type = request.form.get("contact_type", "").strip()
+        value = request.form.get("value", "").strip()
+        if contact_type not in ("email", "whatsapp"):
+            flash("Choose a valid contact type.")
+            return redirect(url_for("admin.birthday_alert_recipients"))
+        if contact_type == "email":
+            if "@" not in value or "." not in value.split("@")[-1]:
+                flash(f"'{value}' doesn't look like a valid email address.")
+                return redirect(url_for("admin.birthday_alert_recipients"))
+        else:
+            if not is_valid_phone(value):
+                flash("Use a valid 10-digit Indian mobile number, or + and country code for a foreign number.")
+                return redirect(url_for("admin.birthday_alert_recipients"))
+            value = normalize_phone(value)
+        if BirthdayAlertRecipient.query.filter_by(contact_type=contact_type, value=value).first():
+            flash(f"'{value}' is already on the {contact_type} list.")
+            return redirect(url_for("admin.birthday_alert_recipients"))
+        db.session.add(BirthdayAlertRecipient(contact_type=contact_type, value=value))
+        log_activity("birthday_alert_recipient_add", target_type="birthday_alert_recipient", details=f"{contact_type}:{value}")
+        db.session.commit()
+        flash(f"Added {value} to the birthday alert {contact_type} list.")
+        return redirect(url_for("admin.birthday_alert_recipients"))
+
+    recipients = BirthdayAlertRecipient.query.order_by(
+        BirthdayAlertRecipient.contact_type, BirthdayAlertRecipient.value
+    ).all()
+    return render_template("admin/birthday_alert_recipients.html", recipients=recipients)
+
+
+@bp.route("/birthday-alert-recipients/<int:recipient_id>/toggle", methods=["POST"])
+@login_required
+@admin_role_required
+def toggle_birthday_alert_recipient(recipient_id):
+    recipient = BirthdayAlertRecipient.query.get_or_404(recipient_id)
+    recipient.is_active = not recipient.is_active
+    log_activity("birthday_alert_recipient_toggle", target_type="birthday_alert_recipient", target_id=recipient.id,
+                 details=f"{recipient.contact_type}:{recipient.value} active={recipient.is_active}")
+    db.session.commit()
+    return redirect(url_for("admin.birthday_alert_recipients"))
+
+
+@bp.route("/birthday-alert-recipients/<int:recipient_id>/delete", methods=["POST"])
+@login_required
+@admin_role_required
+def birthday_alert_recipient_delete(recipient_id):
+    recipient = BirthdayAlertRecipient.query.get_or_404(recipient_id)
+    log_activity("birthday_alert_recipient_delete", target_type="birthday_alert_recipient", target_id=recipient.id,
+                 details=f"{recipient.contact_type}:{recipient.value}")
+    db.session.delete(recipient)
+    db.session.commit()
+    flash(f"Removed {recipient.value} from the birthday alert {recipient.contact_type} list.")
+    return redirect(url_for("admin.birthday_alert_recipients"))
+
+
+def _send_birthday_alert_now_background(app):
+    with app.app_context():
+        try:
+            from birthday_alert_utils import send_birthday_alert
+            send_birthday_alert(app, force=True)
+        except Exception:
+            app.logger.exception("Manually triggered birthday alert failed")
+
+
+@bp.route("/birthday-alert-recipients/send-now", methods=["POST"])
+@login_required
+@admin_role_required
+def send_birthday_alert_now():
+    """Send today's real birthday reminder now, for a safe end-to-end check."""
+    log_activity("birthday_alert_manual_trigger", target_type="birthday_alert")
+    db.session.commit()
+    app = current_app._get_current_object()
+    if app.config.get("TESTING"):
+        _send_birthday_alert_now_background(app)
+    else:
+        threading.Thread(target=_send_birthday_alert_now_background, args=(app,), daemon=True).start()
+    flash("Birthday alert triggered -- check Activity Log in a few seconds for the result.")
+    return redirect(url_for("admin.birthday_alert_recipients"))
 
 
 def _bace_campaign_or_none():

@@ -87,6 +87,31 @@ class TestBackupContents:
             names = set(zf.namelist())
         assert not any("admin" in n or "otp" in n for n in names)
 
+    def test_backup_query_never_loads_excluded_receipt_blobs(self, app, client):
+        """A receipt PDF can be much larger than every CSV combined.
+
+        The scheduled backup must not pull it into the Cron Job only to
+        omit it from the archive -- that was the source of Render's 512 MB
+        out-of-memory failures.
+        """
+        from extensions import db
+        from models import Donation
+        login(client)
+        _seed_donation(client)
+        donation = Donation.query.one()
+        donation.receipt_pdf = b"x" * (2 * 1024 * 1024)
+        donation.razorpay_raw_payload = b"y" * (512 * 1024)
+        db.session.commit()
+
+        with zipfile.ZipFile(io.BytesIO(_take_backup(client))) as zf:
+            donation_csv = zf.read("donations.csv")
+            info = zf.getinfo("donations.csv")
+
+        assert b"receipt_pdf" not in donation_csv.splitlines()[0]
+        assert b"razorpay_raw_payload" not in donation_csv.splitlines()[0]
+        # The uncompressed CSV is tiny despite a 2.5 MB donation row.
+        assert info.file_size < 20_000
+
 
 class TestRestorePreview:
     def test_preview_writes_nothing(self, app, client):

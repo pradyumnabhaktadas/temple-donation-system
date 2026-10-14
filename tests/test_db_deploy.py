@@ -189,35 +189,26 @@ class TestExistingDatabase:
             # class of problem as associated_with_id above, one table
             # further out.
             "            batch_op.drop_column('bace_student_id')\n"
+            # Every table that did not exist at the baseline revision is
+            # dropped, found by *subtraction* from a fixed list of the
+            # baseline's own tables -- not by naming each newer table.
+            # This used to be a hand-maintained DROP TABLE per migration,
+            # and every new-table migration silently broke three tests
+            # here ("table X already exists": create_all() had already
+            # built it from the current models, so the migration's
+            # create_table collided) until somebody remembered to add a
+            # line. With the baseline set below, a new table is handled
+            # automatically; only a new *column or index on an existing
+            # baseline table* still needs stripping by name, above.
+            "    BASELINE_TABLES = {'admin_activity_logs', 'admin_users', 'bace_properties',\n"
+            "        'campaigns', 'donations', 'donor_login_otps', 'donors', 'festivals',\n"
+            "        'live_to_give_purposes', 'preachers', 'receipt_counters', 'seva_types',\n"
+            "        'alembic_version'}\n"
             "    with db.engine.begin() as conn:\n"
-            "        conn.execute(sa.text('DROP TABLE camps'))\n"
-            "        conn.execute(sa.text('DROP TABLE associated_withs'))\n"
-            "        # daily_report_recipients (f3a8c1d5e720) is newer than the\n"
-            "        # b2e91a7c4d05 baseline too -- same reasoning as camps/\n"
-            "        # associated_withs above, drop it so the forward migration's\n"
-            "        # own create_table doesn't collide with one create_all()\n"
-            "        # already built.\n"
-            "        conn.execute(sa.text('DROP TABLE daily_report_recipients'))\n"
-            "        # zoho_forms (e4c72a9b8d13) -- newest post-baseline table,\n"
-            "        # same reasoning: create_all() above already built it from the\n"
-            "        # current models, so the forward migration's create_table would\n"
-            "        # collide with it.\n"
-            "        conn.execute(sa.text('DROP TABLE zoho_forms'))\n"
-            "        # bace_rent_payments / bace_students (d4b81e6c3f92) -- same\n"
-            "        # reasoning again: create_all() above already built these from\n"
-            "        # the current models, so the forward migration's create_table\n"
-            "        # would collide. Drop the payments table first -- it carries a\n"
-            "        # foreign key to bace_students.\n"
-            "        conn.execute(sa.text('DROP TABLE bace_rent_payments'))\n"
-            "        # The rest of the BACE rent ledger, added after this baseline\n"
-            "        # too: bace_rent_charges / bace_rent_month_closes\n"
-            "        # (7b4c2e9a1d63) and bace_rent_adjustments (8c5d1e7a2b94).\n"
-            "        # All three hold foreign keys to bace_students, so they go\n"
-            "        # before it.\n"
-            "        conn.execute(sa.text('DROP TABLE bace_rent_charges'))\n"
-            "        conn.execute(sa.text('DROP TABLE bace_rent_month_closes'))\n"
-            "        conn.execute(sa.text('DROP TABLE bace_rent_adjustments'))\n"
-            "        conn.execute(sa.text('DROP TABLE bace_students'))\n"
+            "        # Foreign keys are not enforced by SQLite unless switched on,\n"
+            "        # so drop order between the dropped tables doesn't matter.\n"
+            "        for t in sorted(set(sa.inspect(conn).get_table_names()) - BASELINE_TABLES):\n"
+            "            conn.execute(sa.text(f'DROP TABLE {t}'))\n"
 
             f"    stamp(revision='{revision}')\n"
         )

@@ -26,9 +26,10 @@ import io
 import os
 import zipfile
 
+from extensions import db
 from models import (
     Donor, Donation, Campaign, BaceProperty, Festival, SevaType,
-    LiveToGivePurpose, Preacher, AssociatedWith, ReceiptCounter, DailyReportRecipient,
+    LiveToGivePurpose, Preacher, AssociatedWith, ReceiptCounter, DailyReportRecipient, BirthdayAlertRecipient,
 )
 
 # (CSV filename, model, columns-to-exclude) -- one entry per table included
@@ -43,6 +44,7 @@ _BACKUP_TABLES = [
     ("live_to_give_purposes.csv", LiveToGivePurpose, []),
     ("associated_withs.csv", AssociatedWith, []),
     ("daily_report_recipients.csv", DailyReportRecipient, []),
+    ("birthday_alert_recipients.csv", BirthdayAlertRecipient, []),
     ("donors.csv", Donor, []),
     ("donations.csv", Donation, ["receipt_pdf", "razorpay_raw_payload"]),
     ("receipt_counters.csv", ReceiptCounter, []),
@@ -50,28 +52,47 @@ _BACKUP_TABLES = [
 
 
 def _table_to_csv_bytes(model, exclude_columns):
+    """In-memory CSV helper used only by the browser download path.
+
+    The scheduled backup uses _write_table_to_zip() below instead, so it
+    never needs a complete CSV or ZIP in RAM.
+    """
     columns = [c.name for c in model.__table__.columns if c.name not in exclude_columns]
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(columns)
-    # Avoid materialising a whole table in the ORM identity map while a
-    # backup is being built. The ZIP itself is still returned as bytes for
-    # the existing download/email interfaces, but database memory stays
-    # bounded as donor and donation history grows.
-    for row in model.query.order_by(model.id).yield_per(1000):
-        writer.writerow([getattr(row, col) for col in columns])
+    # Do not query model instances here: doing so loads *all* columns,
+    # including Donation.receipt_pdf / razorpay_raw_payload. Those fields
+    # are deliberately excluded from a backup but were still being loaded
+    # by the old ORM query, which pushed the Render Cron Job above 512 MB.
+    query = db.session.query(*(getattr(model, col) for col in columns)).order_by(model.id).yield_per(500)
+    for row in query:
+        writer.writerow(row)
     return buf.getvalue().encode("utf-8")
 
 
-def build_backup_zip():
-    """Returns (filename, zip_bytes) for a complete backup taken right now."""
-    timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    filename = f"temple_data_backup_{timestamp}.zip"
+def _write_table_to_zip(zf, csv_name, model, exclude_columns):
+    """Stream one table directly into an open ZIP member.
 
-    zip_buf = io.BytesIO()
-    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+    Most importantly, the SELECT contains only backup columns. This keeps
+    receipt PDFs and raw webhook JSON in Postgres rather than materialising
+    them in the Cron Job process just to throw them away.
+    """
+    columns = [c.name for c in model.__table__.columns if c.name not in exclude_columns]
+    with zf.open(csv_name, "w") as raw_member:
+        with io.TextIOWrapper(raw_member, encoding="utf-8", newline="") as text_member:
+            writer = csv.writer(text_member)
+            writer.writerow(columns)
+            query = db.session.query(*(getattr(model, col) for col in columns)).order_by(model.id).yield_per(500)
+            for row in query:
+                writer.writerow(row)
+
+
+def _write_backup_zip(file_object):
+    """Write a complete ZIP to a file-like object without full CSV buffers."""
+    with zipfile.ZipFile(file_object, "w", zipfile.ZIP_DEFLATED) as zf:
         for csv_name, model, exclude in _BACKUP_TABLES:
-            zf.writestr(csv_name, _table_to_csv_bytes(model, exclude))
+            _write_table_to_zip(zf, csv_name, model, exclude)
         zf.writestr(
             "README.txt",
             "Temple donation system -- full data backup\n"
@@ -82,6 +103,18 @@ def build_backup_zip():
             "donation's own data, and credentials shouldn't leave the database.\n",
         )
 
+
+def build_backup_zip():
+    """Returns (filename, zip_bytes) for the on-demand browser download.
+
+    This necessarily returns bytes because Flask must send a download in the
+    response. The scheduled job uses run_backup(), which writes directly to
+    disk and never takes this in-memory path.
+    """
+    timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    filename = f"temple_data_backup_{timestamp}.zip"
+    zip_buf = io.BytesIO()
+    _write_backup_zip(zip_buf)
     return filename, zip_buf.getvalue()
 
 
@@ -111,8 +144,6 @@ def run_backup(app, dest_dir=None, send_email=True):
     """
     from email_utils import send_backup_email
 
-    filename, zip_bytes = build_backup_zip()
-
     # BACKUP_DIR lets the destination be redirected without changing any
     # caller -- the test suite points it at a temp directory so running the
     # tests doesn't leave real backup ZIPs in the developer's instance/
@@ -121,9 +152,15 @@ def run_backup(app, dest_dir=None, send_email=True):
         app.root_path, "instance", "backups"
     )
     os.makedirs(dest, exist_ok=True)
+    timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    filename = f"temple_data_backup_{timestamp}.zip"
     saved_path = os.path.join(dest, filename)
-    with open(saved_path, "wb") as f:
-        f.write(zip_bytes)
+    # The scheduled path writes ZIP members directly to disk. The old path
+    # built every CSV, then an in-memory ZIP, then another copy for SMTP;
+    # at production data volume it routinely exceeded Render's 512 MB cap.
+    with open(saved_path, "wb") as backup_file:
+        _write_backup_zip(backup_file)
+    size_bytes = os.path.getsize(saved_path)
 
     keep = app.config.get("BACKUP_RETENTION_COUNT", 12)
     backups = sorted(
@@ -137,7 +174,7 @@ def run_backup(app, dest_dir=None, send_email=True):
 
     result = {
         "filename": filename,
-        "size_bytes": len(zip_bytes),
+        "size_bytes": size_bytes,
         "saved_path": saved_path,
         "pruned": pruned,
         "emailed_to": None,
@@ -152,6 +189,12 @@ def run_backup(app, dest_dir=None, send_email=True):
         elif not to_email:
             result["email_skipped_reason"] = "No BACKUP_EMAIL/ORG_CONTACT_EMAIL configured"
         else:
+            # SMTP's standard MIME API needs the attachment bytes. Keep
+            # that one unavoidable copy until an object-storage destination
+            # is configured, but only create it after the disk backup has
+            # succeeded; the database export itself remains streaming.
+            with open(saved_path, "rb") as backup_file:
+                zip_bytes = backup_file.read()
             sent = send_backup_email(app.config, to_email, filename, zip_bytes)
             result["emailed_to"] = to_email
             result["email_sent"] = sent

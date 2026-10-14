@@ -34,7 +34,7 @@ from extensions import db
 from models import (
     Camp, Donation, Donor, Campaign, BaceProperty, Festival, SevaType,
     LiveToGivePurpose, Preacher, AssociatedWith, ReceiptCounter, DonorLoginOTP,
-    AdminActivityLog, AdminUser, DailyReportRecipient, ZohoForm,
+    AdminActivityLog, AdminUser, DailyReportRecipient, BirthdayAlertRecipient, ZohoForm,
     BaceRentPayment, BaceStudent, BaceRentCharge, BaceRentMonthClose,
     BaceRentAdjustment,
 )
@@ -76,6 +76,7 @@ MODELS_IN_DELETE_ORDER = [
     AssociatedWith,
     Camp,
     DailyReportRecipient,
+    BirthdayAlertRecipient,
     AdminUser,
 ]
 

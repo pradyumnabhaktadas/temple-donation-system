@@ -574,11 +574,17 @@ class TestPendingList:
 
     def test_a_fully_paid_student_is_not_listed(self, client, app):
         prop_id = _property(app)
-        _add_student(client, prop_id, full_name="All Settled", monthly_amount="3000", joined_month="2026-09")
+        # The pending list is intentionally for the *current* IST month.
+        # Keep this regression test aligned with that contract instead of
+        # making it fail once the calendar moves past a hard-coded month.
+        from utils import now_ist
+        current_month = now_ist().date().replace(day=1)
+        month_value = current_month.strftime("%Y-%m")
+        _add_student(client, prop_id, full_name="All Settled", monthly_amount="3000", joined_month=month_value)
         from models import BaceStudent
         student = BaceStudent.query.first()
         client.post("/admin/bace-payments", data={
-            "student_id": str(student.id), "for_month": "2026-09", "amount_paid": "3000",
+            "student_id": str(student.id), "for_month": month_value, "amount_paid": "3000",
         }, follow_redirects=True)
 
         resp = client.get("/admin/bace-pending")

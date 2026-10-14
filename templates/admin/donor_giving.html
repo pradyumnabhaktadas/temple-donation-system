@@ -1,0 +1,155 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Donor Giving{% endblock %}
+{% block content %}
+{# Header-click sorting: first click on a column sorts high-to-low (name:
+   A-Z); clicking it again flips the direction. Every other filter in the
+   query string is kept, and the page resets to 1. #}
+{% macro sort_href(key) -%}
+  {%- set default_order = 'asc' if key == 'name' else 'desc' -%}
+  {%- set order = ('asc' if report.sort_order == 'desc' else 'desc') if report.sort_key == key else default_order -%}
+  {%- set args = request.args.to_dict() -%}
+  {%- set _ = args.update({'sort': key ~ '_' ~ order, 'page': 1}) -%}
+  {{ url_for('admin.donor_giving', **args) }}
+{%- endmacro %}
+{% macro sort_arrow(key) -%}
+  {%- if report.sort_key == key %}{{ ' ▲' if report.sort_order == 'asc' else ' ▼' }}{% endif -%}
+{%- endmacro %}
+
+<div class="admin-page-header">
+  <div>
+    <div class="eyebrow">Donor-wise, month by month</div>
+    <h3>🙏 Donor Giving &mdash; {{ 'FY' if report.basis == 'fy' else 'Calendar Year' }} {{ report.year_label }}</h3>
+  </div>
+  <div class="admin-page-actions">
+    <a class="btn btn-sm btn-outline-secondary"
+       href="{{ url_for('admin.export_donor_giving', **request.args.to_dict()) }}">Export CSV</a>
+  </div>
+</div>
+
+<form class="row g-2 mb-3 align-items-end" method="get">
+  <div class="col-auto">
+    <label class="form-label small mb-1">Year</label>
+    <div class="input-group input-group-sm">
+      <select name="basis" class="form-select form-select-sm" onchange="this.form.submit()" aria-label="Year type">
+        <option value="fy" {% if report.basis == 'fy' %}selected{% endif %}>Financial (Apr&ndash;Mar)</option>
+        <option value="cy" {% if report.basis == 'cy' %}selected{% endif %}>Calendar (Jan&ndash;Dec)</option>
+      </select>
+      <select name="year" class="form-select form-select-sm" onchange="this.form.submit()" aria-label="Year">
+        {% for y in years %}
+        <option value="{{ y }}" {% if y == report.year %}selected{% endif %}>
+          {{ ('%d-%02d' % (y, (y + 1) % 100)) if report.basis == 'fy' else y }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+  <div class="col-auto">
+    <label class="form-label small mb-1">Search</label>
+    <input type="text" name="q" value="{{ report.q }}" class="form-control form-control-sm" style="min-width:220px"
+           placeholder="Name, phone or email">
+  </div>
+  <div class="col-auto">
+    <label class="form-label small mb-1">Campaign</label>
+    <select name="campaign_id" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">All campaigns</option>
+      {% for c in campaigns %}
+      <option value="{{ c.id }}" {% if report.campaign_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <label class="form-label small mb-1">Year total &ge; (Rs)</label>
+    <input type="text" inputmode="decimal" name="min_total" value="{{ report.min_total }}"
+           class="form-control form-control-sm" style="width:7.5rem" placeholder="e.g. 10000">
+  </div>
+  <div class="col-auto">
+    <label class="form-label small mb-1">Year total &le; (Rs)</label>
+    <input type="text" inputmode="decimal" name="max_total" value="{{ report.max_total }}"
+           class="form-control form-control-sm" style="width:7.5rem" placeholder="e.g. 50000">
+  </div>
+  <div class="col-auto">
+    <label class="form-label small mb-1">Sort by</label>
+    <select name="sort" class="form-select form-select-sm" onchange="this.form.submit()">
+      {% for value, label in [
+        ('total_desc', 'Year total — largest first'),
+        ('total_asc', 'Year total — smallest first'),
+        ('largest_desc', 'Largest single donation — highest first'),
+        ('largest_asc', 'Largest single donation — lowest first'),
+        ('count_desc', 'Number of donations — most first'),
+        ('count_asc', 'Number of donations — fewest first'),
+        ('name_asc', 'Name — A to Z'),
+        ('name_desc', 'Name — Z to A'),
+      ] %}
+      <option value="{{ value }}" {% if report.sort == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+      {% if report.sort_key.startswith('m') %}
+      <option value="{{ report.sort }}" selected>Month column ({{ report.sort_order }})</option>
+      {% endif %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-sm btn-primary">Apply</button>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.donor_giving') }}">Reset</a>
+  </div>
+</form>
+
+<p class="text-muted small mb-2">
+  {{ report.totals.donors }} donor{{ '' if report.totals.donors == 1 else 's' }} &middot;
+  {{ report.totals.count }} donation{{ '' if report.totals.count == 1 else 's' }} &middot;
+  Rs. {{ report.totals.total | inr }} received. Only successful donations are counted; months are IST.
+  Click any column heading to sort by it.
+</p>
+
+<div class="table-responsive">
+  <table class="table table-sm table-hover table-bordered align-middle bg-white shadow-sm" style="min-width:1250px">
+    <thead>
+      <tr>
+        <th><a class="text-decoration-none text-reset" href="{{ sort_href('name') }}">Donor{{ sort_arrow('name') }}</a></th>
+        {% for m, label in report.month_cols %}
+        <th class="text-end">
+          <a class="text-decoration-none text-reset" href="{{ sort_href('m' ~ m) }}">{{ label }}{{ sort_arrow('m' ~ m) }}</a>
+        </th>
+        {% endfor %}
+        <th class="text-end table-light">
+          <a class="text-decoration-none text-reset" href="{{ sort_href('total') }}">Total {{ report.year_label }}{{ sort_arrow('total') }}</a>
+        </th>
+        <th class="text-end">
+          <a class="text-decoration-none text-reset" href="{{ sort_href('count') }}">#{{ sort_arrow('count') }}</a>
+        </th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>
+          <a href="{{ url_for('admin.donor_detail', donor_id=r.id) }}">{{ r.name }}</a>
+          {% if r.phone %}<div class="small text-muted">{{ r.phone }}</div>{% endif %}
+        </td>
+        {% for m, label in report.month_cols %}
+        {% set amt = r.months[m] %}
+        <td class="text-end {% if not amt %}text-muted{% endif %}">{{ (amt | inr) if amt else '–' }}</td>
+        {% endfor %}
+        <td class="text-end fw-bold table-light">{{ r.total | inr }}</td>
+        <td class="text-end">{{ r.count }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="15" class="text-muted">No donations match these filters for {{ report.year_label }}.</td></tr>
+      {% endfor %}
+    </tbody>
+    {% if rows %}
+    <tfoot>
+      <tr class="fw-bold table-secondary">
+        <td>All {{ report.totals.donors }} donor{{ '' if report.totals.donors == 1 else 's' }}</td>
+        {% for m, label in report.month_cols %}
+        <td class="text-end">{{ (report.totals.months[m] | inr) if report.totals.months[m] else '–' }}</td>
+        {% endfor %}
+        <td class="text-end">{{ report.totals.total | inr }}</td>
+        <td class="text-end">{{ report.totals.count }}</td>
+      </tr>
+    </tfoot>
+    {% endif %}
+  </table>
+</div>
+{% set pagination = pagination %}
+{% include "admin/_pagination.html" %}
+{% endblock %}

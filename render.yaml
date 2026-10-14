@@ -98,6 +98,8 @@ services:
         sync: false
       - key: WHATSAPP_CANCELLATION_TEMPLATE_ID
         sync: false
+      - key: WHATSAPP_BIRTHDAY_ALERT_TEMPLATE_ID
+        sync: false
       - key: PUBLIC_BASE_URL
         sync: false
       - key: SENTRY_DSN
@@ -170,6 +172,21 @@ services:
         sync: false   # the web service's own URL, e.g. https://givetokrishna.com
       - key: INTERNAL_TASK_TOKEN
         sync: false   # same value as the web service's INTERNAL_TASK_TOKEN (generated there)
+
+  # Daily donor-birthday reminder for contacts configured in Admin ->
+  # Settings -> Birthday Alert Recipients. Runs at 3:30 AM IST (22:00 UTC)
+  # and only triggers the web service; the web service handles SMTP/Airtel.
+  - type: cron
+    name: temple-birthday-alerts
+    runtime: python
+    schedule: "0 22 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python birthday_alerts.py
+    envVars:
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: INTERNAL_TASK_TOKEN
+        sync: false
 
   # Automatic Zoho receipt creation is disabled. The separately managed
   # temple-zoho-reconcile job is intentionally retained only to identify

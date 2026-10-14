@@ -1770,6 +1770,38 @@ def internal_daily_report_send():
     })
 
 
+@bp.route("/internal/birthday-alerts/send", methods=["POST"])
+@csrf.exempt
+@_safe_json_route
+def internal_birthday_alert_send():
+    """Authenticated trigger for the daily admin-only birthday reminder."""
+    expected_token = current_app.config.get("INTERNAL_TASK_TOKEN")
+    if not expected_token:
+        return jsonify({"error": "INTERNAL_TASK_TOKEN not configured"}), 503
+    if not hmac.compare_digest(request.headers.get("X-Internal-Token", ""), expected_token):
+        return jsonify({"error": "Unauthorized"}), 401
+    payload = request.get_json(silent=True) or {}
+    alert_date = None
+    if payload.get("date"):
+        try:
+            alert_date = datetime.datetime.strptime(payload["date"], "%Y-%m-%d").date()
+        except ValueError:
+            return jsonify({"error": "Invalid date, expected YYYY-MM-DD"}), 400
+    from birthday_alert_utils import send_birthday_alert
+    result = send_birthday_alert(current_app._get_current_object(), alert_date=alert_date, force=bool(payload.get("force")))
+    response = {"alert_date": result["alert_date"].isoformat()}
+    if result.get("skipped"):
+        response["skipped"] = result["skipped"]
+    else:
+        response.update({
+            "birthday_count": len(result["data"]["donors"]), "email_sent": result["email_sent"],
+            "email_recipients_count": len(result["email_recipients"]), "email_error": result["email_error"],
+            "whatsapp_sent_count": result["whatsapp_sent_count"],
+            "whatsapp_recipients_count": len(result["whatsapp_recipients"]), "whatsapp_error": result["whatsapp_error"],
+        })
+    return jsonify(response)
+
+
 def _zoho_payment_is_captured(payment_id):
     """Returns (captured: bool, error: str|None). The Zoho webhook's only
     proof a payment is genuine and captured -- unlike _payment_is_captured
