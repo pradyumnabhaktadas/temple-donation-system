@@ -9,6 +9,15 @@ class Config:
     SQLALCHEMY_DATABASE_URI = os.environ.get(
         "DATABASE_URL", f"sqlite:///{os.path.join(BASE_DIR, 'instance', 'temple.db')}"
     )
+    # Render may provide a SQLAlchemy URL explicitly selecting psycopg v3
+    # (``postgresql+psycopg://``).  This project intentionally ships the
+    # smaller, stable psycopg2-binary driver instead; leave plain
+    # ``postgresql://`` URLs alone, but normalise the explicit v3 spelling so
+    # migrations and the web service use the driver that is actually installed.
+    if SQLALCHEMY_DATABASE_URI.startswith("postgresql+psycopg://"):
+        SQLALCHEMY_DATABASE_URI = SQLALCHEMY_DATABASE_URI.replace(
+            "postgresql+psycopg://", "postgresql+psycopg2://", 1
+        )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     # Render's managed Postgres silently drops idle connections after a
     # while; without this, SQLAlchemy can hand out a dead connection from
