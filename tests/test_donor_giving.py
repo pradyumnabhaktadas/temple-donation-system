@@ -230,5 +230,7 @@ class TestExportAndAccess:
 
     @pytest.mark.usefixtures("_logged_in")
     def test_the_nav_links_to_it(self, client, seeded):
-        html = client.get("/admin/donors").get_data(as_text=True)
+        response = client.get("/admin/donors")
+        assert response.status_code == 200
+        html = response.get_data(as_text=True)
         assert "/admin/donor-giving" in html

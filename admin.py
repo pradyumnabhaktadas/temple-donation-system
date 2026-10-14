@@ -1203,8 +1203,12 @@ def donors():
             pass
     if donation_frequency:
         query = query.filter(Donor.donation_frequency == donation_frequency)
-    pagination = db.paginate(
-        query.order_by(Donor.full_name), page=page, per_page=DONORS_PER_PAGE, error_out=False
+    # ``query`` is Flask-SQLAlchemy's legacy Query object.  Paginating it
+    # through ``db.paginate`` eventually calls Session.execute(query), which
+    # newer SQLAlchemy releases reject.  Keep it on the Query pagination path
+    # so the donors list works consistently on Render as well as locally.
+    pagination = query.order_by(Donor.full_name).paginate(
+        page=page, per_page=DONORS_PER_PAGE, error_out=False
     )
 
     # Compute totals with one aggregate query instead of the N+1 pattern of
