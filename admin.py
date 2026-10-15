@@ -493,8 +493,8 @@ def activity_log():
         query = query.filter_by(action=action)
 
     page = request.args.get("page", 1, type=int)
-    pagination = db.paginate(
-        query.order_by(AdminActivityLog.created_at.desc()), page=page, per_page=ACTIVITY_LOG_PER_PAGE, error_out=False
+    pagination = query.order_by(AdminActivityLog.created_at.desc()).paginate(
+        page=page, per_page=ACTIVITY_LOG_PER_PAGE, error_out=False
     )
 
     # Options for the filter dropdowns -- every admin username/action that's
@@ -2007,7 +2007,7 @@ def donations():
     query, filters = _apply_donations_filters(Donation.query)
     query, sort = _sorted_donations_query(query, request.args.get("sort", "-date"))
     page = request.args.get("page", 1, type=int)
-    pagination = db.paginate(query, page=page, per_page=DONATIONS_PER_PAGE, error_out=False)
+    pagination = query.paginate(page=page, per_page=DONATIONS_PER_PAGE, error_out=False)
     campaigns = Campaign.query.order_by(Campaign.name).all()
     associated_withs = AssociatedWith.query.order_by(AssociatedWith.display_order, AssociatedWith.name).all()
 
@@ -5219,8 +5219,7 @@ def bace_payments():
     if student_id:
         query = query.filter_by(student_id=student_id)
     page = request.args.get("page", 1, type=int)
-    pagination = db.paginate(
-        query.order_by(BaceRentPayment.date_paid.desc(), BaceRentPayment.id.desc()),
+    pagination = query.order_by(BaceRentPayment.date_paid.desc(), BaceRentPayment.id.desc()).paginate(
         page=page, per_page=50, error_out=False,
     )
     students = BaceStudent.query.order_by(BaceStudent.full_name).all()
@@ -6489,7 +6488,7 @@ def bace_contributions():
     query, filters = _apply_bace_contribution_filters(base_query)
     query = query.order_by(Donation.donation_date.desc())
     page = request.args.get("page", 1, type=int)
-    pagination = db.paginate(query, page=page, per_page=DONATIONS_PER_PAGE, error_out=False)
+    pagination = query.paginate(page=page, per_page=DONATIONS_PER_PAGE, error_out=False)
 
     matched_students = bace_matching.match_students(pagination.items)
 
@@ -6749,7 +6748,7 @@ def dhoti_kurta_contributions():
     query, filters = _apply_dhoti_kurta_filters(Donation.query.filter_by(campaign_id=campaign.id))
     query = query.order_by(Donation.donation_date.desc())
     page = request.args.get("page", 1, type=int)
-    pagination = db.paginate(query, page=page, per_page=DONATIONS_PER_PAGE, error_out=False)
+    pagination = query.paginate(page=page, per_page=DONATIONS_PER_PAGE, error_out=False)
 
     return render_template(
         "admin/dhoti_kurta_contributions.html", campaign=campaign,
@@ -7128,7 +7127,7 @@ def associated_with_report():
         query = query.filter_by(associated_with_id=associated_with_id)
     query = query.order_by(Donation.donation_date.desc())
     page = request.args.get("page", 1, type=int)
-    pagination = db.paginate(query, page=page, per_page=DONATIONS_PER_PAGE, error_out=False)
+    pagination = query.paginate(page=page, per_page=DONATIONS_PER_PAGE, error_out=False)
 
     return render_template(
         "admin/associated_with_report.html",
