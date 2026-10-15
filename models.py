@@ -96,9 +96,20 @@ class PreachingCenter(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
     donations = db.relationship("Donation", backref="preaching_center", lazy="dynamic")
+    purpose_links = db.relationship("PreachingCenterPurpose", backref="preaching_center", lazy="dynamic", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<PreachingCenter {self.slug}>"
+
+
+class PreachingCenterPurpose(db.Model):
+    """Admin-selected Live To Give purposes available from one center link."""
+
+    __tablename__ = "preaching_center_purposes"
+
+    preaching_center_id = db.Column(db.Integer, db.ForeignKey("preaching_centers.id"), primary_key=True)
+    live_to_give_purpose_id = db.Column(db.Integer, db.ForeignKey("live_to_give_purposes.id"), primary_key=True)
+    purpose = db.relationship("LiveToGivePurpose")
 
 
 # Donor.donor_type values -- an IYF (ISKCON Youth Forum) donor vs. a

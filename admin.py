@@ -23,7 +23,7 @@ from extensions import db, limiter
 from models import (
     Camp,
     Donor, Campaign, Donation, AdminUser, ReceiptCounter, BaceProperty, Festival, SevaType,
-    LiveToGivePurpose, Preacher, AssociatedWith, PreachingCenter, AdminActivityLog, DailyReportRecipient, BirthdayAlertRecipient,
+    LiveToGivePurpose, Preacher, AssociatedWith, PreachingCenter, PreachingCenterPurpose, AdminActivityLog, DailyReportRecipient, BirthdayAlertRecipient,
     BaceStudent, BaceRentCharge, BaceRentPayment, BaceRentAdjustment, BaceRentMonthClose, BACE_PAYMENT_MODES,
     REPORT_FREQUENCIES,
     DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES, DONATION_FREQUENCY_LABELS,
@@ -4484,6 +4484,18 @@ def preaching_centers():
         )
         db.session.add(center)
         db.session.flush()
+        # Center collection links deliberately start with only the two
+        # purposes requested by the temple; admins can add any other active
+        # Live To Give purpose later on the edit page.
+        for purpose_name in ("Deity Seva", "Monthly Nitya Seva"):
+            purpose = LiveToGivePurpose.query.filter_by(name=purpose_name).first()
+            if purpose is None:
+                purpose = LiveToGivePurpose(name=purpose_name, is_80g=False)
+                db.session.add(purpose)
+                db.session.flush()
+            db.session.add(PreachingCenterPurpose(
+                preaching_center_id=center.id, live_to_give_purpose_id=purpose.id
+            ))
         log_activity("preaching_center_create", "preaching_center", center.id, f"Created '{center.name}' ({center.slug})")
         db.session.commit()
         flash(f"Preaching center '{center.name}' created. Its link is /pc/{center.slug}.")
@@ -4499,6 +4511,44 @@ def preaching_centers():
     ).filter(Donation.status == "success", Donation.preaching_center_id.isnot(None)).group_by(Donation.preaching_center_id).all()
     totals = {center_id: (total, count) for center_id, total, count in total_rows}
     return render_template("admin/preaching_centers.html", centers=centers, totals=totals)
+
+
+@bp.route("/preaching-centers/dashboard")
+@login_required
+def preaching_centers_dashboard():
+    """Temple-wide dashboard for the collection source, separate from setup."""
+    if current_user.role == "preaching_center_viewer":
+        if not current_user.preaching_center_id:
+            abort(403)
+        return redirect(url_for("admin.preaching_center_detail", center_id=current_user.preaching_center_id))
+    today = now_ist().date()
+    month_start = today.replace(day=1)
+    fy_start = datetime.date(today.year if today.month >= 4 else today.year - 1, 4, 1)
+    centers = PreachingCenter.query.order_by(PreachingCenter.name).all()
+    donations = Donation.query.filter(
+        Donation.preaching_center_id.isnot(None), Donation.status == "success"
+    ).all()
+    rows = {center.id: {"center": center, "all": Decimal("0"), "month": Decimal("0"), "fy": Decimal("0"), "count": 0} for center in centers}
+    for donation in donations:
+        row = rows.get(donation.preaching_center_id)
+        if not row:
+            continue
+        paid_on = to_ist(donation.donation_date).date()
+        amount = Decimal(donation.amount)
+        row["all"] += amount
+        row["count"] += 1
+        if paid_on >= month_start:
+            row["month"] += amount
+        if paid_on >= fy_start:
+            row["fy"] += amount
+    center_rows = list(rows.values())
+    summary = {
+        "all": sum((row["all"] for row in center_rows), Decimal("0")),
+        "month": sum((row["month"] for row in center_rows), Decimal("0")),
+        "fy": sum((row["fy"] for row in center_rows), Decimal("0")),
+        "count": sum(row["count"] for row in center_rows),
+    }
+    return render_template("admin/preaching_centers_dashboard.html", rows=center_rows, summary=summary, today=today)
 
 
 @bp.route("/preaching-centers/<int:center_id>/toggle", methods=["POST"])
@@ -4549,11 +4599,40 @@ def edit_preaching_center(center_id):
         center.contact_phone = request.form.get("contact_phone", "").strip() or None
         center.target_amount = target
         center.target_period = period
+        submitted_purpose_ids = request.form.getlist("purpose_ids")
+        purpose_ids = {int(value) for value in submitted_purpose_ids if value.isdigit()}
+        new_purpose_name = request.form.get("new_purpose_name", "").strip()
+        if new_purpose_name:
+            purpose = LiveToGivePurpose.query.filter_by(name=new_purpose_name).first()
+            if purpose is None:
+                purpose = LiveToGivePurpose(name=new_purpose_name, is_80g=False)
+                db.session.add(purpose)
+                db.session.flush()
+            purpose_ids.add(purpose.id)
+        # Preserve the current choices for older/internal edit clients
+        # which submit only the metadata fields. The HTML form always sends
+        # purpose_ids, so an intentional "none checked" still validates as
+        # an error below.
+        if not submitted_purpose_ids and not new_purpose_name:
+            purpose_ids = {link.live_to_give_purpose_id for link in center.purpose_links}
+        valid_ids = {purpose.id for purpose in LiveToGivePurpose.query.filter_by(is_active=True).all()}
+        purpose_ids &= valid_ids
+        if not purpose_ids:
+            flash("Choose at least one active purpose for this collection link.")
+            return redirect(url_for("admin.edit_preaching_center", center_id=center.id))
+        PreachingCenterPurpose.query.filter_by(preaching_center_id=center.id).delete()
+        for purpose_id in purpose_ids:
+            db.session.add(PreachingCenterPurpose(
+                preaching_center_id=center.id, live_to_give_purpose_id=purpose_id
+            ))
         log_activity("preaching_center_edit", "preaching_center", center.id, f"Updated '{center.name}' metadata")
         db.session.commit()
         flash("Preaching center updated. Its collection link has not changed.")
         return redirect(url_for("admin.preaching_centers"))
-    return render_template("admin/preaching_center_edit.html", center=center)
+    selected_purpose_ids = {link.live_to_give_purpose_id for link in center.purpose_links}
+    purposes = LiveToGivePurpose.query.filter_by(is_active=True).order_by(LiveToGivePurpose.name).all()
+    return render_template("admin/preaching_center_edit.html", center=center, purposes=purposes,
+                           selected_purpose_ids=selected_purpose_ids)
 
 
 @bp.route("/preaching-centers/<int:center_id>")

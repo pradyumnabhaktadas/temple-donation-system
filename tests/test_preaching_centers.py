@@ -13,12 +13,29 @@ def _create_center(client, name="Dwarka Preaching", slug="dwarka"):
 
 class TestPreachingCenterAdministration:
     def test_admin_can_create_center_with_permanent_slug(self, app, client):
-        from models import PreachingCenter
+        from models import PreachingCenter, PreachingCenterPurpose
         login(client)
         response = _create_center(client)
         assert response.status_code == 200
         center = PreachingCenter.query.one()
         assert (center.name, center.slug, center.city) == ("Dwarka Preaching", "dwarka", "New Delhi")
+        assert {link.purpose.name for link in PreachingCenterPurpose.query.filter_by(preaching_center_id=center.id)} == {
+            "Deity Seva", "Monthly Nitya Seva"
+        }
+
+    def test_center_admin_can_add_any_new_purpose(self, app, client):
+        from models import PreachingCenter, PreachingCenterPurpose
+        login(client)
+        _create_center(client)
+        center = PreachingCenter.query.one()
+        response = client.post(f"/admin/preaching-centers/{center.id}/edit", data={
+            "name": center.name, "new_purpose_name": "Book Distribution",
+            "purpose_ids": [str(link.live_to_give_purpose_id) for link in center.purpose_links],
+        }, follow_redirects=True)
+        assert response.status_code == 200
+        assert "Book Distribution" in {
+            link.purpose.name for link in PreachingCenterPurpose.query.filter_by(preaching_center_id=center.id)
+        }
 
     def test_reserved_or_invalid_slug_is_rejected(self, app, client):
         from models import PreachingCenter
@@ -110,6 +127,27 @@ class TestPreachingCenterPublicCollection:
 
 
 class TestPreachingCenterReporting:
+    def test_dashboard_shows_center_totals(self, app, client):
+        from extensions import db
+        from models import Campaign, Donor, Donation, PreachingCenter
+        login(client)
+        _create_center(client)
+        center = PreachingCenter.query.one()
+        campaign = Campaign.query.filter_by(name="Annadan").one()
+        donor = Donor(full_name="Dashboard Donor", phone="9876501103")
+        db.session.add(donor)
+        db.session.flush()
+        db.session.add(Donation(
+            donor_id=donor.id, campaign_id=campaign.id, amount=Decimal("2000"),
+            payment_mode="cash", status="success", preaching_center_id=center.id,
+            preaching_center_name=center.name,
+        ))
+        db.session.commit()
+        response = client.get("/admin/preaching-centers/dashboard")
+        assert response.status_code == 200
+        assert b"Center Collection Dashboard" in response.data
+        assert b"Rs. 2,000" in response.data
+
     def test_report_counts_only_successful_donations(self, app, client):
         from extensions import db
         from models import Campaign, Donor, Donation, PreachingCenter

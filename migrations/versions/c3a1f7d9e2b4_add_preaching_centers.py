@@ -37,9 +37,18 @@ def upgrade():
     op.add_column("admin_users", sa.Column("preaching_center_id", sa.Integer(), nullable=True))
     op.create_index("ix_admin_users_preaching_center_id", "admin_users", ["preaching_center_id"])
     op.create_foreign_key("fk_admin_users_preaching_center", "admin_users", "preaching_centers", ["preaching_center_id"], ["id"])
+    op.create_table(
+        "preaching_center_purposes",
+        sa.Column("preaching_center_id", sa.Integer(), nullable=False),
+        sa.Column("live_to_give_purpose_id", sa.Integer(), nullable=False),
+        sa.ForeignKeyConstraint(["preaching_center_id"], ["preaching_centers.id"]),
+        sa.ForeignKeyConstraint(["live_to_give_purpose_id"], ["live_to_give_purposes.id"]),
+        sa.PrimaryKeyConstraint("preaching_center_id", "live_to_give_purpose_id"),
+    )
 
 
 def downgrade():
+    op.drop_table("preaching_center_purposes")
     op.drop_constraint("fk_admin_users_preaching_center", "admin_users", type_="foreignkey")
     op.drop_index("ix_admin_users_preaching_center_id", table_name="admin_users")
     op.drop_column("admin_users", "preaching_center_id")

@@ -48,7 +48,7 @@ from werkzeug.exceptions import HTTPException
 from extensions import db, csrf, limiter
 from models import (
     Donor, Campaign, Donation, ReceiptCounter, BaceProperty, BaceStudent, Festival, SevaType, LiveToGivePurpose,
-    AssociatedWith, PreachingCenter, AdminActivityLog, ZohoForm,
+    AssociatedWith, PreachingCenter, PreachingCenterPurpose, AdminActivityLog, ZohoForm,
 )
 from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email, send_cancellation_email
@@ -347,7 +347,13 @@ def preaching_center_donate_form(slug):
     if center is None:
         return render_template("preaching_center_unavailable.html"), 404
     campaign = Campaign.query.filter_by(name="Live To Give", is_active=True).first()
-    purposes = LiveToGivePurpose.query.filter_by(is_active=True).order_by(LiveToGivePurpose.name).all() if campaign else []
+    purposes = (LiveToGivePurpose.query.join(
+        PreachingCenterPurpose,
+        PreachingCenterPurpose.live_to_give_purpose_id == LiveToGivePurpose.id,
+    ).filter(
+        PreachingCenterPurpose.preaching_center_id == center.id,
+        LiveToGivePurpose.is_active.is_(True),
+    ).order_by(LiveToGivePurpose.name).all() if campaign else [])
     response = current_app.make_response(render_template(
         "donate.html", campaign=campaign, purposes=purposes, associated_withs=[],
         razorpay_enabled=current_app.config["RAZORPAY_ENABLED"],
@@ -591,6 +597,11 @@ def create_order():
             return jsonify({"error": "This preaching center collection link is no longer available."}), 400
         # Center links deliberately do not collect an Associated With value.
         associated_with_id = None
+        if live_to_give_purpose_id and not PreachingCenterPurpose.query.filter_by(
+            preaching_center_id=preaching_center.id,
+            live_to_give_purpose_id=live_to_give_purpose_id,
+        ).first():
+            return jsonify({"error": "Please select a donation purpose available for this preaching center."}), 400
 
     bace_student_id = None
     if data.get("bace_student_token") or data.get("bace_student_id"):
