@@ -39,12 +39,11 @@ def _give(donor, amount, status="success"):
     return d
 
 
-def _merge(client, *donors):
-    return client.post(
-        "/admin/donors/duplicates/merge",
-        data={"donor_ids": [str(d.id) for d in donors]},
-        follow_redirects=True,
-    )
+def _merge(client, *donors, keep=None):
+    data = {"donor_ids": [str(d.id) for d in donors]}
+    if keep is not None:
+        data["keep_id"] = str(keep.id)
+    return client.post("/admin/donors/duplicates/merge", data=data, follow_redirects=True)
 
 
 def _compare_url(*donors):
@@ -115,6 +114,15 @@ class TestTheComparison:
         assert all(f"donor_ids={d.id}" in href for d in (a, b, c))
         assert admin.get(href).status_code == 200
 
+    def test_each_record_offers_a_keep_choice_defaulting_to_the_biggest_giver(self, admin, app):
+        a, b = _donor("astha", "6204999675"), _donor("Astha Rai", "6204999675")
+        _give(a, 10)
+        _give(b, 99)
+        html = admin.get(_compare_url(a, b)).get_data(as_text=True)
+        assert html.count('name="keep_id"') == 2
+        assert re.search(rf'value="{b.id}"[^>]*checked', html)
+        assert not re.search(rf'value="{a.id}"[^>]*checked', html)
+
     def test_shows_every_record_side_by_side_with_totals_and_recent_gifts(self, admin, app):
         a = _donor("Astha", "6204999675", city="Delhi", pan="ABCDE1234F")
         b = _donor("Astha Rai", "6204999675", city="Noida", email="rai@example.com")
@@ -129,7 +137,7 @@ class TestTheComparison:
             assert text in html
         assert "Rs. 3,000" in html and "Rs. 1,000" in html       # each record's own total
         assert "Annadan" in html                                # recent donations listed
-        assert html.count('class="badge bg-success ms-1">Keeps') == 1
+        assert html.count('class="badge bg-success ms-1">Recommended') == 1
         assert "Merge into Astha Rai" in html                   # the one merge button, naming the kept record
 
     def test_differences_and_fill_ins_are_highlighted(self, admin, app):
@@ -200,6 +208,28 @@ class TestMerging:
         _merge(admin, small, big)
         assert Donor.query.filter_by(full_name="Big").count() == 1
         assert Donor.query.filter_by(full_name="Small").count() == 0
+
+    def test_the_admin_can_choose_which_record_to_keep(self, admin, app):
+        from models import Donor, Donation
+        fuller = _donor("Astha Rai", "6204999675")
+        lower = _donor("astha", "6204999675")
+        _give(fuller, 100)
+        _give(lower, 9000)          # the default survivor would be "astha"
+        resp = _merge(admin, fuller, lower, keep=fuller)
+        assert Donor.query.get(lower.id) is None
+        assert Donor.query.get(fuller.id).full_name == "Astha Rai"
+        assert Donation.query.filter_by(donor_id=fuller.id).count() == 2
+        assert "into Astha Rai" in resp.get_data(as_text=True)
+
+    def test_keep_id_outside_the_group_is_ignored(self, admin, app):
+        from models import Donor
+        a, b = _donor("A", "6204999675"), _donor("B", "6204999675")
+        outsider = _donor("Outsider", "9111111111")
+        _give(a, 1)
+        _give(b, 50)
+        _merge(admin, a, b, keep=outsider)
+        assert Donor.query.get(outsider.id) is not None
+        assert Donor.query.get(b.id) is not None and Donor.query.get(a.id) is None
 
     def test_a_three_way_group_merges_into_one(self, admin, app):
         from models import Donor, Donation

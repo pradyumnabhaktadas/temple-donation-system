@@ -15,18 +15,18 @@
   <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
     <div class="small">
       Merging moves <strong>every donation</strong> into
-      <strong>{{ keep.full_name }}</strong> (<span class="badge bg-success">Keeps</span> &mdash; the record that has given the most)
+      <strong id="keep-name">{{ keep.full_name }}</strong> (<span class="badge bg-success">Recommended</span> &mdash; the record that has given the most; tick <em>Keep this one</em> under any name to keep that one instead, e.g. the fuller spelling)
       and deletes the other {{ (donors | length) - 1 }} record(s).
       Details already on the kept record are never overwritten; blank ones are filled from the others
       (<span class="px-1" style="background:#e3f0ff">blue</span>), and notes from both are combined.
       <span class="px-1" style="background:#fff1cc">Amber</span> rows differ &mdash; the kept record's value stays.
     </div>
     {% if current_user.role == 'admin' %}
-    <form method="post" action="{{ url_for('admin.merge_duplicate_group') }}"
+    <form id="merge-form" method="post" action="{{ url_for('admin.merge_duplicate_group') }}"
           data-confirm="Merge these {{ donors | length }} records into {{ keep.full_name }}? All their donations move to {{ keep.full_name }} and the other {{ (donors | length) - 1 }} record(s) are deleted. This cannot be undone.">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       {% for d in donors %}<input type="hidden" name="donor_ids" value="{{ d.id }}">{% endfor %}
-      <button class="btn btn-primary">Merge into {{ keep.full_name }}</button>
+      <button class="btn btn-primary" id="merge-button">Merge into {{ keep.full_name }}</button>
     </form>
     {% else %}
     <span class="text-muted small">Only an admin can merge.</span>
@@ -42,7 +42,15 @@
       {% for d in donors %}
       <th class="{% if d.id == keep.id %}table-success{% endif %}">
         <a href="{{ url_for('admin.donor_detail', donor_id=d.id) }}">{{ d.full_name }}</a>
-        {% if d.id == keep.id %}<span class="badge bg-success ms-1">Keeps</span>{% else %}<span class="badge bg-secondary ms-1">Merged in</span>{% endif %}
+        {% if d.id == keep.id %}<span class="badge bg-success ms-1">Recommended</span>{% endif %}
+        {% if current_user.role == 'admin' %}
+        <div class="form-check mt-1 fw-normal">
+          <input class="form-check-input keep-radio" type="radio" name="keep_id" form="merge-form"
+                 id="keep-{{ d.id }}" value="{{ d.id }}" data-name="{{ d.full_name }}"
+                 {% if d.id == keep.id %}checked{% endif %}>
+          <label class="form-check-label small" for="keep-{{ d.id }}">Keep this one</label>
+        </div>
+        {% endif %}
         <div class="small text-muted fw-normal">Record #{{ d.id }}{% if d.created_at %} &middot; added {{ (d.created_at | to_ist).strftime('%d %b %Y') }}{% endif %}</div>
       </th>
       {% endfor %}
@@ -86,4 +94,31 @@
   </tbody>
 </table>
 </div>
+{% if current_user.role == 'admin' %}
+<script>
+/* The record being kept is chosen on this page, so the button label and the
+   confirmation have to follow the choice. The names live in data-name
+   attributes and are put in with textContent / dataset, never spliced into
+   a JavaScript string. */
+(function () {
+  var form = document.getElementById('merge-form');
+  if (!form) return;
+  var n = {{ donors | length }};
+  function refresh() {
+    var picked = form.ownerDocument.querySelector('.keep-radio:checked');
+    if (!picked) return;
+    var name = picked.dataset.name;
+    document.getElementById('merge-button').textContent = 'Merge into ' + name;
+    var label = document.getElementById('keep-name');
+    if (label) label.textContent = name;
+    form.dataset.confirm = 'Merge these ' + n + ' records into ' + name + '? All their donations move to '
+      + name + ' and the other ' + (n - 1) + ' record(s) are deleted. This cannot be undone.';
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.keep-radio'), function (r) {
+    r.addEventListener('change', refresh);
+  });
+  refresh();
+})();
+</script>
+{% endif %}
 {% endblock %}

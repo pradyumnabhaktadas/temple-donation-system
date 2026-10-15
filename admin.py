@@ -1758,14 +1758,15 @@ def compare_duplicate_group():
 @login_required
 @admin_role_required
 def merge_duplicate_group():
-    """One click on the Possible Duplicates page: merges every donor in the
-    group into the one with the most giving (see _pick_merge_survivor).
+    """The Merge button on the compare page: merges every donor in the group
+    into one record -- the one the admin ticked "Keep this one" on, which
+    defaults to whoever has given the most (see _pick_merge_survivor).
 
-    The survivor is worked out here, not read from the form -- the form
-    only says *which donors*, so a hand-edited request can't redirect a
-    group's history into an arbitrary record. It also has to be a real
-    group: every donor must share the survivor's phone or email, so this
-    route can't be used to merge two unrelated people."""
+    `donor_ids` says which donors are in the group; `keep_id` (optional)
+    says which of them survives. keep_id must be one of those donors, and
+    every other donor must share the survivor's phone or email -- this
+    route can't be used to merge two unrelated people, or to fold a
+    group's history into a record outside it."""
     try:
         ids = sorted({int(x) for x in request.form.getlist("donor_ids")})
     except ValueError:
@@ -1776,7 +1777,10 @@ def merge_duplicate_group():
               "The list below is up to date.")
         return redirect(url_for("admin.duplicate_donors"))
 
-    keep = _pick_merge_survivor(donors, _donor_money_stats([d.id for d in donors]))
+    keep_id = request.form.get("keep_id", type=int)
+    keep = next((d for d in donors if d.id == keep_id), None)
+    if keep is None:   # not sent, or not one of this group: use the default
+        keep = _pick_merge_survivor(donors, _donor_money_stats([d.id for d in donors]))
     others = [d for d in donors if d.id != keep.id]
     if not _share_contact_with(keep, others):
         flash("Those donors don't share a phone number or email, so they were not merged.")
