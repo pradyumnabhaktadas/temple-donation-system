@@ -428,6 +428,8 @@ body {
 .brand-caption { display:block; margin-top:.15rem; font-size:.72rem; font-weight:700; letter-spacing:-.01em; line-height:1.15; white-space:nowrap; }
 .site-account-link { color:var(--maroon-dark); font-size:.82rem; font-weight:700; white-space:nowrap; padding:.54rem .75rem; border:1px solid rgba(29,59,109,.15); border-radius:99px; transition:.18s ease; }
 .site-account-link:hover { background:var(--maroon); border-color:var(--maroon); color:#fff; }
+.site-center-nav .dropdown-toggle { color:var(--maroon-dark); white-space:nowrap; }
+.site-center-nav .dropdown-menu { border:1px solid rgba(15,36,68,.14); box-shadow:0 12px 26px rgba(15,36,68,.16); }
 .nav-give-btn { color:#fff; background:var(--maroon); font-size:.82rem; font-weight:700; white-space:nowrap; padding:.56rem 1.05rem; border-radius:99px; transition:.18s ease; box-shadow:0 4px 10px rgba(15,36,68,.2); }
 .nav-give-btn:hover { background:var(--maroon-dark); color:#fff; }
 .site-main { min-height: calc(100vh - 148px); }
@@ -458,6 +460,9 @@ body {
   .site-nav-links.show { display:flex !important; }
   .site-nav-links a { padding:.75rem .1rem; border-bottom:1px solid rgba(15,36,68,.07); border-radius:0; width:100%; }
   .site-nav-links .site-account-link { margin-top:.6rem; border-radius:.6rem; text-align:center; justify-content:center; display:flex; border-bottom:1px solid rgba(29,59,109,.15); }
+  .site-nav-links .site-center-nav { width:100%; }
+  .site-nav-links .site-center-nav > a { display:block; }
+  .site-nav-links .site-center-nav .dropdown-menu { position:static; width:100%; margin:0; border:0; box-shadow:none; background:transparent; }
   .site-nav-links .nav-give-btn { margin-top:.5rem; border-radius:.6rem; text-align:center; display:block; border-bottom:none; }
 }
 

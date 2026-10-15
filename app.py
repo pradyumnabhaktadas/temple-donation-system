@@ -8,7 +8,7 @@ load_dotenv()
 
 from config import Config
 from extensions import db, login_manager, csrf, limiter, LIMITER_AVAILABLE
-from models import AdminUser
+from models import AdminUser, PreachingCenter
 from utils import HIGH_VALUE_PAN_THRESHOLD, format_inr, normalize_phone, to_ist, receipt_access_token, mask_pan
 
 
@@ -272,6 +272,12 @@ def create_app(test_config=None, serving=None):
             "org_contact_email": app.config["ORG_CONTACT_EMAIL"],
             "org_contact_phone": contact_phone,
             "org_contact_whatsapp_number": contact_whatsapp_number,
+            # The public header lists only live collection links.  Because
+            # this comes from the database, a newly-created center appears
+            # automatically without another template or deployment change.
+            "public_preaching_centers": PreachingCenter.query.filter_by(
+                is_active=True
+            ).order_by(PreachingCenter.name).all(),
         }
 
     @app.errorhandler(CSRFError)

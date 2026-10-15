@@ -91,6 +91,21 @@ class TestPreachingCenterPublicCollection:
         assert response.headers["X-Robots-Tag"] == "noindex, nofollow"
         assert PreachingCenter.query.one().is_active is True
 
+    def test_public_navigation_lists_only_active_centers(self, app, client):
+        from extensions import db
+        from models import PreachingCenter
+        login(client)
+        _create_center(client)
+        inactive = PreachingCenter(name="Inactive Center", slug="inactive-center", is_active=False)
+        db.session.add(inactive)
+        db.session.commit()
+
+        response = client.get("/")
+        assert response.status_code == 200
+        assert b"Preaching Centers" in response.data
+        assert b"/pc/dwarka" in response.data
+        assert b"/pc/inactive-center" not in response.data
+
     def test_order_records_center_server_side(self, app, client):
         from models import Campaign, Donation, PreachingCenter
         login(client)

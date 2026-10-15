@@ -53,6 +53,16 @@
           <a href="{{ url_for('public.about_us') }}" class="text-decoration-none {% if request.endpoint == 'public.about_us' %}fw-bold{% endif %}">About Us</a>
           <a href="{{ url_for('public.festival_seva_form') }}" class="text-decoration-none {% if request.endpoint == 'public.festival_seva_form' %}fw-bold{% endif %}">Festival Seva</a>
           <a href="{{ url_for('public.bace_rent_form') }}" class="text-decoration-none {% if request.endpoint == 'public.bace_rent_form' %}fw-bold{% endif %}">BACE Contribution</a>
+          {% if public_preaching_centers %}
+          <div class="nav-item dropdown site-center-nav">
+            <a class="text-decoration-none dropdown-toggle {% if request.endpoint == 'public.preaching_center_donate_form' %}fw-bold{% endif %}" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">Preaching Centers</a>
+            <ul class="dropdown-menu dropdown-menu-end">
+              {% for center in public_preaching_centers %}
+              <li><a class="dropdown-item" href="{{ url_for('public.preaching_center_donate_form', slug=center.slug) }}">{{ center.name }}</a></li>
+              {% endfor %}
+            </ul>
+          </div>
+          {% endif %}
           {# Donor Login hidden per request (not needed for now) -- donor_portal
              routes are untouched, just not linked from the nav. Restore this
              block to bring it back. #}
