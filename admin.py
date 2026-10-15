@@ -1531,6 +1531,62 @@ def donor_edit(donor_id):
     )
 
 
+# Fields copied onto the kept donor only where the kept donor has nothing --
+# the merge never overwrites what is already on file. (full_name is not
+# here: the kept record's own name always stays.)
+_DONOR_BACKFILL_FIELDS = (
+    "email", "phone", "whatsapp_number", "pan", "address", "city", "state", "pincode",
+    "donor_type", "connected_preacher_id", "donation_frequency", "gifts",
+    "dob", "father_dob", "mother_dob", "wife_dob", "marriage_anniversary",
+)
+
+
+def _absorb_donor(keep, duplicate):
+    """Moves every donation from `duplicate` onto `keep`, fills `keep`'s
+    blank fields from `duplicate`, and deletes `duplicate`. Returns how many
+    donations moved. Adds to the session only -- the caller commits (and
+    logs). The one place a merge happens, shared by the donor page's
+    "Merge a Duplicate Record" box and the Possible Duplicates page's
+    one-click Merge, so the two can never merge differently."""
+    moved = Donation.query.filter_by(donor_id=duplicate.id).update({"donor_id": keep.id})
+    for field in _DONOR_BACKFILL_FIELDS:
+        if not getattr(keep, field):
+            setattr(keep, field, getattr(duplicate, field))
+    # Notes are free text that staff wrote by hand; losing the duplicate's
+    # would be silent data loss, so they are appended rather than dropped.
+    if duplicate.additional_info and duplicate.additional_info != keep.additional_info:
+        keep.additional_info = (
+            f"{keep.additional_info}\n\n{duplicate.additional_info}" if keep.additional_info
+            else duplicate.additional_info
+        )
+    db.session.delete(duplicate)
+    return moved
+
+
+def _donor_money_stats(donor_ids):
+    """{donor_id: (total_received, successful_donation_count)} in as few
+    queries as possible (chunked, so a long list stays under SQLite's
+    bound-parameter limit)."""
+    ids = list(donor_ids)
+    stats = {}
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        for donor_id, total, count in (
+            db.session.query(Donation.donor_id, func.coalesce(func.sum(Donation.amount), 0), func.count(Donation.id))
+            .filter(Donation.status == "success", Donation.donor_id.in_(chunk))
+            .group_by(Donation.donor_id)
+        ):
+            stats[donor_id] = (Decimal(total), count)
+    return {donor_id: stats.get(donor_id, (Decimal(0), 0)) for donor_id in ids}
+
+
+def _pick_merge_survivor(donors, stats):
+    """The record a group merges *into*: whoever has given the most (then
+    the most donations, then the oldest record) -- so the history and
+    details people already rely on stay where they are."""
+    return max(donors, key=lambda d: (stats[d.id][0], stats[d.id][1], -d.id))
+
+
 @bp.route("/donors/<int:donor_id>/merge", methods=["POST"])
 @login_required
 @admin_role_required
@@ -1558,17 +1614,7 @@ def donor_merge(donor_id):
         flash(f"No other donor found matching '{lookup}'.")
         return redirect(url_for("admin.donor_detail", donor_id=donor_id))
 
-    moved = Donation.query.filter_by(donor_id=duplicate.id).update({"donor_id": keep.id})
-    keep.full_name = keep.full_name or duplicate.full_name
-    keep.phone = keep.phone or duplicate.phone
-    keep.email = keep.email or duplicate.email
-    keep.pan = keep.pan or duplicate.pan
-    keep.address = keep.address or duplicate.address
-    keep.city = keep.city or duplicate.city
-    keep.state = keep.state or duplicate.state
-    keep.pincode = keep.pincode or duplicate.pincode
-
-    db.session.delete(duplicate)
+    moved = _absorb_donor(keep, duplicate)
     log_activity(
         "donor_merge", target_type="donor", target_id=keep.id,
         details=f"Merged duplicate donor #{duplicate.id} ('{duplicate.full_name}') into '{keep.full_name}' ({moved} donation(s) reassigned)",
@@ -1613,10 +1659,142 @@ def duplicate_donors():
         key=lambda g: g[0].email,
     )
 
+    stats = _donor_money_stats({d.id for g in phone_dupes + email_dupes for d in g})
+    survivors = {}
+    for group in phone_dupes + email_dupes:
+        survivors[",".join(str(d.id) for d in group)] = _pick_merge_survivor(group, stats).id
+
     return render_template(
         "admin/duplicate_donors.html",
-        phone_dupes=phone_dupes, email_dupes=email_dupes,
+        phone_dupes=phone_dupes, email_dupes=email_dupes, stats=stats, survivors=survivors,
     )
+
+
+def _share_contact_with(keep, others):
+    """True when every donor in `others` shares `keep`'s phone or email --
+    the only thing that makes a set of donors a "group" on the Possible
+    Duplicates page. Both the compare view and the merge check this
+    server-side, so neither can be pointed at two unrelated people."""
+    return all(
+        (o.phone and o.phone == keep.phone) or (o.email and o.email == keep.email)
+        for o in others
+    )
+
+
+@bp.route("/donors/duplicates/compare")
+@login_required
+def compare_duplicate_group():
+    """Side-by-side view of one group, so staff can see everything on file
+    for each record -- details and recent giving -- before deciding to
+    merge. The Merge button is on this page."""
+    try:
+        ids = sorted({int(x) for x in request.args.getlist("donor_ids")})
+    except ValueError:
+        abort(400)
+    donors = Donor.query.filter(Donor.id.in_(ids)).all() if ids else []
+    if len(donors) < 2 or len(donors) != len(ids):
+        flash("That group has already changed (a record was merged or removed). The list below is up to date.")
+        return redirect(url_for("admin.duplicate_donors"))
+
+    stats = _donor_money_stats([d.id for d in donors])
+    keep = _pick_merge_survivor(donors, stats)
+    if not _share_contact_with(keep, [d for d in donors if d.id != keep.id]):
+        flash("Those donors don't share a phone number or email, so they can't be compared as a group.")
+        return redirect(url_for("admin.duplicate_donors"))
+
+    # Kept record first, then the rest by name.
+    donors.sort(key=lambda d: (d.id != keep.id, (d.full_name or "").lower(), d.id))
+    recent = {
+        d.id: Donation.query.filter_by(donor_id=d.id, status="success")
+        .order_by(Donation.donation_date.desc()).limit(5).all()
+        for d in donors
+    }
+    last_given = {d.id: (recent[d.id][0].donation_date if recent[d.id] else None) for d in donors}
+
+    # (label, getter) -- getter returns the display text; blank means "nothing on file".
+    def text(attr):
+        return lambda d: (getattr(d, attr) or "")
+
+    def day(attr):
+        return lambda d: (getattr(d, attr).strftime("%d %b %Y") if getattr(d, attr) else "")
+
+    fields = [
+        ("Name", text("full_name")),
+        ("Phone", text("phone")),
+        ("WhatsApp", text("whatsapp_number")),
+        ("Email", text("email")),
+        ("PAN", text("pan")),
+        ("Address", text("address")),
+        ("City", text("city")),
+        ("State", text("state")),
+        ("Pincode", text("pincode")),
+        ("Donor type", lambda d: DONOR_TYPE_LABELS.get(d.donor_type, "") if d.donor_type else ""),
+        ("Connected preacher", lambda d: d.connected_preacher.name if d.connected_preacher else ""),
+        ("Donation frequency", lambda d: DONATION_FREQUENCY_LABELS.get(d.donation_frequency, "") if d.donation_frequency else ""),
+        ("Date of birth", day("dob")),
+        ("Marriage anniversary", day("marriage_anniversary")),
+        ("Gifts", text("gifts")),
+        ("Notes", text("additional_info")),
+    ]
+    rows = []
+    for label, getter in fields:
+        values = [getter(d) for d in donors]
+        filled = {v.strip().lower() for v in values if v and v.strip()}
+        rows.append({
+            # "cells", not "values": in Jinja `row.values` finds dict.values() first.
+            "label": label, "cells": values,
+            # amber: two different non-blank values -- the kept one wins;
+            # blue: kept record is blank here, so it will be filled in.
+            "differs": len(filled) > 1,
+            "will_fill": (not values[0]) and bool(filled),
+        })
+    return render_template(
+        "admin/duplicate_compare.html", donors=donors, keep=keep, rows=rows, stats=stats,
+        recent=recent, last_given=last_given,
+    )
+
+
+@bp.route("/donors/duplicates/merge", methods=["POST"])
+@login_required
+@admin_role_required
+def merge_duplicate_group():
+    """One click on the Possible Duplicates page: merges every donor in the
+    group into the one with the most giving (see _pick_merge_survivor).
+
+    The survivor is worked out here, not read from the form -- the form
+    only says *which donors*, so a hand-edited request can't redirect a
+    group's history into an arbitrary record. It also has to be a real
+    group: every donor must share the survivor's phone or email, so this
+    route can't be used to merge two unrelated people."""
+    try:
+        ids = sorted({int(x) for x in request.form.getlist("donor_ids")})
+    except ValueError:
+        abort(400)
+    donors = Donor.query.filter(Donor.id.in_(ids)).all() if ids else []
+    if len(donors) < 2 or len(donors) != len(ids):
+        flash("That group has already changed (a record was merged or removed) -- nothing was merged. "
+              "The list below is up to date.")
+        return redirect(url_for("admin.duplicate_donors"))
+
+    keep = _pick_merge_survivor(donors, _donor_money_stats([d.id for d in donors]))
+    others = [d for d in donors if d.id != keep.id]
+    if not _share_contact_with(keep, others):
+        flash("Those donors don't share a phone number or email, so they were not merged.")
+        return redirect(url_for("admin.duplicate_donors"))
+
+    moved = 0
+    merged_names = []
+    for other in others:
+        merged_names.append(f"#{other.id} '{other.full_name}'")
+        moved += _absorb_donor(keep, other)
+    log_activity(
+        "donor_merge", target_type="donor", target_id=keep.id,
+        details=f"Merged duplicate donor(s) {', '.join(merged_names)} into '{keep.full_name}' "
+                f"({moved} donation(s) reassigned) from the Possible Duplicates page",
+    )
+    db.session.commit()
+    flash(f"Merged {len(others)} record(s) into {keep.full_name}; {moved} donation(s) moved.")
+    return redirect(url_for("admin.duplicate_donors"))
 
 
 def _apply_donations_filters(query):

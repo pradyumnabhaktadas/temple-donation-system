@@ -1,0 +1,89 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Compare Duplicate Donors{% endblock %}
+{% block content %}
+<div class="admin-page-header">
+  <div>
+    <div class="eyebrow">Possible duplicates</div>
+    <h3>🔍 Compare {{ donors | length }} Donor Records</h3>
+  </div>
+  <div class="admin-page-actions">
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.duplicate_donors') }}">&larr; Back to list</a>
+  </div>
+</div>
+
+<div class="card card-body shadow-sm p-3 mb-3">
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+    <div class="small">
+      Merging moves <strong>every donation</strong> into
+      <strong>{{ keep.full_name }}</strong> (<span class="badge bg-success">Keeps</span> &mdash; the record that has given the most)
+      and deletes the other {{ (donors | length) - 1 }} record(s).
+      Details already on the kept record are never overwritten; blank ones are filled from the others
+      (<span class="px-1" style="background:#e3f0ff">blue</span>), and notes from both are combined.
+      <span class="px-1" style="background:#fff1cc">Amber</span> rows differ &mdash; the kept record's value stays.
+    </div>
+    {% if current_user.role == 'admin' %}
+    <form method="post" action="{{ url_for('admin.merge_duplicate_group') }}"
+          data-confirm="Merge these {{ donors | length }} records into {{ keep.full_name }}? All their donations move to {{ keep.full_name }} and the other {{ (donors | length) - 1 }} record(s) are deleted. This cannot be undone.">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {% for d in donors %}<input type="hidden" name="donor_ids" value="{{ d.id }}">{% endfor %}
+      <button class="btn btn-primary">Merge into {{ keep.full_name }}</button>
+    </form>
+    {% else %}
+    <span class="text-muted small">Only an admin can merge.</span>
+    {% endif %}
+  </div>
+</div>
+
+<div class="table-responsive">
+<table class="table table-sm table-bordered bg-white shadow-sm align-top" style="min-width:{{ 180 + 260 * (donors | length) }}px">
+  <thead>
+    <tr>
+      <th style="width:180px"></th>
+      {% for d in donors %}
+      <th class="{% if d.id == keep.id %}table-success{% endif %}">
+        <a href="{{ url_for('admin.donor_detail', donor_id=d.id) }}">{{ d.full_name }}</a>
+        {% if d.id == keep.id %}<span class="badge bg-success ms-1">Keeps</span>{% else %}<span class="badge bg-secondary ms-1">Merged in</span>{% endif %}
+        <div class="small text-muted fw-normal">Record #{{ d.id }}{% if d.created_at %} &middot; added {{ (d.created_at | to_ist).strftime('%d %b %Y') }}{% endif %}</div>
+      </th>
+      {% endfor %}
+    </tr>
+  </thead>
+  <tbody>
+    <tr class="table-light">
+      <th class="small">Giving</th>
+      {% for d in donors %}
+      <td>
+        <div><strong>Rs. {{ stats[d.id][0] | inr }}</strong> &middot; {{ stats[d.id][1] }} donation{{ '' if stats[d.id][1] == 1 else 's' }}</div>
+        <div class="small text-muted">
+          Last: {{ (last_given[d.id] | to_ist).strftime('%d %b %Y') if last_given[d.id] else 'never' }}
+        </div>
+      </td>
+      {% endfor %}
+    </tr>
+    {% for row in rows %}
+    <tr {% if row.differs %}style="background:#fff1cc"{% endif %}>
+      <th class="small">{{ row.label }}</th>
+      {% for v in row.cells %}
+      {% set cell_style = ('background:#e3f0ff;' if (row.will_fill and loop.first) else '') ~ ('white-space:pre-wrap;' if row.label in ('Notes', 'Address') else '') %}
+      <td {% if cell_style %}style="{{ cell_style }}"{% endif %}>
+        {% if v %}{{ v }}{% else %}<span class="text-muted">&ndash;</span>{% endif %}
+      </td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+    <tr class="table-light">
+      <th class="small">Recent donations</th>
+      {% for d in donors %}
+      <td class="small">
+        {% for g in recent[d.id] %}
+        <div>{{ (g.donation_date | to_ist).strftime('%d %b %Y') }} &middot; Rs. {{ g.amount | inr }} &middot; {{ g.campaign.name }}</div>
+        {% else %}
+        <span class="text-muted">None yet</span>
+        {% endfor %}
+      </td>
+      {% endfor %}
+    </tr>
+  </tbody>
+</table>
+</div>
+{% endblock %}
