@@ -28,6 +28,10 @@ class TestPreachingCenterAdministration:
         login(client)
         _create_center(client)
         center = PreachingCenter.query.one()
+        edit_page = client.get(f"/admin/preaching-centers/{center.id}/edit")
+        assert edit_page.status_code == 200
+        assert b"Deity Seva" in edit_page.data
+        assert b"Monthly Nitya Seva" in edit_page.data
         response = client.post(f"/admin/preaching-centers/{center.id}/edit", data={
             "name": center.name, "new_purpose_name": "Book Distribution",
             "purpose_ids": [str(link.live_to_give_purpose_id) for link in center.purpose_links],
