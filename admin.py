@@ -23,7 +23,7 @@ from extensions import db, limiter
 from models import (
     Camp,
     Donor, Campaign, Donation, AdminUser, ReceiptCounter, BaceProperty, Festival, SevaType,
-    LiveToGivePurpose, Preacher, AssociatedWith, AdminActivityLog, DailyReportRecipient, BirthdayAlertRecipient,
+    LiveToGivePurpose, Preacher, AssociatedWith, PreachingCenter, AdminActivityLog, DailyReportRecipient, BirthdayAlertRecipient,
     BaceStudent, BaceRentCharge, BaceRentPayment, BaceRentAdjustment, BaceRentMonthClose, BACE_PAYMENT_MODES,
     REPORT_FREQUENCIES,
     DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES, DONATION_FREQUENCY_LABELS,
@@ -40,9 +40,10 @@ import bace_matching
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
-ADMIN_ROLES = ["bace_viewer", "staff", "manager", "admin"]
+ADMIN_ROLES = ["bace_viewer", "preaching_center_viewer", "staff", "manager", "admin"]
 ADMIN_ROLE_LABELS = {
     "bace_viewer": "BACE Viewer -- read-only access to the BACE rent tracker only",
+    "preaching_center_viewer": "Center Viewer -- read-only access to one preaching center report",
     "staff": "Staff -- day-to-day work (log donations, view donors/reports)",
     "manager": "Manager -- staff permissions, same restrictions as staff for now",
     "admin": "Admin -- full access, including managing campaigns and other accounts",
@@ -55,6 +56,10 @@ ADMIN_ROLE_LABELS = {
 BACE_VIEWER_ENDPOINTS = frozenset({
     "admin.bace_tracker_grid", "admin.change_password", "admin.logout",
 })
+CENTER_VIEWER_ENDPOINTS = frozenset({
+    "admin.preaching_center_detail", "admin.export_preaching_center", "admin.preaching_center_qr",
+    "admin.change_password", "admin.logout",
+})
 
 
 @bp.before_request
@@ -66,6 +71,12 @@ def restrict_bace_viewer_access():
     ):
         flash("This account has read-only access to the BACE rent tracker.")
         return redirect(url_for("admin.bace_tracker_grid"))
+    if current_user.is_authenticated and current_user.role == "preaching_center_viewer":
+        if request.endpoint not in CENTER_VIEWER_ENDPOINTS:
+            if current_user.preaching_center_id:
+                flash("This account has read-only access to its assigned preaching center.")
+                return redirect(url_for("admin.preaching_center_detail", center_id=current_user.preaching_center_id))
+            abort(403)
 
 
 def _generate_temp_password():
@@ -273,10 +284,11 @@ def manage_users():
     seed.py), which doesn't scale past one admin."""
     users = AdminUser.query.order_by(AdminUser.role.desc(), AdminUser.username).all()
     properties = BaceProperty.query.order_by(BaceProperty.name).all()
+    preaching_centers = PreachingCenter.query.order_by(PreachingCenter.name).all()
     return render_template(
         "admin/manage_users.html", users=users,
         admin_roles=ADMIN_ROLES, admin_role_labels=ADMIN_ROLE_LABELS,
-        properties=properties,
+        properties=properties, preaching_centers=preaching_centers,
     )
 
 
@@ -293,18 +305,26 @@ def add_user():
     if role not in ADMIN_ROLES:
         role = "staff"
     bace_property_id = request.form.get("bace_property_id", type=int)
+    preaching_center_id = request.form.get("preaching_center_id", type=int)
     if role == "bace_viewer":
         if not bace_property_id or not BaceProperty.query.get(bace_property_id):
             flash("Choose the BACE property this viewer may access.")
             return redirect(url_for("admin.manage_users"))
     else:
         bace_property_id = None
+    if role == "preaching_center_viewer":
+        if not preaching_center_id or not PreachingCenter.query.get(preaching_center_id):
+            flash("Choose the preaching center this viewer may access.")
+            return redirect(url_for("admin.manage_users"))
+    else:
+        preaching_center_id = None
     if AdminUser.query.filter_by(username=username).first():
         flash(f"Username '{username}' is already taken.")
         return redirect(url_for("admin.manage_users"))
 
     temp_password = _generate_temp_password()
-    user = AdminUser(username=username, role=role, bace_property_id=bace_property_id, must_change_password=True)
+    user = AdminUser(username=username, role=role, bace_property_id=bace_property_id,
+                     preaching_center_id=preaching_center_id, must_change_password=True)
     user.set_password(temp_password)
     db.session.add(user)
     db.session.flush()
@@ -376,6 +396,8 @@ def change_user_role(user_id):
     user.role = new_role
     if new_role != "bace_viewer":
         user.bace_property_id = None
+    if new_role != "preaching_center_viewer":
+        user.preaching_center_id = None
     log_activity("admin_user_role_change", target_type="admin_user", target_id=user.id, details=f"'{user.username}' role changed: {old_role} -> {new_role}")
     db.session.commit()
     flash(f"'{user.username}' is now {new_role}.")
@@ -399,6 +421,26 @@ def change_user_bace_property(user_id):
     log_activity("admin_user_bace_scope", "admin_user", user.id, f"Scoped '{user.username}' to {prop.name}")
     db.session.commit()
     flash(f"'{user.username}' can now view {prop.name} only.")
+    return redirect(url_for("admin.manage_users"))
+
+
+@bp.route("/settings/users/<int:user_id>/preaching-center", methods=["POST"])
+@login_required
+@admin_role_required
+def change_user_preaching_center(user_id):
+    user = AdminUser.query.get_or_404(user_id)
+    if user.role != "preaching_center_viewer":
+        flash("Only Center Viewer accounts can have a preaching-center scope.")
+        return redirect(url_for("admin.manage_users"))
+    center_id = request.form.get("preaching_center_id", type=int)
+    center = PreachingCenter.query.get(center_id) if center_id else None
+    if not center:
+        flash("Choose a valid preaching center.")
+        return redirect(url_for("admin.manage_users"))
+    user.preaching_center_id = center.id
+    log_activity("admin_user_center_scope", "admin_user", user.id, f"Scoped '{user.username}' to {center.name}")
+    db.session.commit()
+    flash(f"'{user.username}' can now view {center.name} only.")
     return redirect(url_for("admin.manage_users"))
 
 
@@ -2170,6 +2212,14 @@ def _validated_id_from_form(form, key, model, label):
     return value, None
 
 
+_CENTER_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_RESERVED_CENTER_SLUGS = {"admin", "api", "donate", "pc", "receipt", "webhooks", "healthz", "static"}
+
+
+def _valid_center_slug(slug):
+    return bool(_CENTER_SLUG_RE.fullmatch(slug or "")) and slug not in _RESERVED_CENTER_SLUGS
+
+
 def _offline_donation_form_context():
     """Dropdown data the Single Entry tab needs -- shared between
     manual_donation() and bulk_import_donations() since both routes can
@@ -2248,6 +2298,12 @@ def reassign_donation_campaign(donation_id):
         if error:
             flash(error)
             return redirect(url_for("admin.reassign_donation_campaign", donation_id=donation_id))
+        preaching_center_id, error = _validated_id_from_form(
+            request.form, "preaching_center_id", PreachingCenter, "preaching center"
+        )
+        if error:
+            flash(error)
+            return redirect(url_for("admin.reassign_donation_campaign", donation_id=donation_id))
 
         if new_campaign.name == "BACE Contribution" and not bace_property_id:
             flash("Please choose which BACE property this donation is for.")
@@ -2299,6 +2355,9 @@ def reassign_donation_campaign(donation_id):
             live_to_give_purpose_id if new_campaign.name == "Live To Give" else None
         )
         donation.is_80g_requested = is_80g_requested if new_campaign.name == "Live To Give" else None
+        center = PreachingCenter.query.get(preaching_center_id) if preaching_center_id else None
+        donation.preaching_center_id = center.id if center else None
+        donation.preaching_center_name = center.name if center else None
 
         new_is_80g = donation.effective_is_80g
 
@@ -2335,7 +2394,9 @@ def reassign_donation_campaign(donation_id):
         return redirect(url_for("admin.donor_detail", donor_id=donation.donor_id))
 
     return render_template(
-        "admin/reassign_campaign.html", donation=donation, **_offline_donation_form_context(),
+        "admin/reassign_campaign.html", donation=donation,
+        preaching_centers=PreachingCenter.query.order_by(PreachingCenter.name).all(),
+        **_offline_donation_form_context(),
     )
 
 
@@ -4384,6 +4445,177 @@ def import_donors():
         "admin/import_donors.html", results=results, created=created, updated=updated,
         skipped=skipped, preview=preview
     )
+
+
+@bp.route("/preaching-centers", methods=["GET", "POST"])
+@login_required
+def preaching_centers():
+    """Admin-maintained, scalable collection sources for public /pc/<slug> links."""
+    if request.method == "POST":
+        if current_user.role != "admin":
+            flash("That action requires an administrator account.")
+            return redirect(url_for("admin.preaching_centers"))
+        name = request.form.get("name", "").strip()
+        slug = request.form.get("slug", "").strip().lower()
+        if not name or not _valid_center_slug(slug):
+            flash("Enter a center name and a unique slug using lowercase letters, numbers, and hyphens (reserved names are not allowed).")
+            return redirect(url_for("admin.preaching_centers"))
+        if PreachingCenter.query.filter((PreachingCenter.name == name) | (PreachingCenter.slug == slug)).first():
+            flash("A preaching center with that name or link name already exists.")
+            return redirect(url_for("admin.preaching_centers"))
+        period = request.form.get("target_period") or None
+        if period not in (None, "monthly", "financial_year"):
+            flash("Invalid target period.")
+            return redirect(url_for("admin.preaching_centers"))
+        raw_target = request.form.get("target_amount", "").strip()
+        try:
+            target = Decimal(raw_target) if raw_target else None
+        except Exception:
+            target = None
+        if target is not None and target < 0:
+            flash("Target amount cannot be negative.")
+            return redirect(url_for("admin.preaching_centers"))
+        center = PreachingCenter(
+            name=name, slug=slug, city=request.form.get("city", "").strip() or None,
+            address=request.form.get("address", "").strip() or None,
+            contact_name=request.form.get("contact_name", "").strip() or None,
+            contact_phone=request.form.get("contact_phone", "").strip() or None,
+            target_amount=target, target_period=period,
+        )
+        db.session.add(center)
+        db.session.flush()
+        log_activity("preaching_center_create", "preaching_center", center.id, f"Created '{center.name}' ({center.slug})")
+        db.session.commit()
+        flash(f"Preaching center '{center.name}' created. Its link is /pc/{center.slug}.")
+        return redirect(url_for("admin.preaching_centers"))
+
+    if current_user.role == "preaching_center_viewer":
+        if not current_user.preaching_center_id:
+            abort(403)
+        return redirect(url_for("admin.preaching_center_detail", center_id=current_user.preaching_center_id))
+    centers = PreachingCenter.query.order_by(PreachingCenter.name).all()
+    total_rows = db.session.query(
+        Donation.preaching_center_id, func.coalesce(func.sum(Donation.amount), 0), func.count(Donation.id)
+    ).filter(Donation.status == "success", Donation.preaching_center_id.isnot(None)).group_by(Donation.preaching_center_id).all()
+    totals = {center_id: (total, count) for center_id, total, count in total_rows}
+    return render_template("admin/preaching_centers.html", centers=centers, totals=totals)
+
+
+@bp.route("/preaching-centers/<int:center_id>/toggle", methods=["POST"])
+@login_required
+@admin_role_required
+def toggle_preaching_center(center_id):
+    center = PreachingCenter.query.get_or_404(center_id)
+    center.is_active = not center.is_active
+    log_activity("preaching_center_toggle", "preaching_center", center.id, f"'{center.name}' set to {'active' if center.is_active else 'inactive'}")
+    db.session.commit()
+    return redirect(url_for("admin.preaching_centers"))
+
+
+@bp.route("/preaching-centers/<int:center_id>/edit", methods=["GET", "POST"])
+@login_required
+@admin_role_required
+def edit_preaching_center(center_id):
+    """Edit center metadata while deliberately keeping its public slug permanent."""
+    center = PreachingCenter.query.get_or_404(center_id)
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        if not name:
+            flash("Center name is required.")
+            return redirect(url_for("admin.edit_preaching_center", center_id=center.id))
+        duplicate = PreachingCenter.query.filter(
+            PreachingCenter.name == name, PreachingCenter.id != center.id
+        ).first()
+        if duplicate:
+            flash("Another preaching center already uses that name.")
+            return redirect(url_for("admin.edit_preaching_center", center_id=center.id))
+        period = request.form.get("target_period") or None
+        if period not in (None, "monthly", "financial_year"):
+            flash("Invalid target period.")
+            return redirect(url_for("admin.edit_preaching_center", center_id=center.id))
+        raw_target = request.form.get("target_amount", "").strip()
+        try:
+            target = Decimal(raw_target) if raw_target else None
+        except Exception:
+            flash("Target amount must be a number.")
+            return redirect(url_for("admin.edit_preaching_center", center_id=center.id))
+        if target is not None and target < 0:
+            flash("Target amount cannot be negative.")
+            return redirect(url_for("admin.edit_preaching_center", center_id=center.id))
+        center.name = name
+        center.city = request.form.get("city", "").strip() or None
+        center.address = request.form.get("address", "").strip() or None
+        center.contact_name = request.form.get("contact_name", "").strip() or None
+        center.contact_phone = request.form.get("contact_phone", "").strip() or None
+        center.target_amount = target
+        center.target_period = period
+        log_activity("preaching_center_edit", "preaching_center", center.id, f"Updated '{center.name}' metadata")
+        db.session.commit()
+        flash("Preaching center updated. Its collection link has not changed.")
+        return redirect(url_for("admin.preaching_centers"))
+    return render_template("admin/preaching_center_edit.html", center=center)
+
+
+@bp.route("/preaching-centers/<int:center_id>")
+@login_required
+def preaching_center_detail(center_id):
+    center = PreachingCenter.query.get_or_404(center_id)
+    if current_user.role == "preaching_center_viewer" and current_user.preaching_center_id != center.id:
+        abort(403)
+    status = request.args.get("status", "success")
+    query = Donation.query.filter_by(preaching_center_id=center.id)
+    if status:
+        query = query.filter_by(status=status)
+    donations = query.order_by(Donation.donation_date.desc()).limit(200).all()
+    # Group in Python after converting to IST, rather than using a database
+    # date-format function. The latter is different between SQLite (tests)
+    # and PostgreSQL (Render), and can otherwise put late-night donations in
+    # the wrong month.
+    by_month = defaultdict(Decimal)
+    successful = Donation.query.filter_by(
+        preaching_center_id=center.id, status="success"
+    ).order_by(Donation.donation_date.desc()).all()
+    for donation in successful:
+        by_month[to_ist(donation.donation_date).strftime("%Y-%m")] += Decimal(donation.amount)
+    by_month = dict(sorted(by_month.items(), reverse=True))
+    return render_template("admin/preaching_center_detail.html", center=center, donations=donations, by_month=by_month, status=status)
+
+
+@bp.route("/preaching-centers/<int:center_id>/export.csv")
+@login_required
+def export_preaching_center(center_id):
+    center = PreachingCenter.query.get_or_404(center_id)
+    if current_user.role == "preaching_center_viewer" and current_user.preaching_center_id != center.id:
+        abort(403)
+    rows = Donation.query.filter_by(preaching_center_id=center.id).order_by(Donation.donation_date.desc()).all()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Date", "Donor", "Amount", "Campaign", "Purpose", "Payment ID", "Receipt", "Status", "Center"])
+    for donation in rows:
+        writer.writerow(csv_safe_row([
+            to_ist(donation.donation_date).strftime("%d-%b-%Y"), donation.donor.full_name,
+            donation.amount, donation.campaign.name, donation.specific_purpose or "",
+            donation.razorpay_payment_id or "", donation.receipt_number or "", donation.status, center.name,
+        ]))
+    return Response(output.getvalue(), mimetype="text/csv", headers={
+        "Content-Disposition": f'attachment; filename="preaching-center-{center.slug}.csv"'
+    })
+
+
+@bp.route("/preaching-centers/<int:center_id>/qr.png")
+@login_required
+def preaching_center_qr(center_id):
+    """On-demand printable QR image; nothing is persisted beyond the center link."""
+    center = PreachingCenter.query.get_or_404(center_id)
+    if current_user.role == "preaching_center_viewer" and current_user.preaching_center_id != center.id:
+        abort(403)
+    import qrcode
+    image = qrcode.make(url_for("public.preaching_center_donate_form", slug=center.slug, _external=True))
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    return Response(output.getvalue(), mimetype="image/png", headers={
+        "Content-Disposition": f'inline; filename="{center.slug}-donate-qr.png"'
+    })
 
 
 @bp.route("/campaigns", methods=["GET", "POST"])

@@ -1,0 +1,11 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}{{ center.name }} Collection{% endblock %}
+{% block content %}
+<a href="{{ url_for('admin.preaching_centers') }}">&larr; Back to Preaching Centers</a>
+<h3 class="mt-2">{{ center.name }}</h3><p class="text-muted">Collection link: <a target="_blank" href="{{ url_for('public.preaching_center_donate_form', slug=center.slug) }}">{{ url_for('public.preaching_center_donate_form', slug=center.slug, _external=True) }}</a></p>
+<a class="btn btn-sm btn-outline-secondary mb-3" href="{{ url_for('admin.export_preaching_center', center_id=center.id) }}">Download CSV</a>
+<a class="btn btn-sm btn-outline-secondary mb-3" target="_blank" href="{{ url_for('admin.preaching_center_qr', center_id=center.id) }}">Open printable QR</a>
+<div class="row mb-4"><div class="col-md-5"><div class="card card-body shadow-sm"><h6>Monthly successful collection</h6>{% for month, total in by_month.items() %}<div class="d-flex justify-content-between border-bottom py-1"><span>{{ month }}</span><strong>Rs. {{ '{:,.0f}'.format(total) }}</strong></div>{% else %}<span class="text-muted">No successful donations yet.</span>{% endfor %}</div></div></div>
+<div class="d-flex gap-2 mb-2"><a class="btn btn-sm {% if status == 'success' %}btn-gold{% else %}btn-outline-secondary{% endif %}" href="{{ url_for('admin.preaching_center_detail', center_id=center.id, status='success') }}">Successful</a><a class="btn btn-sm {% if not status %}btn-gold{% else %}btn-outline-secondary{% endif %}" href="{{ url_for('admin.preaching_center_detail', center_id=center.id, status='') }}">All statuses</a></div>
+<div class="table-responsive"><table class="table bg-white shadow-sm"><thead><tr><th>Date</th><th>Donor</th><th>Amount</th><th>Purpose</th><th>Status</th><th>Receipt</th></tr></thead><tbody>{% for d in donations %}<tr><td>{{ d.donation_date.strftime('%d-%b-%Y') }}</td><td>{{ d.donor.full_name }}</td><td>Rs. {{ '{:,.0f}'.format(d.amount) }}</td><td>{{ d.specific_purpose or d.campaign.name }}</td><td>{{ d.status | capitalize }}</td><td>{{ d.receipt_number or '-' }}</td></tr>{% else %}<tr><td colspan="6" class="text-muted">No donations.</td></tr>{% endfor %}</tbody></table></div>
+{% endblock %}

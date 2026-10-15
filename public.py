@@ -48,7 +48,7 @@ from werkzeug.exceptions import HTTPException
 from extensions import db, csrf, limiter
 from models import (
     Donor, Campaign, Donation, ReceiptCounter, BaceProperty, BaceStudent, Festival, SevaType, LiveToGivePurpose,
-    AssociatedWith, AdminActivityLog, ZohoForm,
+    AssociatedWith, PreachingCenter, AdminActivityLog, ZohoForm,
 )
 from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email, send_cancellation_email
@@ -336,7 +336,26 @@ def donate_form():
         razorpay_enabled=current_app.config["RAZORPAY_ENABLED"],
         razorpay_key_id=current_app.config["RAZORPAY_KEY_ID"],
         org_name=current_app.config["ORG_NAME"],
+        preaching_center=None,
     )
+
+
+@bp.route("/pc/<slug>")
+def preaching_center_donate_form(slug):
+    """Public, QR-safe collection link for one active preaching center."""
+    center = PreachingCenter.query.filter_by(slug=(slug or "").lower(), is_active=True).first()
+    if center is None:
+        return render_template("preaching_center_unavailable.html"), 404
+    campaign = Campaign.query.filter_by(name="Live To Give", is_active=True).first()
+    purposes = LiveToGivePurpose.query.filter_by(is_active=True).order_by(LiveToGivePurpose.name).all() if campaign else []
+    response = current_app.make_response(render_template(
+        "donate.html", campaign=campaign, purposes=purposes, associated_withs=[],
+        razorpay_enabled=current_app.config["RAZORPAY_ENABLED"],
+        razorpay_key_id=current_app.config["RAZORPAY_KEY_ID"],
+        org_name=current_app.config["ORG_NAME"], preaching_center=center,
+    ))
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return response
 
 
 @bp.route("/bace-rent")
@@ -562,6 +581,17 @@ def create_order():
     except _InvalidFkError as e:
         return jsonify({"error": str(e)}), 400
 
+    preaching_center = None
+    center_slug = (data.get("preaching_center_slug") or "").strip().lower()
+    if center_slug:
+        # Resolve from the slug server-side: a browser cannot attach a
+        # payment to an arbitrary/inactive center by changing a hidden id.
+        preaching_center = PreachingCenter.query.filter_by(slug=center_slug, is_active=True).first()
+        if preaching_center is None:
+            return jsonify({"error": "This preaching center collection link is no longer available."}), 400
+        # Center links deliberately do not collect an Associated With value.
+        associated_with_id = None
+
     bace_student_id = None
     if data.get("bace_student_token") or data.get("bace_student_id"):
         try:
@@ -698,6 +728,7 @@ def create_order():
             Donation.seva_type_id == seva_type_id,
             Donation.live_to_give_purpose_id == live_to_give_purpose_id,
             Donation.associated_with_id == associated_with_id,
+            Donation.preaching_center_id == (preaching_center.id if preaching_center else None),
             Donation.donation_date >= dedup_cutoff,
         ).order_by(Donation.id.desc()).first()
         if existing_donation and (
@@ -724,6 +755,8 @@ def create_order():
             seva_type_id=seva_type_id,
             live_to_give_purpose_id=live_to_give_purpose_id,
             associated_with_id=associated_with_id,
+            preaching_center_id=preaching_center.id if preaching_center else None,
+            preaching_center_name=preaching_center.name if preaching_center else None,
             is_80g_requested=is_80g_requested,
             remarks=remarks,
             consent_given=True,

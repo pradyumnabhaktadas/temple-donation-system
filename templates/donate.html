@@ -5,7 +5,7 @@
   <div class="donation-hero-copy">
     <p class="hero-eyebrow">{{ org_name or 'ISKCON Dwarka Delhi' }}</p>
     {# The <em> carries the gold accent colour -- see .donation-hero h1 em. #}
-    <h1>Live to <em>Give</em></h1>
+    <h1>{% if preaching_center %}{{ preaching_center.name }} <em>Collection</em>{% else %}Live to <em>Give</em>{% endif %}</h1>
     {# Deliberate line breaks, not incidental wrapping: the lede is set as
        three lines so the Deity's name sits whole on its own, rather than
        breaking wherever the column happens to run out.
@@ -38,8 +38,10 @@
       </div>
 
       <input type="hidden" name="campaign_id" value="{{ campaign.id if campaign else '' }}">
+      {% if preaching_center %}<input type="hidden" name="preaching_center_slug" value="{{ preaching_center.slug }}">{% endif %}
       <input type="hidden" name="full_name" id="full_name">
 
+      {% if preaching_center %}<div class="alert alert-info py-2">Your contribution will be recorded for <strong>{{ preaching_center.name }}</strong>.</div>{% endif %}
       <div class="form-section">
       <div class="row">
         <div class="col-md-6 mb-3">
@@ -157,7 +159,7 @@
       </div>
       </div>
 
-      <div class="form-section">
+      {% if not preaching_center %}<div class="form-section">
         <label class="form-label" for="associated_with_id">I am associated with <span class="text-muted">(optional)</span></label>
         <select class="form-select" name="associated_with_id" id="associated_with_id">
           <option value="">-- Select an option --</option>
@@ -165,7 +167,7 @@
           <option value="{{ a.id }}">{{ a.name }}</option>
           {% endfor %}
         </select>
-      </div>
+      </div>{% endif %}
 
       <div class="form-section mb-0">
         <label class="form-label" for="remarks">Remarks <span class="text-muted">(optional)</span></label>

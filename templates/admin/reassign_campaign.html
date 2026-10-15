@@ -76,6 +76,17 @@
       </select>
     </div>
 
+    <div class="mb-3">
+      <label class="form-label">Preaching center <span class="text-muted">(optional collection source)</span></label>
+      <select class="form-select" name="preaching_center_id">
+        <option value="">-- no preaching center --</option>
+        {% for center in preaching_centers %}
+        <option value="{{ center.id }}" {% if donation.preaching_center_id == center.id %}selected{% endif %}>{{ center.name }}{% if not center.is_active %} (inactive){% endif %}</option>
+        {% endfor %}
+      </select>
+      <div class="form-text">This corrects reporting attribution only; the formal receipt does not print the center.</div>
+    </div>
+
     <div class="form-check mb-3">
       <input class="form-check-input" type="checkbox" name="resend_receipt" id="resend_receipt" value="yes">
       <label class="form-check-label" for="resend_receipt">

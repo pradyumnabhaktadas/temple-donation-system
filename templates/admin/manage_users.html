@@ -26,6 +26,13 @@
         {% for p in properties %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
       </select>
     </div>
+    <div class="col-md-6">
+      <label class="form-label small" for="new-user-preaching-center">Center viewer scope</label>
+      <select name="preaching_center_id" id="new-user-preaching-center" class="form-select">
+        <option value="">Required only for Center Viewer</option>
+        {% for c in preaching_centers %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+      </select>
+    </div>
     <div class="col-md-2">
       <button class="btn btn-gold w-100">Create</button>
     </div>
@@ -71,6 +78,15 @@
               {% for p in properties %}<option value="{{ p.id }}" {% if u.bace_property_id == p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
             </select>
             <button class="btn btn-sm btn-outline-secondary">Scope</button>
+          </form>
+          {% endif %}
+          {% if u.role == 'preaching_center_viewer' %}
+          <form method="post" action="{{ url_for('admin.change_user_preaching_center', user_id=u.id) }}" class="d-flex gap-1 mt-1">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <select name="preaching_center_id" class="form-select form-select-sm" aria-label="Preaching center for {{ u.username }}">
+              <option value="">Choose center…</option>
+              {% for c in preaching_centers %}<option value="{{ c.id }}" {% if u.preaching_center_id == c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+            </select><button class="btn btn-sm btn-outline-secondary">Scope</button>
           </form>
           {% endif %}
         </td>

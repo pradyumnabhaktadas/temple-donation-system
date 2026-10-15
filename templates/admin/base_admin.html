@@ -21,10 +21,14 @@
       {% set donations_endpoints = ['admin.donations'] + offline_donation_endpoints + ['admin.import_legacy_donations', 'admin.import_zoho_report', 'admin.zoho_reconcile'] %}
       {% set programs_endpoints = iyf_camp_endpoints + bace_tracker_endpoints %}
       {% set donors_endpoints = ['admin.donors', 'admin.donor_giving', 'admin.birthdays', 'admin.donor_insights', 'admin.donor_intelligence', 'admin.lapsed_donors', 'admin.duplicate_donors', 'admin.import_donors'] %}
-      {% set settings_endpoints = ['admin.campaigns', 'admin.bace_properties', 'admin.bace_contributions', 'admin.festivals', 'admin.seva_types', 'admin.live_to_give_purposes', 'admin.preachers', 'admin.associated_withs', 'admin.associated_with_report', 'admin.dhoti_kurta_contributions', 'admin.data_backup', 'admin.manage_users', 'admin.activity_log', 'admin.daily_report_recipients', 'admin.birthday_alert_recipients'] %}
-      {% if current_user.is_authenticated and current_user.role == 'bace_viewer' %}
+      {% set settings_endpoints = ['admin.campaigns', 'admin.preaching_centers', 'admin.preaching_center_detail', 'admin.edit_preaching_center', 'admin.bace_properties', 'admin.bace_contributions', 'admin.festivals', 'admin.seva_types', 'admin.live_to_give_purposes', 'admin.preachers', 'admin.associated_withs', 'admin.associated_with_report', 'admin.dhoti_kurta_contributions', 'admin.data_backup', 'admin.manage_users', 'admin.activity_log', 'admin.daily_report_recipients', 'admin.birthday_alert_recipients'] %}
+      {% if current_user.is_authenticated and current_user.role in ['bace_viewer', 'preaching_center_viewer'] %}
       <div class="navbar-nav ms-auto flex-wrap align-items-lg-center">
+        {% if current_user.role == 'bace_viewer' %}
         <a class="nav-link {% if request.endpoint == 'admin.bace_tracker_grid' %}active{% endif %}" href="{{ url_for('admin.bace_tracker_grid') }}">BACE Rent Tracker</a>
+        {% else %}
+        <a class="nav-link {% if request.endpoint == 'admin.preaching_center_detail' %}active{% endif %}" href="{{ url_for('admin.preaching_center_detail', center_id=current_user.preaching_center_id) }}">Center Collection</a>
+        {% endif %}
         <span class="nav-link text-muted small">Read-only</span>
         <a class="nav-link" href="{{ url_for('admin.change_password') }}">Account</a>
         <a class="nav-link" href="{{ url_for('admin.logout') }}">Logout</a>
@@ -77,6 +81,7 @@
           <a class="nav-link dropdown-toggle {% if request.endpoint in settings_endpoints %}active{% endif %}" href="#" role="button" aria-expanded="false">Settings</a>
           <ul class="dropdown-menu dropdown-menu-end">
             <li><a class="dropdown-item {% if request.endpoint == 'admin.campaigns' %}active{% endif %}" href="{{ url_for('admin.campaigns') }}">Campaigns</a></li>
+            <li><a class="dropdown-item {% if request.endpoint in ['admin.preaching_centers', 'admin.preaching_center_detail'] %}active{% endif %}" href="{{ url_for('admin.preaching_centers') }}">Preaching Centers</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.bace_properties' %}active{% endif %}" href="{{ url_for('admin.bace_properties') }}">BACE</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.bace_contributions' %}active{% endif %}" href="{{ url_for('admin.bace_contributions') }}">BACE Contribution Logs</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.festivals' %}active{% endif %}" href="{{ url_for('admin.festivals') }}">Festivals</a></li>

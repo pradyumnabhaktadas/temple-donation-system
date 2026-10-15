@@ -73,6 +73,34 @@ class AssociatedWith(db.Model):
         return f"<AssociatedWith {self.name}>"
 
 
+class PreachingCenter(db.Model):
+    """A physical preaching center which has its own public collection link.
+
+    The immutable ``slug`` is the part printed in a QR code and is therefore
+    never changed after creation.  A center is a collection source, not an
+    ``AssociatedWith`` relationship, so the two can be reported separately.
+    """
+
+    __tablename__ = "preaching_centers"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False, unique=True)
+    slug = db.Column(db.String(80), nullable=False, unique=True)
+    city = db.Column(db.String(100))
+    address = db.Column(db.String(400))
+    contact_name = db.Column(db.String(150))
+    contact_phone = db.Column(db.String(20))
+    target_amount = db.Column(db.Numeric(12, 2))
+    target_period = db.Column(db.String(20))  # monthly / financial_year
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    donations = db.relationship("Donation", backref="preaching_center", lazy="dynamic")
+
+    def __repr__(self):
+        return f"<PreachingCenter {self.slug}>"
+
+
 # Donor.donor_type values -- an IYF (ISKCON Youth Forum) donor vs. a
 # Live To Give (Nitya Seva) donor. Kept as a plain string rather than a
 # separate lookup table since this is a fixed, small, code-meaningful set
@@ -443,6 +471,12 @@ class Donation(db.Model):
     # the Give to Krishna (Live To Give) and Festival Seva forms, plus
     # admin offline entry; NULL means "not specified" everywhere.
     associated_with_id = db.Column(db.Integer, db.ForeignKey("associated_withs.id"), nullable=True)
+    # Where the donation was collected.  This remains independent from
+    # AssociatedWith (the donor relationship) and from Campaign/Purpose.
+    preaching_center_id = db.Column(db.Integer, db.ForeignKey("preaching_centers.id"), nullable=True, index=True)
+    # Preserve the human-readable center name that was present when the
+    # payment was started, while the FK remains the authoritative link.
+    preaching_center_name = db.Column(db.String(150))
     # The Live To Give form lets the donor choose 80G vs Non-80G for this
     # specific donation (unlike every other form, where 80G-eligibility is
     # fixed per campaign) -- NULL here means "not asked" (every other
@@ -805,7 +839,7 @@ class AdminUser(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
-    role = db.Column(db.String(20), default="staff")  # staff/manager/admin
+    role = db.Column(db.String(30), default="staff")  # staff/manager/admin + scoped viewers
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
     must_change_password = db.Column(db.Boolean, default=False, nullable=False)
@@ -816,6 +850,8 @@ class AdminUser(UserMixin, db.Model):
     # makes the restriction apply to every direct URL too.
     bace_property_id = db.Column(db.Integer, db.ForeignKey("bace_properties.id"), index=True)
     bace_property = db.relationship("BaceProperty")
+    preaching_center_id = db.Column(db.Integer, db.ForeignKey("preaching_centers.id"), index=True)
+    preaching_center = db.relationship("PreachingCenter")
 
     def is_locked(self):
         return bool(self.locked_until and self.locked_until > datetime.datetime.utcnow())
