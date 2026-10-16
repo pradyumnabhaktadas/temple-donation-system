@@ -12,7 +12,43 @@
     <div class="mb-3"><label class="form-label">Address</label><textarea class="form-control" name="address" rows="2">{{ center.address or '' }}</textarea></div>
     <div class="row"><div class="col mb-3"><label class="form-label">Contact person</label><input class="form-control" name="contact_name" value="{{ center.contact_name or '' }}"></div><div class="col mb-3"><label class="form-label">Phone</label><input class="form-control" name="contact_phone" value="{{ center.contact_phone or '' }}"></div></div>
     <div class="row"><div class="col mb-3"><label class="form-label">Target amount</label><input class="form-control" type="number" min="0" step="0.01" name="target_amount" value="{{ center.target_amount or '' }}"></div><div class="col mb-3"><label class="form-label">Target period</label><select class="form-select" name="target_period"><option value="" {% if not center.target_period %}selected{% endif %}>No target</option><option value="monthly" {% if center.target_period == 'monthly' %}selected{% endif %}>Monthly</option><option value="financial_year" {% if center.target_period == 'financial_year' %}selected{% endif %}>Financial year</option></select></div></div>
-    <fieldset class="mb-3"><legend class="form-label">Purposes available on this center's donation link</legend><p class="form-text">Only checked purposes appear to donors. The regular temple form is unchanged.</p>{% for purpose in purposes %}<div class="form-check"><input class="form-check-input" type="checkbox" name="purpose_ids" value="{{ purpose.id }}" id="purpose-{{ purpose.id }}" {% if purpose.id in selected_purpose_ids %}checked{% endif %}><label class="form-check-label" for="purpose-{{ purpose.id }}">{{ purpose.name }}</label></div>{% endfor %}<input class="form-control mt-2" name="new_purpose_name" maxlength="150" placeholder="Add a new purpose for this center (optional)"></fieldset>
+    <fieldset class="mb-3">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <legend class="form-label mb-0" style="width: auto;">Purposes available on this center's donation link</legend>
+        <div class="small">
+          <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none me-2" onclick="document.querySelectorAll('input[name=purpose_ids]').forEach(cb => cb.checked = true)">Select all</button>
+          <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none text-muted me-2" onclick="document.querySelectorAll('input[name=purpose_ids]').forEach(cb => cb.checked = false)">Clear</button>
+          <a href="{{ url_for('admin.live_to_give_purposes') }}" class="text-decoration-none">⚙️ Manage all purposes</a>
+        </div>
+      </div>
+      <p class="form-text mt-1 mb-2">Only checked purposes appear to donors. The regular temple form is unchanged.</p>
+      <div class="border rounded p-2 bg-light-subtle mb-2">
+        {% for purpose in purposes %}
+        <div class="form-check py-1 d-flex align-items-center justify-content-between pe-2">
+          <div>
+            <input class="form-check-input" type="checkbox" name="purpose_ids" value="{{ purpose.id }}" id="purpose-{{ purpose.id }}" {% if purpose.id in selected_purpose_ids %}checked{% endif %}>
+            <label class="form-check-label" for="purpose-{{ purpose.id }}">{{ purpose.name }}</label>
+          </div>
+          {% if purpose.is_80g %}
+            <span class="badge bg-success-subtle text-success border border-success-subtle" style="font-size: 0.72rem;">80G Eligible</span>
+          {% else %}
+            <span class="badge bg-light text-muted border" style="font-size: 0.72rem;">Non-80G</span>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      <div class="row g-2 align-items-center mt-2">
+        <div class="col-sm-8">
+          <input class="form-control" name="new_purpose_name" maxlength="150" placeholder="Add a new purpose for this center (optional)" aria-label="New purpose name">
+        </div>
+        <div class="col-sm-4">
+          <select class="form-select" name="new_purpose_is_80g" aria-label="New purpose 80G eligibility">
+            <option value="0" selected>Non-80G (Regular)</option>
+            <option value="1">80G Eligible</option>
+          </select>
+        </div>
+      </div>
+    </fieldset>
     <button class="btn btn-gold">Save changes</button>
   </form>
 </div>

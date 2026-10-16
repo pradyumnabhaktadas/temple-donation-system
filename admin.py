@@ -4860,10 +4860,11 @@ def edit_preaching_center(center_id):
         purpose_ids = {int(v) for v in submitted_purpose_ids if v.isascii() and v.isdigit()}
         created_purpose = None
         new_purpose_name = request.form.get("new_purpose_name", "").strip()[:150]
+        new_purpose_is_80g = request.form.get("new_purpose_is_80g") in ("1", "yes", "true", "on")
         if new_purpose_name:
             purpose = _purpose_by_name(new_purpose_name)
             if purpose is None:
-                purpose = LiveToGivePurpose(name=new_purpose_name, is_80g=False)
+                purpose = LiveToGivePurpose(name=new_purpose_name, is_80g=new_purpose_is_80g)
                 db.session.add(purpose)
                 db.session.flush()
                 created_purpose = purpose.name

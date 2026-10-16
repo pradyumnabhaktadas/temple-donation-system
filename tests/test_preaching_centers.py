@@ -34,12 +34,16 @@ class TestPreachingCenterAdministration:
         assert b"Monthly Nitya Seva" in edit_page.data
         response = client.post(f"/admin/preaching-centers/{center.id}/edit", data={
             "name": center.name, "new_purpose_name": "Book Distribution",
+            "new_purpose_is_80g": "1",
             "purpose_ids": [str(link.live_to_give_purpose_id) for link in center.purpose_links],
         }, follow_redirects=True)
         assert response.status_code == 200
-        assert "Book Distribution" in {
-            link.purpose.name for link in PreachingCenterPurpose.query.filter_by(preaching_center_id=center.id)
+        links = {
+            link.purpose.name: link.purpose.is_80g
+            for link in PreachingCenterPurpose.query.filter_by(preaching_center_id=center.id)
         }
+        assert "Book Distribution" in links
+        assert links["Book Distribution"] is True
 
     def test_reserved_or_invalid_slug_is_rejected(self, app, client):
         from models import PreachingCenter
