@@ -86,18 +86,34 @@
     </form>
   </div>
   <div class="table-responsive">
-  <table class="table table-sm mb-0">
-    <thead><tr><th>Donor</th><th>Occasion</th><th>Date</th><th class="text-end">In</th></tr></thead>
+  <table class="table table-sm table-hover align-middle mb-0">
+    <thead><tr><th>Donor</th><th>Phone</th><th>Occasion</th><th>Date</th><th class="text-end">In</th><th class="text-end">Action</th></tr></thead>
     <tbody>
       {% for u in upcoming %}
       <tr>
-        <td><a href="{{ url_for('admin.donor_detail', donor_id=u.donor.id) }}">{{ u.donor.full_name }}</a></td>
+        <td><a href="{{ url_for('admin.donor_detail', donor_id=u.donor.id) }}" class="fw-semibold">{{ u.donor.full_name }}</a></td>
+        <td>
+          {% if u.donor.phone %}
+            <span>{{ u.donor.phone }}</span>
+            <span role="button" class="text-muted ms-1 small" data-copy="{{ u.donor.phone }}" title="Copy phone">📋</span>
+          {% else %}-{% endif %}
+        </td>
         <td>{{ u.label }}</td>
         <td>{{ u.date.strftime('%d-%b') }}</td>
         <td class="text-end">{{ 'Today' if u.days_until == 0 else (u.days_until ~ ' day' ~ ('s' if u.days_until != 1 else '')) }}</td>
+        <td class="text-end">
+          {% set occ_ph = (u.donor.whatsapp_number or u.donor.phone or '') | replace('+', '') | replace(' ', '') | replace('-', '') %}
+          {% if occ_ph %}
+            {% set wa_occ = ('91' ~ occ_ph) if occ_ph | length == 10 else occ_ph %}
+            {% set wa_msg = 'Hare Krishna ' ~ u.donor.full_name ~ ' prabhu/mataji! 🙏 Warmest blessings from ISKCON Temple on the auspicious occasion of ' ~ u.label ~ ' (' ~ u.date.strftime('%d %b') ~ ')! May Lord Krishna shower His choicest blessings of health, happiness, and devotion upon you and your family. Haribol!' %}
+            <a href="https://wa.me/{{ wa_occ }}?text={{ wa_msg | urlencode }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success py-0 px-2">
+              💬 Wish on WA
+            </a>
+          {% else %}-{% endif %}
+        </td>
       </tr>
       {% else %}
-      <tr><td colspan="4" class="text-muted">Nothing in the next {{ upcoming_days }} days.</td></tr>
+      <tr><td colspan="6" class="text-muted">Nothing in the next {{ upcoming_days }} days.</td></tr>
       {% endfor %}
     </tbody>
   </table>

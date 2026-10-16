@@ -1,21 +1,73 @@
 {% extends "admin/base_admin.html" %}
 {% block title %}Lapsed Donors{% endblock %}
 {% block content %}
-<h3 class="mb-3">📞 Recurring Donors Who May Need Follow-Up</h3>
-<p class="text-muted">Donors who gave in each of the 3 months before last month, but not last month.</p>
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+  <div>
+    <h3 class="mb-1">📞 Recurring Donors Who May Need Follow-Up</h3>
+    <p class="text-muted mb-0">Donors who gave in each of the 3 months before last month, but not last month.</p>
+  </div>
+  <form method="get" class="d-flex align-items-center gap-2">
+    <label class="small text-muted mb-0" for="lapsed-preacher">Preacher</label>
+    <select name="preacher_id" id="lapsed-preacher" aria-label="Filter by preacher" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">All Preachers</option>
+      <option value="none" {% if preacher_id == 'none' %}selected{% endif %}>Not Assigned</option>
+      {% for p in preachers %}
+      <option value="{{ p.id }}" {% if preacher_id == p.id|string %}selected{% endif %}>{{ p.name }}</option>
+      {% endfor %}
+    </select>
+  </form>
+</div>
+
 <div class="table-responsive">
-<table class="table table-sm bg-white shadow-sm">
-  <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Last Donation</th></tr></thead>
+<table class="table table-sm table-hover bg-white shadow-sm align-middle">
+  <thead class="table-light">
+    <tr>
+      <th>Name</th>
+      <th>Phone</th>
+      <th>Email</th>
+      <th>Preacher</th>
+      <th class="text-end"># Donations</th>
+      <th class="text-end">Total Given</th>
+      <th>Last Donation</th>
+      <th class="text-end">Stewardship Action</th>
+    </tr>
+  </thead>
   <tbody>
     {% for d in donors %}
     <tr>
-      <td><a href="{{ url_for('admin.donor_detail', donor_id=d.id) }}">{{ d.full_name }}</a></td>
-      <td>{{ d.phone or '-' }}</td>
-      <td>{{ d.email or '-' }}</td>
+      <td><a href="{{ url_for('admin.donor_detail', donor_id=d.id) }}" class="fw-semibold">{{ d.full_name }}</a></td>
+      <td>
+        {% if d.phone %}
+          <span>{{ d.phone }}</span>
+          <span role="button" class="text-muted ms-1 small" data-copy="{{ d.phone }}" title="Copy phone">📋</span>
+        {% else %}-{% endif %}
+      </td>
+      <td>
+        {% if d.email %}
+          <span>{{ d.email }}</span>
+          <span role="button" class="text-muted ms-1 small" data-copy="{{ d.email }}" title="Copy email">📋</span>
+        {% else %}-{% endif %}
+      </td>
+      <td class="small text-muted">{{ d.connected_preacher.name if d.connected_preacher else '-' }}</td>
+      <td class="text-end">{{ d.donation_count }}</td>
+      <td class="text-end fw-semibold">Rs. {{ d.total_donated | inr }}</td>
       <td>{{ d.last_donation_date.strftime('%d-%b-%Y') if d.last_donation_date else '-' }}</td>
+      <td class="text-end text-nowrap">
+        {% set c_ph = (d.whatsapp_number or d.phone or '') | replace('+', '') | replace(' ', '') | replace('-', '') %}
+        {% if c_ph %}
+          {% set wa_num = ('91' ~ c_ph) if c_ph | length == 10 else c_ph %}
+          {% set wa_msg = 'Hare Krishna ' ~ d.full_name ~ ' prabhu/mataji! 🙏 Pamho. All glories to Srila Prabhupada. Warm greetings from ISKCON Temple! Thinking of you and praying to Sri Sri Radha Govinda for your and your family\'s good health, peace, and spiritual well-being. Haribol!' %}
+          <a href="https://wa.me/{{ wa_num }}?text={{ wa_msg | urlencode }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success py-0 px-2">
+            💬 Check-in on WA
+          </a>
+        {% endif %}
+        {% if d.phone %}
+          <a href="tel:{{ d.phone }}" class="btn btn-sm btn-outline-secondary py-0 px-2">📞 Call</a>
+        {% endif %}
+      </td>
     </tr>
     {% else %}
-    <tr><td colspan="4" class="text-muted">None found.</td></tr>
+    <tr><td colspan="8" class="text-muted">None found.</td></tr>
     {% endfor %}
   </tbody>
 </table>

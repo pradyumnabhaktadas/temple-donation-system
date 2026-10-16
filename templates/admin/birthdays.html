@@ -32,7 +32,14 @@
   <div>
     🎂 <strong>Birthday today:</strong>
     {% for u in birthdays_today %}
-      <a href="{{ url_for('admin.donor_detail', donor_id=u.donor.id) }}">{{ u.donor.full_name }}</a>{% if not loop.last %}, {% endif %}
+      <a href="{{ url_for('admin.donor_detail', donor_id=u.donor.id) }}" class="fw-semibold">{{ u.donor.full_name }}</a>
+      {% set b_ph = (u.donor.whatsapp_number or u.donor.phone or '') | replace('+', '') | replace(' ', '') | replace('-', '') %}
+      {% if b_ph %}
+        {% set wa_b = ('91' ~ b_ph) if b_ph | length == 10 else b_ph %}
+        {% set wa_msg = 'Hare Krishna ' ~ u.donor.full_name ~ ' prabhu/mataji! 🎂🙏 Warmest birthday wishes from ISKCON Temple! May Lord Krishna bless you with good health, happiness, and devotional service. Haribol!' %}
+        <a href="https://wa.me/{{ wa_b }}?text={{ wa_msg | urlencode }}" target="_blank" rel="noopener" class="badge bg-success text-decoration-none ms-1">💬 Wish on WA</a>
+      {% endif %}
+      {% if not loop.last %}, {% endif %}
     {% endfor %}
     -- don't forget to wish them! 🙏
   </div>
@@ -54,18 +61,40 @@
     </form>
   </div>
   <div class="table-responsive">
-    <table class="table table-sm mb-0">
-      <thead><tr><th>Donor</th><th>Phone</th><th>Date</th><th class="text-end">In</th></tr></thead>
+    <table class="table table-sm table-hover align-middle mb-0">
+      <thead><tr><th>Donor</th><th>Phone</th><th>Connected Preacher</th><th>Date</th><th class="text-end">In</th><th class="text-end">Action</th></tr></thead>
       <tbody>
         {% for u in birthdays_upcoming %}
         <tr>
-          <td><a href="{{ url_for('admin.donor_detail', donor_id=u.donor.id) }}">{{ u.donor.full_name }}</a></td>
-          <td>{{ u.donor.phone or '-' }}</td>
+          <td><a href="{{ url_for('admin.donor_detail', donor_id=u.donor.id) }}" class="fw-semibold">{{ u.donor.full_name }}</a></td>
+          <td>
+            {% if u.donor.phone %}
+              <span>{{ u.donor.phone }}</span>
+              <span role="button" class="text-muted ms-1 small" data-copy="{{ u.donor.phone }}" title="Copy phone">📋</span>
+            {% else %}-{% endif %}
+          </td>
+          <td class="small text-muted">{{ u.donor.connected_preacher.name if u.donor.connected_preacher else '-' }}</td>
           <td>{{ u.date.strftime('%d-%b-%Y') }}</td>
-          <td class="text-end">{{ u.days_until }} day{{ 's' if u.days_until != 1 else '' }}</td>
+          <td class="text-end">
+            {% if u.days_until == 0 %}
+              <span class="badge bg-success">🎂 Today!</span>
+            {% else %}
+              {{ u.days_until }} day{{ 's' if u.days_until != 1 else '' }}
+            {% endif %}
+          </td>
+          <td class="text-end">
+            {% set b_ph = (u.donor.whatsapp_number or u.donor.phone or '') | replace('+', '') | replace(' ', '') | replace('-', '') %}
+            {% if b_ph %}
+              {% set wa_b = ('91' ~ b_ph) if b_ph | length == 10 else b_ph %}
+              {% set wa_msg = 'Hare Krishna ' ~ u.donor.full_name ~ ' prabhu/mataji! 🎂🙏 Warmest birthday blessings from ISKCON Temple! We pray to Sri Sri Radha Govinda for your good health, peace, and spiritual prosperity. Haribol!' %}
+              <a href="https://wa.me/{{ wa_b }}?text={{ wa_msg | urlencode }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success py-0 px-2">
+                💬 Wish on WA
+              </a>
+            {% else %}-{% endif %}
+          </td>
         </tr>
         {% else %}
-        <tr><td colspan="4" class="text-muted text-center py-3">No birthdays in this window.</td></tr>
+        <tr><td colspan="6" class="text-muted text-center py-3">No birthdays in this window.</td></tr>
         {% endfor %}
       </tbody>
     </table>

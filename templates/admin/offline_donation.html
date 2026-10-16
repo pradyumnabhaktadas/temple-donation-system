@@ -141,6 +141,7 @@
       <div class="col-md-6 mb-3">
         <label class="form-label" for="amount">Amount (Rs.)</label>
         <input type="number" min="1" class="form-control" name="amount" id="amount" required>
+        <div id="amount-in-words" class="form-text text-muted" style="display:none; font-style: italic;"></div>
       </div>
       <div class="col-md-6 mb-3">
         <label class="form-label" for="payment_mode">Payment Mode</label>
@@ -546,6 +547,54 @@
       dropdown.style.display = 'none';
     }
   });
+
+  // Live Indian Amount in Words helper
+  const amountInput = document.getElementById('amount');
+  const amountWordsEl = document.getElementById('amount-in-words');
+  function inrToWords(num) {
+    let n = Math.floor(Number(num) || 0);
+    if (n <= 0 || n > 999999999) return '';
+    const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+      'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+    const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+    function twoDigits(x) {
+      if (x < 20) return ones[x];
+      return tens[Math.floor(x / 10)] + (x % 10 ? ' ' + ones[x % 10] : '');
+    }
+    let parts = [];
+    if (n >= 10000000) { parts.push(twoDigits(Math.floor(n / 10000000)) + ' Crore'); n %= 10000000; }
+    if (n >= 100000) { parts.push(twoDigits(Math.floor(n / 100000)) + ' Lakh'); n %= 100000; }
+    if (n >= 1000) { parts.push(twoDigits(Math.floor(n / 1000)) + ' Thousand'); n %= 1000; }
+    if (n >= 100) { parts.push(ones[Math.floor(n / 100)] + ' Hundred'); n %= 100; }
+    if (n > 0) { parts.push(twoDigits(n)); }
+    return 'Rupees ' + parts.join(' ') + ' Only';
+  }
+  if (amountInput && amountWordsEl) {
+    amountInput.addEventListener('input', function () {
+      const words = inrToWords(this.value);
+      amountWordsEl.textContent = words;
+      amountWordsEl.style.display = words ? 'block' : 'none';
+    });
+  }
+
+  // 6-digit Indian Pincode auto-lookup for City & State
+  if (pincodeInput && cityInput && stateInput) {
+    pincodeInput.addEventListener('input', function () {
+      const pin = this.value.trim();
+      if (/^[1-9][0-9]{5}$/.test(pin)) {
+        fetch('https://api.postalpincode.in/pincode/' + pin)
+          .then(r => r.json())
+          .then(data => {
+            if (Array.isArray(data) && data[0] && data[0].Status === 'Success' && data[0].PostOffice && data[0].PostOffice.length) {
+              const po = data[0].PostOffice[0];
+              if (!cityInput.value.trim() && po.District) cityInput.value = po.District;
+              if (!stateInput.value.trim() && po.State) stateInput.value = po.State;
+            }
+          })
+          .catch(() => {});
+      }
+    });
+  }
 })();
 </script>
 {% endblock %}

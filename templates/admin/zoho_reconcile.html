@@ -26,6 +26,11 @@
   <div class="col-auto">
     <a class="btn btn-outline-secondary" href="{{ url_for('admin.zoho_reconcile') }}">Today</a>
   </div>
+  {% if payments %}
+  <div class="col-auto">
+    <a class="btn btn-outline-success" href="{{ url_for('admin.zoho_reconcile', from=from_date.isoformat(), to=to_date.isoformat(), export='csv') }}">⬇ Export CSV</a>
+  </div>
+  {% endif %}
 </form>
 
 {% set range_label = from_date.strftime('%d %b %Y') if from_date == to_date else from_date.strftime('%d %b %Y') ~ ' to ' ~ to_date.strftime('%d %b %Y') %}
@@ -58,10 +63,23 @@
     <tbody>
       {% for p in payments %}
       <tr class="{% if p.ignored %}text-muted{% endif %}">
-        <td><code>{{ p.payment_id }}</code></td>
+        <td>
+          <code>{{ p.payment_id }}</code>
+          <span role="button" class="ms-1 text-muted small" data-copy="{{ p.payment_id }}" title="Copy Payment ID">📋</span>
+        </td>
         <td>Rs. {{ '%.2f' | format(p.amount) }}</td>
-        <td>{{ p.contact or '-' }}</td>
-        <td>{{ p.email or '-' }}</td>
+        <td>
+          {% if p.contact %}
+            {{ p.contact }}
+            <span role="button" class="ms-1 text-muted small" data-copy="{{ p.contact }}" title="Copy Contact">📋</span>
+          {% else %}-{% endif %}
+        </td>
+        <td>
+          {% if p.email %}
+            {{ p.email }}
+            <span role="button" class="ms-1 text-muted small" data-copy="{{ p.email }}" title="Copy Email">📋</span>
+          {% else %}-{% endif %}
+        </td>
         <td>{{ p.created_at.strftime('%d %b, %H:%M') }}</td>
         <td>
           {% if p.ignored %}

@@ -12,7 +12,14 @@
           <strong>{{ donation.campaign.name }}{% if donation.bace_property %} -- {{ donation.bace_property.name }}{% endif %}{% if donation.festival %} -- {{ donation.festival.name }}{% endif %}{% if donation.seva_type %} ({{ donation.seva_type.name }}){% endif %}{% if donation.live_to_give_purpose %} -- {{ donation.live_to_give_purpose.name }}{% endif %}</strong> was received successfully.</p>
         {% if donation.receipt_number %}
         <p class="receipt-reference">Receipt No: <strong>{{ donation.receipt_number }}</strong></p>
-        <a class="btn btn-gold success-action mb-2" href="{{ url_for('public.download_receipt', donation_id=donation.id, t=receipt_token(donation.id)) }}">Download receipt <span>↓</span></a>
+        {% set r_url = url_for('public.download_receipt', donation_id=donation.id, t=receipt_token(donation.id), _external=True) %}
+        <div class="d-flex justify-content-center gap-2 flex-wrap mb-2">
+          <a class="btn btn-gold success-action" href="{{ url_for('public.download_receipt', donation_id=donation.id, t=receipt_token(donation.id)) }}">Download receipt <span>↓</span></a>
+          <a class="btn btn-outline-success" target="_blank" rel="noopener"
+             href="https://wa.me/?text={{ ('Hare Krishna! 🙏 Donation Receipt ' ~ donation.receipt_number ~ ' (Rs. ' ~ (donation.amount | inr) ~ ') from ' ~ org_name ~ ': ' ~ r_url) | urlencode }}">
+            💬 Save / Share on WhatsApp
+          </a>
+        </div>
         {% else %}
         {# Defensive fallback, not the normal case for any current
            campaign -- every online donation gets a real receipt number

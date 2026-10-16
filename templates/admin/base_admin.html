@@ -12,7 +12,7 @@
       {% set offline_donation_endpoints = ['admin.manual_donation', 'admin.bulk_import_donations'] %}
       {% set iyf_camp_endpoints = ['admin.iyf_camps', 'admin.iyf_camp_single', 'admin.iyf_camp_bulk'] %}
       {% set bace_tracker_endpoints = ['admin.bace_dashboard', 'admin.bace_students', 'admin.bace_student_edit', 'admin.bace_payments', 'admin.bace_tracker_grid', 'admin.bace_pending_list'] %}
-      {% set donations_endpoints = ['admin.donations', 'admin.cash_closing'] + offline_donation_endpoints + ['admin.import_legacy_donations', 'admin.import_zoho_report', 'admin.zoho_reconcile'] %}
+      {% set donations_endpoints = ['admin.donations', 'admin.cash_closing', 'admin.form_10bd_audit'] + offline_donation_endpoints + ['admin.import_legacy_donations', 'admin.import_zoho_report', 'admin.zoho_reconcile'] %}
       {% set programs_endpoints = iyf_camp_endpoints + bace_tracker_endpoints %}
       {% set donors_endpoints = ['admin.donors', 'admin.donor_giving', 'admin.birthdays', 'admin.donor_insights', 'admin.donor_intelligence', 'admin.lapsed_donors', 'admin.duplicate_donors', 'admin.import_donors'] %}
       {% set preaching_center_endpoints = ['admin.preaching_centers', 'admin.preaching_centers_dashboard', 'admin.preaching_center_detail', 'admin.edit_preaching_center'] %}
@@ -39,6 +39,7 @@
             <li><a class="dropdown-item {% if request.endpoint == 'admin.donations' %}active{% endif %}" href="{{ url_for('admin.donations') }}">Donations Log</a></li>
             <li><a class="dropdown-item {% if request.endpoint in offline_donation_endpoints %}active{% endif %}" href="{{ url_for('admin.manual_donation') }}">Offline Donation</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.cash_closing' %}active{% endif %}" href="{{ url_for('admin.cash_closing') }}">💵 Cash Counter Closing</a></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'admin.form_10bd_audit' %}active{% endif %}" href="{{ url_for('admin.form_10bd_audit') }}">📋 Form 10BD (80G) Audit</a></li>
             {% if current_user.is_authenticated and current_user.role == 'admin' %}
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.import_legacy_donations' %}active{% endif %}" href="{{ url_for('admin.import_legacy_donations') }}">Import Historical Data</a></li>
@@ -230,6 +231,10 @@
             <span>💵 Cash Counter Closing</span>
             <span class="text-muted small">Denomination Calculator</span>
           </a>
+          <a href="{{ url_for('admin.form_10bd_audit') }}" class="list-group-item list-group-item-action py-2 px-3 rounded border-0 d-flex align-items-center justify-content-between cmd-item">
+            <span>📋 Form 10BD (80G) Pre-Filing Audit</span>
+            <span class="text-muted small">PAN &amp; Address Readiness</span>
+          </a>
           <a href="{{ url_for('admin.donations') }}" class="list-group-item list-group-item-action py-2 px-3 rounded border-0 d-flex align-items-center justify-content-between cmd-item">
             <span>🧾 Donations Log</span>
             <span class="text-muted small">All Contributions</span>
@@ -241,6 +246,10 @@
           <a href="{{ url_for('admin.birthdays') }}" class="list-group-item list-group-item-action py-2 px-3 rounded border-0 d-flex align-items-center justify-content-between cmd-item">
             <span>🎂 Birthday &amp; Anniversary Calendar</span>
             <span class="text-muted small">Preaching Outreach</span>
+          </a>
+          <a href="{{ url_for('admin.lapsed_donors') }}" class="list-group-item list-group-item-action py-2 px-3 rounded border-0 d-flex align-items-center justify-content-between cmd-item">
+            <span>📞 Lapsed Donors Follow-Up</span>
+            <span class="text-muted small">Stewardship &amp; Care</span>
           </a>
           <a href="{{ url_for('admin.settings_index') }}" class="list-group-item list-group-item-action py-2 px-3 rounded border-0 d-flex align-items-center justify-content-between cmd-item">
             <span>⚙️ Settings Hub</span>

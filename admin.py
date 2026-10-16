@@ -497,6 +497,14 @@ def activity_log():
     if action:
         query = query.filter_by(action=action)
 
+    q = (request.args.get("q") or "").strip()
+    if q:
+        query = query.filter(
+            AdminActivityLog.details.ilike(f"%{q}%")
+            | AdminActivityLog.admin_username.ilike(f"%{q}%")
+            | AdminActivityLog.action.ilike(f"%{q}%")
+        )
+
     page = request.args.get("page", 1, type=int)
     pagination = query.order_by(AdminActivityLog.created_at.desc()).paginate(
         page=page, per_page=ACTIVITY_LOG_PER_PAGE, error_out=False
@@ -510,7 +518,7 @@ def activity_log():
 
     return render_template(
         "admin/activity_log.html", pagination=pagination, entries=pagination.items,
-        admin_username=admin_username, action=action,
+        admin_username=admin_username, action=action, q=q,
         known_usernames=known_usernames, known_actions=known_actions,
     )
 
@@ -2303,6 +2311,42 @@ def generate_missing_receipt(donation_id):
     return redirect(url_for("admin.donor_detail", donor_id=donation.donor_id))
 
 
+@bp.route("/donations/<int:donation_id>/resend-receipt", methods=["POST"])
+@login_required
+def resend_receipt(donation_id):
+    """Re-triggers receipt email and WhatsApp delivery for an existing
+    successful donation on demand."""
+    donation = Donation.query.get_or_404(donation_id)
+    if donation.status != "success" or not donation.receipt_number:
+        flash("Only a successful donation with a generated receipt can be resent.")
+        return redirect(url_for("admin.donor_detail", donor_id=donation.donor_id))
+
+    pdf_bytes = donation.receipt_pdf
+    if not pdf_bytes:
+        try:
+            _, pdf_bytes = generate_receipt_pdf(donation, donation.donor, _org_cfg())
+            donation.receipt_pdf = pdf_bytes
+            db.session.commit()
+        except Exception:
+            current_app.logger.exception("Failed to regenerate receipt PDF for donation %s", donation.id)
+            flash("Couldn't generate the receipt PDF to resend.", "danger")
+            return redirect(url_for("admin.donor_detail", donor_id=donation.donor_id))
+
+    app_obj = current_app._get_current_object()
+    threading.Thread(
+        target=_send_receipt_notifications_background,
+        args=(app_obj, donation.id, pdf_bytes),
+        daemon=True,
+    ).start()
+
+    log_activity(
+        "donation_resend_receipt", target_type="donation", target_id=donation.id,
+        details=f"Resent receipt {donation.receipt_number} to {donation.donor.full_name}",
+    )
+    flash(f"Receipt {donation.receipt_number} queued for delivery via email/WhatsApp.")
+    return redirect(url_for("admin.donor_detail", donor_id=donation.donor_id))
+
+
 def _validated_id_from_form(form, key, model, label):
     """Same idea as public.py's _validated_fk_id, but for the admin
     manual-donation form (werkzeug form data, and flash+redirect instead of
@@ -3345,6 +3389,27 @@ def zoho_reconcile():
     payments, error = unreconciled_razorpay_payments(
         current_app.config, from_date=from_date, to_date=to_date,
     )
+
+    if request.args.get("export") == "csv" and payments:
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["Payment ID", "Amount (Rs)", "Contact", "Email", "Time (IST)", "Source", "Source Ref", "Ignored"])
+        for p in payments:
+            writer.writerow(csv_safe_row([
+                p.get("payment_id") or "",
+                f"{p.get('amount', 0):.2f}",
+                p.get("contact") or "",
+                p.get("email") or "",
+                p["created_at"].strftime("%Y-%m-%d %H:%M") if p.get("created_at") else "",
+                p.get("source") or "",
+                p.get("source_ref") or "",
+                "yes" if p.get("ignored") else "no",
+            ]))
+        return Response(
+            output.getvalue(),
+            mimetype="text/csv",
+            headers={"Content-Disposition": f"attachment;filename=Zoho_Reconcile_{from_date.isoformat()}_to_{to_date.isoformat()}.csv"},
+        )
 
     return render_template(
         "admin/zoho_reconcile.html",
@@ -8063,6 +8128,81 @@ def trigger_backup():
     return redirect(url_for("admin.data_backup"))
 
 
+@bp.route("/form-10bd-audit")
+@login_required
+def form_10bd_audit():
+    """Form 10BD (80G) Pre-Filing Audit & Data Readiness Checker.
+    Splits a financial year's 80G-eligible donations into Ready vs
+    Incomplete (missing/invalid PAN or missing address) so staff can
+    reach out to donors on WhatsApp and fix records before exporting
+    the final Form 10BD CSV."""
+    current_fy = get_financial_year(now_ist().date())
+    fy = (request.args.get("fy") or current_fy).strip()
+
+    all_fys_rows = (
+        db.session.query(Donation.financial_year)
+        .filter(Donation.status == "success", Donation.financial_year.isnot(None))
+        .distinct()
+        .all()
+    )
+    available_fys = sorted({r[0] for r in all_fys_rows if r[0]} | {current_fy}, reverse=True)
+
+    rows = (
+        db.session.query(Donation, Donor, Campaign)
+        .join(Donor, Donation.donor_id == Donor.id)
+        .join(Campaign, Donation.campaign_id == Campaign.id)
+        .filter(Donation.status == "success", Donation.financial_year == fy)
+        .order_by(Donation.donation_date.desc())
+        .all()
+    )
+    eighty_g_rows = [(donation, donor, campaign) for donation, donor, campaign in rows if donation.effective_is_80g]
+
+    ready_rows = []
+    missing_rows = []
+    ready_total = 0.0
+    missing_total = 0.0
+
+    for donation, donor, campaign in eighty_g_rows:
+        pan_val = (donor.pan or "").strip()
+        addr_val = (donor.address or "").strip()
+        issues = []
+        if not pan_val:
+            issues.append("Missing PAN")
+        elif not is_valid_pan(pan_val):
+            issues.append(f"Invalid PAN ({pan_val})")
+        if not addr_val:
+            issues.append("Missing Address")
+
+        amt = float(donation.amount)
+        if issues:
+            missing_rows.append({
+                "donation": donation,
+                "donor": donor,
+                "campaign": campaign,
+                "issues": issues,
+            })
+            missing_total += amt
+        else:
+            ready_rows.append({
+                "donation": donation,
+                "donor": donor,
+                "campaign": campaign,
+            })
+            ready_total += amt
+
+    return render_template(
+        "admin/form_10bd_audit.html",
+        fy=fy,
+        available_fys=available_fys,
+        ready_rows=ready_rows,
+        missing_rows=missing_rows,
+        ready_total=ready_total,
+        missing_total=missing_total,
+        total_80g_count=len(eighty_g_rows),
+        total_80g_amount=ready_total + missing_total,
+    )
+
+
 @bp.route("/export/10bd")
 @login_required
 def export_10bd():
@@ -8346,9 +8486,24 @@ def lapsed_donors():
         donor_id for donor_id, donated_months in months_by_donor.items()
         if prior_three.issubset(donated_months) and last_month_key not in donated_months
     ]
-    lapsed = Donor.query.filter(Donor.id.in_(lapsed_ids)).order_by(Donor.full_name).all() if lapsed_ids else []
+    preacher_id = request.args.get("preacher_id", "").strip()
+    if lapsed_ids:
+        query = Donor.query.filter(Donor.id.in_(lapsed_ids))
+        if preacher_id == "none":
+            query = query.filter(Donor.connected_preacher_id.is_(None))
+        elif preacher_id.isdigit():
+            query = query.filter(Donor.connected_preacher_id == int(preacher_id))
+        lapsed = query.order_by(Donor.full_name).all()
+    else:
+        lapsed = []
 
-    return render_template("admin/lapsed_donors.html", donors=lapsed)
+    preachers = Preacher.query.order_by(Preacher.name).all()
+    return render_template(
+        "admin/lapsed_donors.html",
+        donors=lapsed,
+        preachers=preachers,
+        preacher_id=preacher_id,
+    )
 
 
 # ---------------------------------------------------------------------------

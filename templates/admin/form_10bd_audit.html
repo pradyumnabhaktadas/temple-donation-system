@@ -1,0 +1,166 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Form 10BD (80G) Audit{% endblock %}
+{% block content %}
+<div class="admin-page-header mb-4">
+  <div>
+    <div class="eyebrow">Income Tax 80G compliance &amp; data readiness</div>
+    <h3>📋 Form 10BD Pre-Filing Audit &mdash; FY {{ fy }}</h3>
+  </div>
+  <div class="admin-page-actions d-flex gap-2 align-items-center flex-wrap">
+    <form method="get" class="d-flex align-items-center gap-2">
+      <label class="small text-muted mb-0" for="fy-select">FY</label>
+      <select name="fy" id="fy-select" aria-label="Financial year" class="form-select form-select-sm" onchange="this.form.submit()">
+        {% for f in available_fys %}
+        <option value="{{ f }}" {% if f == fy %}selected{% endif %}>FY {{ f }}</option>
+        {% endfor %}
+      </select>
+    </form>
+    <a class="btn btn-sm btn-gold" href="{{ url_for('admin.export_10bd', fy=fy) }}">⬇ Download Form 10BD CSV (FY {{ fy }})</a>
+  </div>
+</div>
+
+<p class="text-muted small mb-4" style="max-width: 840px;">
+  The Income Tax portal rejects Form 10BD rows if an 80G donor is missing a valid 10-character PAN or postal address.
+  Use this audit checklist to resolve any missing details with donors via WhatsApp before exporting your final filing CSV.
+</p>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-4">
+    <div class="stat-card">
+      <div class="stat-label">Total 80G Donations (FY {{ fy }})</div>
+      <div class="stat-value" style="font-size: 1.5rem;">Rs. {{ total_80g_amount | inr }}</div>
+      <div class="stat-subtext">{{ total_80g_count }} 80G-eligible donation(s)</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="stat-card" style="border-left: 4px solid #2e7d32;">
+      <div class="stat-label">✅ Ready for Filing</div>
+      <div class="stat-value text-success" style="font-size: 1.5rem;">{{ ready_rows | length }}</div>
+      <div class="stat-subtext">Rs. {{ ready_total | inr }} with valid PAN &amp; address</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="stat-card" style="border-left: 4px solid {{ '#d32f2f' if missing_rows else '#2e7d32' }};">
+      <div class="stat-label">⚠️ Action Required (Missing PAN / Address)</div>
+      <div class="stat-value {{ 'text-danger' if missing_rows else 'text-success' }}" style="font-size: 1.5rem;">{{ missing_rows | length }}</div>
+      <div class="stat-subtext">Rs. {{ missing_total | inr }} needing donor update</div>
+    </div>
+  </div>
+</div>
+
+{% if missing_rows %}
+<div class="card card-body shadow-sm mb-4 border-warning">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <h5 class="mb-0 text-danger">⚠️ Incomplete 80G Records ({{ missing_rows | length }})</h5>
+    <span class="badge bg-warning text-dark">Fix before Form 10BD upload</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Date</th>
+          <th>Receipt #</th>
+          <th>Donor</th>
+          <th>Phone</th>
+          <th class="text-end">Amount</th>
+          <th>Missing / Invalid</th>
+          <th class="text-end">Quick Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in missing_rows %}
+        <tr>
+          <td>{{ r.donation.donation_date.strftime('%d-%b-%Y') }}</td>
+          <td>
+            {% if r.donation.receipt_number %}
+              <span>{{ r.donation.receipt_number }}</span>
+              <span role="button" class="text-muted ms-1 small" data-copy="{{ r.donation.receipt_number }}" title="Copy receipt #">📋</span>
+            {% else %}-{% endif %}
+          </td>
+          <td>
+            <a href="{{ url_for('admin.donor_detail', donor_id=r.donor.id) }}" class="fw-semibold">{{ r.donor.full_name }}</a>
+            <div class="small text-muted">{{ r.campaign.name }}</div>
+          </td>
+          <td>
+            {% if r.donor.phone %}
+              <span>{{ r.donor.phone }}</span>
+              <span role="button" class="text-muted ms-1 small" data-copy="{{ r.donor.phone }}" title="Copy phone">📋</span>
+            {% else %}-{% endif %}
+          </td>
+          <td class="text-end fw-semibold">Rs. {{ r.donation.amount | inr }}</td>
+          <td>
+            {% for issue in r.issues %}
+              <span class="badge bg-danger me-1">{{ issue }}</span>
+            {% endfor %}
+          </td>
+          <td class="text-end text-nowrap">
+            {% set contact_ph = (r.donor.whatsapp_number or r.donor.phone or '') | replace('+', '') | replace(' ', '') | replace('-', '') %}
+            {% if contact_ph %}
+              {% set wa_num = ('91' ~ contact_ph) if contact_ph | length == 10 else contact_ph %}
+              {% set wa_req = 'Hare Krishna ' ~ r.donor.full_name ~ ' prabhu/mataji! 🙏 Pamho. Warm greetings from ISKCON Temple. For filing your 80G tax-exemption statement (Form 10BD) for FY ' ~ fy ~ ' (Receipt: ' ~ (r.donation.receipt_number or '') ~ ', Rs. ' ~ r.donation.amount ~ '), we kindly need your ' ~ (r.issues | join(' and ')) ~ '. Please reply to this message with the details so we can update your record. Haribol!' %}
+              <a href="https://wa.me/{{ wa_num }}?text={{ wa_req | urlencode }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success me-1" title="Request missing details via WhatsApp">
+                💬 Request on WA
+              </a>
+            {% endif %}
+            <a href="{{ url_for('admin.donor_edit', donor_id=r.donor.id) }}" class="btn btn-sm btn-outline-primary">
+              ✏️ Edit Donor
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="alert alert-success d-flex align-items-center justify-content-between flex-wrap gap-2 mb-4">
+  <div>
+    <strong>✅ All {{ ready_rows | length }} 80G-eligible donation(s) for FY {{ fy }} have valid PAN and postal address on file!</strong>
+    Your Form 10BD export is 100% ready for filing.
+  </div>
+  <a class="btn btn-sm btn-success" href="{{ url_for('admin.export_10bd', fy=fy) }}">⬇ Download Form 10BD CSV</a>
+</div>
+{% endif %}
+
+<div class="card card-body shadow-sm">
+  <h6 class="mb-3">✅ Ready 80G Records ({{ ready_rows | length }})</h6>
+  <div class="table-responsive" style="max-height: 60vh; overflow-y: auto;">
+    <table class="table table-sm table-hover align-middle mb-0">
+      <thead class="table-light" style="position: sticky; top: 0; z-index: 5;">
+        <tr>
+          <th>Date</th>
+          <th>Receipt #</th>
+          <th>Donor</th>
+          <th>PAN</th>
+          <th>Address</th>
+          <th class="text-end">Amount</th>
+          <th>Campaign</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in ready_rows %}
+        <tr>
+          <td>{{ r.donation.donation_date.strftime('%d-%b-%Y') }}</td>
+          <td>
+            {{ r.donation.receipt_number or '-' }}
+            {% if r.donation.receipt_number %}
+              <span role="button" class="text-muted ms-1 small" data-copy="{{ r.donation.receipt_number }}" title="Copy receipt #">📋</span>
+            {% endif %}
+          </td>
+          <td><a href="{{ url_for('admin.donor_detail', donor_id=r.donor.id) }}">{{ r.donor.full_name }}</a></td>
+          <td>
+            <code>{{ r.donor.pan }}</code>
+            <span role="button" class="text-muted ms-1 small" data-copy="{{ r.donor.pan }}" title="Copy PAN">📋</span>
+          </td>
+          <td class="small text-muted">{{ r.donor.address }}{% if r.donor.city %}, {{ r.donor.city }}{% endif %}{% if r.donor.state %}, {{ r.donor.state }}{% endif %} {{ r.donor.pincode or '' }}</td>
+          <td class="text-end">Rs. {{ r.donation.amount | inr }}</td>
+          <td>{{ r.campaign.name }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-muted text-center py-3">No ready 80G donations found for FY {{ fy }}.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

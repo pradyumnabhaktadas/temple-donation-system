@@ -147,8 +147,17 @@
       </td>
       <td>
         {% if d.status == 'success' and d.receipt_number %}
-        <a href="{{ url_for('public.download_receipt', donation_id=d.id, t=receipt_token(d.id)) }}">{{ d.receipt_number }}</a>
-        <span role="button" class="ms-1 text-muted small" data-copy="{{ d.receipt_number }}" title="Copy receipt number">📋</span>
+        <div class="d-inline-flex align-items-center gap-1 text-nowrap">
+          <a href="{{ url_for('public.download_receipt', donation_id=d.id, t=receipt_token(d.id)) }}">{{ d.receipt_number }}</a>
+          <span role="button" class="text-muted small" data-copy="{{ d.receipt_number }}" title="Copy receipt number">📋</span>
+          {% if d.donor.phone or d.donor.whatsapp_number %}
+            {% set wa_phone = (d.donor.whatsapp_number or d.donor.phone) | replace(' ', '') | replace('-', '') | replace('+', '') %}
+            {% if wa_phone | length == 10 %}{% set wa_phone = '91' ~ wa_phone %}{% endif %}
+            {% set r_url = url_for('public.download_receipt', donation_id=d.id, t=receipt_token(d.id), _external=True) %}
+            <a href="https://wa.me/{{ wa_phone }}?text={{ ('Hare Krishna ' ~ d.donor.full_name ~ '! 🙏 Thank you for your contribution of Rs. ' ~ (d.amount | inr) ~ ' towards ' ~ d.campaign.name ~ '. Download receipt (' ~ d.receipt_number ~ '): ' ~ r_url) | urlencode }}"
+               target="_blank" rel="noopener" class="text-success text-decoration-none small" title="Send Receipt Link on WhatsApp">💬</a>
+          {% endif %}
+        </div>
         {% elif d.status == 'success' %}
         <span class="text-muted small">no receipt</span>
         {% else %}-{% endif %}

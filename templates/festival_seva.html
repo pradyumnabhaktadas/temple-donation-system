@@ -55,6 +55,7 @@
       <div class="form-section">
         <div class="d-flex justify-content-between align-items-center"><label class="form-label mb-0" for="amount">Your offering</label><span class="field-note">Any amount is meaningful</span></div>
         <div class="currency-input"><span>₹</span><input type="number" min="1" step="1" class="form-control" name="amount" id="amount" placeholder="Enter an amount" required></div>
+        <div id="amount-in-words" class="field-note text-muted mt-1" style="display:none; font-style: italic;"></div>
       </div>
 
       <div class="form-section">
@@ -163,12 +164,64 @@
   // lock) the amount field.
   const sevaSelect = document.getElementById('seva_type_id');
   const amountInput = document.getElementById('amount');
+  const amountWordsEl = document.getElementById('amount-in-words');
+
+  function inrToWords(num) {
+    let n = Math.floor(Number(num) || 0);
+    if (n <= 0 || n > 999999999) return '';
+    const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+      'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+    const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+    function twoDigits(x) {
+      if (x < 20) return ones[x];
+      return tens[Math.floor(x / 10)] + (x % 10 ? ' ' + ones[x % 10] : '');
+    }
+    let parts = [];
+    if (n >= 10000000) { parts.push(twoDigits(Math.floor(n / 10000000)) + ' Crore'); n %= 10000000; }
+    if (n >= 100000) { parts.push(twoDigits(Math.floor(n / 100000)) + ' Lakh'); n %= 100000; }
+    if (n >= 1000) { parts.push(twoDigits(Math.floor(n / 1000)) + ' Thousand'); n %= 1000; }
+    if (n >= 100) { parts.push(ones[Math.floor(n / 100)] + ' Hundred'); n %= 100; }
+    if (n > 0) { parts.push(twoDigits(n)); }
+    return 'Rupees ' + parts.join(' ') + ' Only';
+  }
+
+  function updateAmountWords() {
+    if (!amountWordsEl) return;
+    const words = inrToWords(amountInput.value);
+    amountWordsEl.textContent = words;
+    amountWordsEl.style.display = words ? 'block' : 'none';
+  }
+
   sevaSelect.addEventListener('change', () => {
     const selected = sevaSelect.options[sevaSelect.selectedIndex];
     const suggested = selected ? selected.dataset.amount : '';
     if (suggested) amountInput.value = suggested;
+    updateAmountWords();
     updatePanAddressRequirement();
   });
+  amountInput.addEventListener('input', updateAmountWords);
+
+  // 6-digit Indian Pincode auto-lookup for City & State
+  const pincodeInput = document.getElementById('pincode');
+  const cityInput = document.getElementById('city');
+  const stateInput = document.getElementById('state');
+  if (pincodeInput && cityInput && stateInput) {
+    pincodeInput.addEventListener('input', function () {
+      const pin = this.value.trim();
+      if (/^[1-9][0-9]{5}$/.test(pin)) {
+        fetch('https://api.postalpincode.in/pincode/' + pin)
+          .then(r => r.json())
+          .then(data => {
+            if (Array.isArray(data) && data[0] && data[0].Status === 'Success' && data[0].PostOffice && data[0].PostOffice.length) {
+              const po = data[0].PostOffice[0];
+              if (!cityInput.value.trim() && po.District) cityInput.value = po.District;
+              if (!stateInput.value.trim() && po.State) stateInput.value = po.State;
+            }
+          })
+          .catch(() => {});
+      }
+    });
+  }
 
   // Whether PAN/address are shown (and PAN required) unconditionally, or
   // only above the high-value threshold, follows the *actual* Festivals

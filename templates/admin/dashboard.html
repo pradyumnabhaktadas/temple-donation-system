@@ -18,7 +18,14 @@
   <div>
     🎂 <strong>Birthday today:</strong>
     {% for u in birthdays_today %}
-      <a href="{{ url_for('admin.donor_detail', donor_id=u.donor.id) }}">{{ u.donor.full_name }}</a>{% if not loop.last %}, {% endif %}
+      <a href="{{ url_for('admin.donor_detail', donor_id=u.donor.id) }}" class="fw-semibold">{{ u.donor.full_name }}</a>
+      {% set b_ph = (u.donor.whatsapp_number or u.donor.phone or '') | replace('+', '') | replace(' ', '') | replace('-', '') %}
+      {% if b_ph %}
+        {% set wa_b = ('91' ~ b_ph) if b_ph | length == 10 else b_ph %}
+        {% set wa_msg = 'Hare Krishna ' ~ u.donor.full_name ~ ' prabhu/mataji! 🎂🙏 Warmest birthday wishes from ISKCON Temple! May Lord Krishna bless you with good health, happiness, and devotional service. Haribol!' %}
+        <a href="https://wa.me/{{ wa_b }}?text={{ wa_msg | urlencode }}" target="_blank" rel="noopener" class="badge bg-success text-decoration-none ms-1">💬 Wish on WA</a>
+      {% endif %}
+      {% if not loop.last %}, {% endif %}
     {% endfor %}
     -- don't forget to wish them! 🙏
   </div>
@@ -36,7 +43,10 @@
       {{ form_10bd_reminder.days_left }} day(s) left to file Form 10BD for FY {{ form_10bd_reminder.filing_fy }} (due 31 May).
     {% endif %}
   </div>
-  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.export_10bd', fy=form_10bd_reminder.filing_fy) }}">Download Form 10BD data (CSV)</a>
+  <div class="d-flex gap-2 flex-wrap">
+    <a class="btn btn-sm btn-outline-dark" href="{{ url_for('admin.form_10bd_audit', fy=form_10bd_reminder.filing_fy) }}">📋 Audit PAN &amp; Address Readiness</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.export_10bd', fy=form_10bd_reminder.filing_fy) }}">Download Form 10BD data (CSV)</a>
+  </div>
 </div>
 {% endif %}
 
@@ -133,18 +143,21 @@
   <div class="col-md-6">
     <div class="card card-body shadow-sm">
       <div class="dashboard-panel-title"><h6>📤 Exports</h6><span class="panel-note">Reports &amp; filing data</span></div>
-      <a class="btn btn-outline-secondary btn-sm mb-2" href="{{ url_for('admin.export_10bd') }}">Download Form 10BD data (CSV)</a><br>
-      <a class="btn btn-outline-secondary btn-sm mb-3" href="{{ url_for('admin.export_collections') }}">Download all collections (CSV)</a>
+      <div class="d-flex flex-wrap gap-2 mb-3">
+        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('admin.form_10bd_audit') }}">📋 Form 10BD Readiness Audit</a>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin.export_10bd') }}">Download Form 10BD data (CSV)</a>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin.export_collections') }}">Download all collections (CSV)</a>
+      </div>
       <hr>
       <div class="small fw-bold mb-2">Monthly Donor Report</div>
       <p class="text-muted small mb-2">Full donor details (contact, address, PAN) plus every donation for one month.</p>
       <form method="get" action="{{ url_for('admin.export_monthly_report') }}" class="d-flex gap-2">
-        <select name="month" class="form-select form-select-sm">
+        <select name="month" aria-label="Report month" class="form-select form-select-sm">
           {% for m in range(1, 13) %}
           <option value="{{ m }}" {% if m == today.month %}selected{% endif %}>{{ ['January','February','March','April','May','June','July','August','September','October','November','December'][m-1] }}</option>
           {% endfor %}
         </select>
-        <select name="year" class="form-select form-select-sm">
+        <select name="year" aria-label="Report year" class="form-select form-select-sm">
           {% for y in range(today.year, today.year - 5, -1) %}
           <option value="{{ y }}" {% if y == today.year %}selected{% endif %}>{{ y }}</option>
           {% endfor %}

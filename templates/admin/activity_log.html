@@ -10,8 +10,11 @@
 </p>
 
 <form class="row g-2 mb-3">
+  <div class="col-md-4">
+    <input type="search" name="q" value="{{ q or '' }}" class="form-control" placeholder="Search details, receipt #, donor..." aria-label="Search activity log">
+  </div>
   <div class="col-auto">
-    <select name="admin_username" class="form-select" onchange="this.form.submit()">
+    <select name="admin_username" class="form-select" aria-label="Filter by admin" onchange="this.form.submit()">
       <option value="">All Admins</option>
       {% for u in known_usernames %}
       <option value="{{ u }}" {% if admin_username == u %}selected{% endif %}>{{ u }}</option>
@@ -19,14 +22,17 @@
     </select>
   </div>
   <div class="col-auto">
-    <select name="action" class="form-select" onchange="this.form.submit()">
+    <select name="action" class="form-select" aria-label="Filter by action" onchange="this.form.submit()">
       <option value="">All Actions</option>
       {% for a in known_actions %}
       <option value="{{ a }}" {% if action == a %}selected{% endif %}>{{ a.replace('_', ' ').title() }}</option>
       {% endfor %}
     </select>
   </div>
-  {% if admin_username or action %}
+  <div class="col-auto">
+    <button type="submit" class="btn btn-gold">Search</button>
+  </div>
+  {% if admin_username or action or q %}
   <div class="col-auto">
     <a class="btn btn-outline-secondary" href="{{ url_for('admin.activity_log') }}">Clear Filters</a>
   </div>
