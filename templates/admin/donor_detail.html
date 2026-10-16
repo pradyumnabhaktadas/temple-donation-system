@@ -2,13 +2,63 @@
 {% block title %}{{ donor.full_name }}{% endblock %}
 {% block content %}
 <a href="{{ url_for('admin.donors') }}">&larr; Back to Donors</a>
-<div class="d-flex justify-content-between align-items-start mt-2">
-  <h3 class="mb-0">{{ donor.full_name }}</h3>
-  <a href="{{ url_for('admin.donor_edit', donor_id=donor.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+<div class="d-flex justify-content-between align-items-start mt-2 flex-wrap gap-2">
+  <div>
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+      <h3 class="mb-0">{{ donor.full_name }}</h3>
+      {% if donor.total_donated >= 100000 or donor.donor_type == 'patron' %}
+        <span class="badge bg-warning text-dark border border-warning">⭐ Major Patron</span>
+      {% endif %}
+      {% if donor.last_donation_date %}
+        {% set last_date = donor.last_donation_date.date() if donor.last_donation_date.date is defined else donor.last_donation_date %}
+        {% set days_since = (today - last_date).days if today else 0 %}
+        {% if days_since <= 90 %}
+          <span class="badge bg-success">🟢 Active Donor</span>
+        {% elif days_since <= 180 %}
+          <span class="badge bg-warning text-dark">🟡 At-Risk ({{ days_since }}d)</span>
+        {% else %}
+          <span class="badge bg-danger">🔴 Lapsed ({{ days_since }}d)</span>
+        {% endif %}
+      {% else %}
+        <span class="badge bg-secondary">New / No Donations</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="d-flex gap-2 align-items-center flex-wrap">
+    {% set contact_phone = donor.whatsapp_number or donor.phone %}
+    {% if contact_phone %}
+      {% set clean_phone = contact_phone | replace('+', '') | replace(' ', '') | replace('-', '') %}
+      {% set wa_num = ('91' ~ clean_phone) if clean_phone | length == 10 else clean_phone %}
+      {% set wa_blessing = 'Hare Krishna ' ~ donor.full_name ~ ' prabhu/mataji! 🙏 Pamho. All glories to Srila Prabhupada. Warm greetings from ISKCON Temple. We pray to Sri Sri Radha Govinda for your and your family\'s spiritual well-being and happiness. Haribol!' %}
+      <a href="https://wa.me/{{ wa_num }}?text={{ wa_blessing | urlencode }}" target="_blank" class="btn btn-sm btn-outline-success d-inline-flex align-items-center gap-1" style="color: #25D366; border-color: #25D366;">
+        💬 Send WhatsApp Greeting
+      </a>
+    {% endif %}
+    <a href="{{ url_for('admin.donor_edit', donor_id=donor.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+  </div>
 </div>
-<p class="text-muted">
-  {{ donor.phone or '-' }} &middot; {{ donor.email or '-' }} &middot; PAN: {{ donor.pan or '-' }}<br>
-  {{ donor.address or '' }} {{ donor.city or '' }} {{ donor.state or '' }} {{ donor.pincode or '' }}
+<p class="text-muted mt-2">
+  {% if donor.phone %}
+    <span>📱 {{ donor.phone }}</span>
+    <span role="button" class="text-muted ms-1 small" data-copy="{{ donor.phone }}" title="Copy Phone">📋</span> &middot;
+  {% endif %}
+  {% if donor.whatsapp_number and donor.whatsapp_number != donor.phone %}
+    <span>💬 WA: {{ donor.whatsapp_number }}</span>
+    <span role="button" class="text-muted ms-1 small" data-copy="{{ donor.whatsapp_number }}" title="Copy WhatsApp">📋</span> &middot;
+  {% endif %}
+  {% if donor.email %}
+    <span>✉️ {{ donor.email }}</span>
+    <span role="button" class="text-muted ms-1 small" data-copy="{{ donor.email }}" title="Copy Email">📋</span> &middot;
+  {% endif %}
+  <span>PAN: <strong>{{ donor.pan or '-' }}</strong></span>
+  {% if donor.pan %}
+    <span role="button" class="text-muted ms-1 small" data-copy="{{ donor.pan }}" title="Copy PAN">📋</span>
+  {% endif %}
+  <br>
+  {% if donor.address or donor.city or donor.state or donor.pincode %}
+    <span>📍 {{ donor.address or '' }} {{ donor.city or '' }} {{ donor.state or '' }} {{ donor.pincode or '' }}</span>
+    <span role="button" class="text-muted ms-1 small" data-copy="{{ donor.address or '' }} {{ donor.city or '' }} {{ donor.state or '' }} {{ donor.pincode or '' }}" title="Copy Address">📋</span>
+  {% endif %}
 </p>
 
 <div class="row g-3 mb-3">

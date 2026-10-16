@@ -35,21 +35,49 @@
     <button type="submit" class="btn btn-outline-secondary">Search / Filter</button>
   </div>
 </form>
-<div class="table-responsive">
-<table class="table table-sm table-hover bg-white shadow-sm">
-  <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>PAN</th><th>Donor Type</th><th>Preacher</th><th class="text-end"># Donations</th><th class="text-end">Total</th></tr></thead>
+
+<div class="d-flex flex-wrap gap-2 mb-3 align-items-center">
+  <span class="small text-muted fw-bold">Quick Filters:</span>
+  <a href="{{ url_for('admin.donors') }}" class="badge rounded-pill text-decoration-none {% if not donor_type and not preacher_id and not donation_frequency and not q %}bg-primary text-white{% else %}bg-light text-dark border{% endif %}">All Donors</a>
+  <a href="{{ url_for('admin.donors', preacher_id='none') }}" class="badge rounded-pill text-decoration-none {% if preacher_id == 'none' %}bg-primary text-white{% else %}bg-light text-dark border{% endif %}">⚠️ Unassigned Preacher</a>
+  <a href="{{ url_for('admin.donors', donor_type='patron') }}" class="badge rounded-pill text-decoration-none {% if donor_type == 'patron' %}bg-primary text-white{% else %}bg-light text-dark border{% endif %}">⭐ Patrons</a>
+  <a href="{{ url_for('admin.donors', donation_frequency='monthly') }}" class="badge rounded-pill text-decoration-none {% if donation_frequency == 'monthly' %}bg-primary text-white{% else %}bg-light text-dark border{% endif %}">🔄 Monthly Donors</a>
+  <a href="{{ url_for('admin.donors', donation_frequency='weekly') }}" class="badge rounded-pill text-decoration-none {% if donation_frequency == 'weekly' %}bg-primary text-white{% else %}bg-light text-dark border{% endif %}">🗓️ Weekly Donors</a>
+</div>
+
+<div class="table-responsive" style="max-height: 75vh; overflow-y: auto;">
+<table class="table table-sm table-hover bg-white shadow-sm align-middle">
+  <thead class="table-light" style="position: sticky; top: 0; z-index: 5; box-shadow: 0 1px 2px rgba(0,0,0,0.06);"><tr><th>Name</th><th>Phone</th><th>Email</th><th>PAN</th><th>Donor Type</th><th>Preacher</th><th class="text-end"># Donations</th><th class="text-end">Total</th></tr></thead>
   <tbody>
     {% for d in donors %}
     {% set t = totals.get(d.id, (0, 0)) %}
     <tr>
-      <td><a href="{{ url_for('admin.donor_detail', donor_id=d.id) }}">{{ d.full_name }}</a></td>
-      <td>{{ d.phone or '-' }}</td>
-      <td>{{ d.email or '-' }}</td>
-      <td>{{ d.pan | mask_pan if d.pan else '-' }}</td>
+      <td><a href="{{ url_for('admin.donor_detail', donor_id=d.id) }}" class="fw-semibold">{{ d.full_name }}</a></td>
+      <td>
+        {% if d.phone %}
+          <span>{{ d.phone }}</span>
+          <span role="button" class="text-muted ms-1 small" data-copy="{{ d.phone }}" title="Copy phone">📋</span>
+          {% set clean_ph = d.phone | replace('+', '') | replace(' ', '') | replace('-', '') %}
+          {% set wa_num = ('91' ~ clean_ph) if clean_ph | length == 10 else clean_ph %}
+          <a href="https://wa.me/{{ wa_num }}?text={{ ('Hare Krishna ' ~ d.full_name ~ ' prabhu/mataji! 🙏') | urlencode }}" target="_blank" class="text-success ms-1 text-decoration-none small" title="Chat on WhatsApp">💬</a>
+        {% else %}-{% endif %}
+      </td>
+      <td>
+        {% if d.email %}
+          <span>{{ d.email }}</span>
+          <span role="button" class="text-muted ms-1 small" data-copy="{{ d.email }}" title="Copy email">📋</span>
+        {% else %}-{% endif %}
+      </td>
+      <td>
+        {% if d.pan %}
+          <span>{{ d.pan | mask_pan }}</span>
+          <span role="button" class="text-muted ms-1 small" data-copy="{{ d.pan }}" title="Copy PAN">📋</span>
+        {% else %}-{% endif %}
+      </td>
       <td>{{ donor_type_labels.get(d.donor_type, '-') if d.donor_type else '-' }}</td>
-      <td>{{ d.connected_preacher.name if d.connected_preacher else '-' }}</td>
+      <td>{{ d.connected_preacher.name if d.connected_preacher else '<span class="text-muted fst-italic">None</span>' | safe }}</td>
       <td class="text-end">{{ t[1] }}</td>
-      <td class="text-end">Rs. {{ t[0] | inr }}</td>
+      <td class="text-end fw-semibold">Rs. {{ t[0] | inr }}</td>
     </tr>
     {% else %}
     <tr><td colspan="8" class="text-muted">No donors found.</td></tr>

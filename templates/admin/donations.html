@@ -95,9 +95,20 @@
   </div>
 </form>
 
-<div class="table-responsive">
-<table class="table table-sm bg-white shadow-sm">
-  <thead><tr>
+<div class="d-flex flex-wrap gap-2 mb-3 align-items-center">
+  <span class="small text-muted fw-bold">Quick Filters:</span>
+  <a href="{{ url_for('admin.donations') }}" class="badge rounded-pill text-decoration-none {% if not mode and not q and date_range == 'this_month' and status == 'success' %}bg-primary text-white{% else %}bg-light text-dark border{% endif %}">This Month</a>
+  <a href="{{ url_for('admin.donations', mode='cash') }}" class="badge rounded-pill text-decoration-none {% if mode == 'cash' %}bg-primary text-white{% else %}bg-light text-dark border{% endif %}">💵 Cash</a>
+  <a href="{{ url_for('admin.donations', mode='online') }}" class="badge rounded-pill text-decoration-none {% if mode == 'online' %}bg-primary text-white{% else %}bg-light text-dark border{% endif %}">💳 Online (UPI/Cards)</a>
+  <a href="{{ url_for('admin.donations', mode='cheque') }}" class="badge rounded-pill text-decoration-none {% if mode == 'cheque' %}bg-primary text-white{% else %}bg-light text-dark border{% endif %}">📜 Cheque</a>
+  <a href="{{ url_for('admin.donations', mode='bank_transfer') }}" class="badge rounded-pill text-decoration-none {% if mode == 'bank_transfer' %}bg-primary text-white{% else %}bg-light text-dark border{% endif %}">🏦 Bank Transfer</a>
+  <a href="{{ url_for('admin.donations', range='this_fy') }}" class="badge rounded-pill text-decoration-none {% if date_range == 'this_fy' %}bg-primary text-white{% else %}bg-light text-dark border{% endif %}">📅 This FY</a>
+  <a href="{{ url_for('admin.donations', range='all') }}" class="badge rounded-pill text-decoration-none {% if date_range == 'all' %}bg-primary text-white{% else %}bg-light text-dark border{% endif %}">All Time</a>
+</div>
+
+<div class="table-responsive" style="max-height: 75vh; overflow-y: auto;">
+<table class="table table-sm table-hover bg-white shadow-sm align-middle">
+  <thead class="table-light" style="position: sticky; top: 0; z-index: 5; box-shadow: 0 1px 2px rgba(0,0,0,0.06);"><tr>
     <th>{{ sort_th('date', 'Date', 'desc') }}</th>
     <th>{{ sort_th('donor', 'Donor', 'asc') }}</th>
     <th>{{ sort_th('campaign', 'Campaign', 'asc') }}</th>
@@ -121,7 +132,12 @@
       <td class="small text-muted">{{ d.associated_with.name if d.associated_with else '-' }}</td>
       <td>Rs. {{ d.amount | inr }}</td>
       <td>{{ d.payment_mode.replace('_',' ').title() }}{% if d.razorpay_method %} ({{ d.razorpay_method.upper() }}){% endif %}</td>
-      <td class="small text-muted">{{ d.reference_display or '-' }}</td>
+      <td class="small text-muted">
+        {% if d.reference_display %}
+          <span>{{ d.reference_display }}</span>
+          <span role="button" class="ms-1 text-muted" data-copy="{{ d.reference_display }}" title="Copy reference">📋</span>
+        {% else %}-{% endif %}
+      </td>
       <td class="small text-muted">{{ d.razorpay_order_id or '-' }}</td>
       <td>
         {% if d.status == 'success' %}<span class="badge bg-success">Success</span>
@@ -132,6 +148,7 @@
       <td>
         {% if d.status == 'success' and d.receipt_number %}
         <a href="{{ url_for('public.download_receipt', donation_id=d.id, t=receipt_token(d.id)) }}">{{ d.receipt_number }}</a>
+        <span role="button" class="ms-1 text-muted small" data-copy="{{ d.receipt_number }}" title="Copy receipt number">📋</span>
         {% elif d.status == 'success' %}
         <span class="text-muted small">no receipt</span>
         {% else %}-{% endif %}

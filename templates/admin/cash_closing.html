@@ -1,0 +1,244 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Daily Cash Closing{% endblock %}
+{% block content %}
+<div class="admin-page-header mb-4">
+  <div>
+    <div class="eyebrow">Financial reconciliation &amp; counter closing</div>
+    <h3>💰 Daily Cash Counter Closing</h3>
+  </div>
+  <div class="admin-page-actions d-flex gap-2 align-items-center">
+    <form method="get" class="d-flex align-items-center gap-2">
+      <input type="date" name="date" aria-label="Closing date" class="form-control form-control-sm" value="{{ closing_date.isoformat() }}" onchange="this.form.submit()">
+    </form>
+    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="window.print()">🖨️ Print Closing Slip</button>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="stat-card" style="border-left: 4px solid #2e7d32;">
+      <div class="stat-label">Total System Cash</div>
+      <div class="stat-value text-success" style="font-size: 1.5rem;">Rs. {{ cash_total | inr }}</div>
+      <div class="stat-subtext">{{ cash_donations | length }} cash donation(s) on {{ closing_date.strftime('%d %b %Y') }}</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="stat-card">
+      <div class="stat-label">Total All Collections</div>
+      <div class="stat-value" style="font-size: 1.5rem;">Rs. {{ total_collections | inr }}</div>
+      <div class="stat-subtext">All payment modes combined</div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card card-body shadow-sm p-3 h-100">
+      <div class="small fw-bold text-muted mb-2">Mode-Wise Breakdown ({{ closing_date.strftime('%d %b %Y') }})</div>
+      <div class="d-flex flex-wrap gap-3">
+        {% for m, data in modes_summary.items() %}
+        <div class="p-2 border rounded bg-light" style="min-width: 110px;">
+          <div class="small text-muted text-uppercase">{{ m.replace('_', ' ') }}</div>
+          <div class="fw-bold">Rs. {{ data.total | inr }}</div>
+          <div class="text-muted" style="font-size: 0.75rem;">{{ data.count }} record(s)</div>
+        </div>
+        {% else %}
+        <span class="text-muted small">No collections recorded for this date.</span>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4 mb-4">
+  <div class="col-lg-6">
+    <div class="card shadow-sm p-4 h-100">
+      <h5 class="mb-3 d-flex justify-content-between align-items-center">
+        <span>💵 Cash Drawer Denominations</span>
+        <span class="badge bg-secondary fw-normal">Physical Count</span>
+      </h5>
+      <p class="text-muted small mb-3">Count and enter the notes in the counter cash drawer to verify against recorded system donations.</p>
+
+      <form id="denomination-form">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th style="width: 35%">Denomination</th>
+              <th style="width: 30%">Count</th>
+              <th class="text-end" style="width: 35%">Subtotal (Rs.)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for denom in [500, 200, 100, 50, 20, 10] %}
+            <tr>
+              <td><strong>Rs. {{ denom }}</strong></td>
+              <td>
+                <input type="number" min="0" class="form-control form-control-sm denom-input" aria-label="Count of {{ denom }} rupee notes" data-value="{{ denom }}" value="0" style="max-width: 100px;">
+              </td>
+              <td class="text-end fw-bold" id="subtotal-{{ denom }}">0</td>
+            </tr>
+            {% endfor %}
+            <tr>
+              <td><strong>Coins / Other</strong></td>
+              <td>
+                <input type="number" min="0" class="form-control form-control-sm denom-input" aria-label="Count of coins and other" data-value="1" value="0" style="max-width: 100px;">
+              </td>
+              <td class="text-end fw-bold" id="subtotal-1">0</td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr class="table-light">
+              <th colspan="2">Total Physical Cash Counted:</th>
+              <th class="text-end fs-5 text-primary" id="total-counted">Rs. 0</th>
+            </tr>
+            <tr>
+              <th colspan="2">System Cash Recorded:</th>
+              <th class="text-end text-muted" id="total-system">Rs. {{ cash_total | inr }}</th>
+            </tr>
+            <tr id="variance-row" class="table-success">
+              <th colspan="2" id="variance-label">Status:</th>
+              <th class="text-end fs-6" id="variance-value">Balanced (Rs. 0)</th>
+            </tr>
+          </tfoot>
+        </table>
+        <div class="d-flex justify-content-between mt-3">
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="reset-denoms">Clear Counts</button>
+          <button type="button" class="btn btn-sm btn-gold" onclick="window.print()">Print Cash Slip</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card shadow-sm p-4 h-100">
+      <h5 class="mb-3">🧾 Cash Donations Log ({{ closing_date.strftime('%d %b %Y') }})</h5>
+      {% if cash_donations %}
+      <div class="table-responsive" style="max-height: 480px; overflow-y: auto;">
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead class="table-light sticky-top">
+            <tr>
+              <th>Time</th>
+              <th>Donor</th>
+              <th>Receipt</th>
+              <th>Campaign</th>
+              <th class="text-end">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for d in cash_donations %}
+            <tr>
+              <td class="small text-muted">{{ (d.donation_date | to_ist).strftime('%I:%M %p') }}</td>
+              <td>
+                <a href="{{ url_for('admin.donor_detail', donor_id=d.donor.id) }}" class="text-decoration-none fw-semibold">
+                  {{ d.donor.full_name }}
+                </a>
+              </td>
+              <td>
+                <span class="badge bg-light text-dark border">{{ d.receipt_number or '-' }}</span>
+              </td>
+              <td class="small">{{ d.campaign.name }}</td>
+              <td class="text-end fw-bold">Rs. {{ d.amount | inr }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="text-center py-5 text-muted">
+        <div class="fs-1 mb-2">🪔</div>
+        <div>No cash donations recorded for this date.</div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="d-none d-print-block mt-4 p-4 border" id="printable-handover-slip">
+  <div class="text-center mb-3">
+    <h4 class="mb-1">{{ config.ORG_NAME }}</h4>
+    <div class="small text-muted">Daily Cash Drawer Closing &amp; Shift Handover Slip</div>
+    <div class="fw-bold mt-2">Date: {{ closing_date.strftime('%d %B %Y') }}</div>
+  </div>
+  <hr>
+  <div class="row mb-3">
+    <div class="col-6"><strong>Closing Date:</strong> {{ closing_date.strftime('%d-%m-%Y') }}</div>
+    <div class="col-6 text-end"><strong>Generated By:</strong> {{ current_user.username | capitalize }}</div>
+  </div>
+  <table class="table table-bordered table-sm mb-3">
+    <thead>
+      <tr><th>Metric</th><th class="text-end">Amount (Rs.)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>System Cash Donations ({{ cash_donations | length }} receipts)</td><td class="text-end">Rs. {{ cash_total | inr }}</td></tr>
+      <tr><td>Physical Cash Counted</td><td class="text-end" id="print-counted">Rs. 0</td></tr>
+      <tr><td><strong>Variance (Difference)</strong></td><td class="text-end fw-bold" id="print-variance">Rs. 0</td></tr>
+    </tbody>
+  </table>
+  <div class="row mt-5 pt-4">
+    <div class="col-6 text-center border-top">
+      <div class="small text-muted mt-1">Cashier / Counter Devotee Signature</div>
+    </div>
+    <div class="col-6 text-center border-top">
+      <div class="small text-muted mt-1">Treasurer / Temple Manager Signature</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const systemCash = {{ cash_total }};
+  const inputs = document.querySelectorAll('.denom-input');
+  const totalCountedEl = document.getElementById('total-counted');
+  const printCountedEl = document.getElementById('print-counted');
+  const varianceRow = document.getElementById('variance-row');
+  const varianceLabel = document.getElementById('variance-label');
+  const varianceValue = document.getElementById('variance-value');
+  const printVarianceEl = document.getElementById('print-variance');
+
+  function calculate() {
+    let grandTotal = 0;
+    inputs.forEach(input => {
+      const val = parseInt(input.getAttribute('data-value'), 10);
+      const count = parseInt(input.value, 10) || 0;
+      const subtotal = val * count;
+      grandTotal += subtotal;
+      const subEl = document.getElementById('subtotal-' + val);
+      if (subEl) subEl.textContent = subtotal.toLocaleString('en-IN');
+    });
+
+    const formatted = 'Rs. ' + grandTotal.toLocaleString('en-IN');
+    totalCountedEl.textContent = formatted;
+    if (printCountedEl) printCountedEl.textContent = formatted;
+
+    const diff = grandTotal - systemCash;
+    if (diff === 0) {
+      varianceRow.className = 'table-success';
+      varianceLabel.textContent = 'Status:';
+      varianceValue.textContent = '✅ Balanced (Rs. 0)';
+      if (printVarianceEl) printVarianceEl.textContent = 'Balanced (Rs. 0)';
+    } else if (diff > 0) {
+      varianceRow.className = 'table-info';
+      varianceLabel.textContent = 'Surplus (+):';
+      varianceValue.textContent = 'Rs. +' + diff.toLocaleString('en-IN');
+      if (printVarianceEl) printVarianceEl.textContent = 'Surplus: Rs. +' + diff.toLocaleString('en-IN');
+    } else {
+      varianceRow.className = 'table-danger';
+      varianceLabel.textContent = 'Shortage (-):';
+      varianceValue.textContent = 'Rs. ' + diff.toLocaleString('en-IN');
+      if (printVarianceEl) printVarianceEl.textContent = 'Shortage: Rs. ' + diff.toLocaleString('en-IN');
+    }
+  }
+
+  inputs.forEach(input => {
+    input.addEventListener('input', calculate);
+  });
+
+  const resetBtn = document.getElementById('reset-denoms');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', function() {
+      inputs.forEach(input => input.value = 0);
+      calculate();
+    });
+  }
+
+  calculate();
+})();
+</script>
+{% endblock %}

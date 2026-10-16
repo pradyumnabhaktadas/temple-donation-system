@@ -1,0 +1,124 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Settings &amp; Configuration{% endblock %}
+{% block content %}
+<div class="admin-page-header mb-4">
+  <div>
+    <div class="eyebrow">System preferences &amp; master data</div>
+    <h3>⚙️ Settings &amp; Configuration Hub</h3>
+  </div>
+</div>
+
+<div class="row g-4 mb-5">
+  <div class="col-lg-4 col-md-6">
+    <div class="card h-100 shadow-sm border-0 bg-light">
+      <div class="card-body p-4">
+        <div class="d-flex align-items-center gap-2 mb-3">
+          <span class="fs-4">🪔</span>
+          <h5 class="card-title mb-0">Master Data &amp; Sevas</h5>
+        </div>
+        <p class="text-muted small mb-4">Configure donation campaigns, 80G eligibility, festival sponsorship tiers, and properties.</p>
+        <div class="list-group list-group-flush rounded shadow-sm">
+          <a href="{{ url_for('admin.campaigns') }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+            <span>Campaigns</span>
+            <span class="text-muted small">&rarr;</span>
+          </a>
+          <a href="{{ url_for('admin.live_to_give_purposes') }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+            <span>Live To Give Purposes (80G)</span>
+            <span class="text-muted small">&rarr;</span>
+          </a>
+          <a href="{{ url_for('admin.festivals') }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+            <span>Festivals &amp; Occasions</span>
+            <span class="text-muted small">&rarr;</span>
+          </a>
+          <a href="{{ url_for('admin.seva_types') }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+            <span>Seva Types / Sponsorships</span>
+            <span class="text-muted small">&rarr;</span>
+          </a>
+          <a href="{{ url_for('admin.bace_properties') }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+            <span>BACE Properties</span>
+            <span class="text-muted small">&rarr;</span>
+          </a>
+          <a href="{{ url_for('admin.dhoti_kurta_contributions') }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+            <span>Dhoti Kurta Contributions</span>
+            <span class="text-muted small">&rarr;</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4 col-md-6">
+    <div class="card h-100 shadow-sm border-0 bg-light">
+      <div class="card-body p-4">
+        <div class="d-flex align-items-center gap-2 mb-3">
+          <span class="fs-4">👥</span>
+          <h5 class="card-title mb-0">Devotees &amp; Preaching</h5>
+        </div>
+        <p class="text-muted small mb-4">Manage preaching departments, personal devotee assignments, and contribution programs.</p>
+        <div class="list-group list-group-flush rounded shadow-sm">
+          <a href="{{ url_for('admin.preachers') }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+            <span>Preachers &amp; Mentors</span>
+            <span class="text-muted small">&rarr;</span>
+          </a>
+          <a href="{{ url_for('admin.associated_withs') }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+            <span>Associated With Programs</span>
+            <span class="text-muted small">&rarr;</span>
+          </a>
+          <a href="{{ url_for('admin.associated_with_report') }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+            <span>Associated With Report</span>
+            <span class="text-muted small">&rarr;</span>
+          </a>
+          <a href="{{ url_for('admin.bace_contributions') }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+            <span>BACE Contribution Logs</span>
+            <span class="text-muted small">&rarr;</span>
+          </a>
+          <a href="{{ url_for('admin.cash_closing') }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+            <span>Daily Cash Closing</span>
+            <span class="badge bg-success">New</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4 col-md-6">
+    <div class="card h-100 shadow-sm border-0 bg-light">
+      <div class="card-body p-4">
+        <div class="d-flex align-items-center gap-2 mb-3">
+          <span class="fs-4">🛡️</span>
+          <h5 class="card-title mb-0">System &amp; Administration</h5>
+        </div>
+        <p class="text-muted small mb-4">Manage user permissions, security audit trail, and database backup routines.</p>
+        <div class="list-group list-group-flush rounded shadow-sm">
+          {% if current_user.is_authenticated and current_user.role == 'admin' %}
+          <a href="{{ url_for('admin.manage_users') }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+            <span>Manage Staff &amp; Roles</span>
+            <span class="text-muted small">&rarr;</span>
+          </a>
+          <a href="{{ url_for('admin.activity_log') }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+            <span>Activity Audit Log</span>
+            <span class="text-muted small">&rarr;</span>
+          </a>
+          <a href="{{ url_for('admin.data_backup') }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+            <span>Database Backup &amp; Restore</span>
+            <span class="text-muted small">&rarr;</span>
+          </a>
+          <a href="{{ url_for('admin.daily_report_recipients') }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+            <span>4 AM Daily Report Recipients</span>
+            <span class="text-muted small">&rarr;</span>
+          </a>
+          <a href="{{ url_for('admin.birthday_alert_recipients') }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+            <span>Birthday Alert Recipients</span>
+            <span class="text-muted small">&rarr;</span>
+          </a>
+          {% endif %}
+          <a href="{{ url_for('admin.change_password') }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+            <span>Change My Password</span>
+            <span class="text-muted small">&rarr;</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

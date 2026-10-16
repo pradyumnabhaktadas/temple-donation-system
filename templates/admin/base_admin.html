@@ -12,17 +12,11 @@
       {% set offline_donation_endpoints = ['admin.manual_donation', 'admin.bulk_import_donations'] %}
       {% set iyf_camp_endpoints = ['admin.iyf_camps', 'admin.iyf_camp_single', 'admin.iyf_camp_bulk'] %}
       {% set bace_tracker_endpoints = ['admin.bace_dashboard', 'admin.bace_students', 'admin.bace_student_edit', 'admin.bace_payments', 'admin.bace_tracker_grid', 'admin.bace_pending_list'] %}
-      {# Donations and Programs used to be 7 separate flat links crowding
-         the bar onto two lines on ordinary screens -- grouped into
-         dropdowns the same way Donors/Settings already were below, so
-         the top-level bar stays to one line: click a group, pick a page,
-         it opens full-page like any other link; Dashboard is always the
-         one click back to the main admin page. #}
-      {% set donations_endpoints = ['admin.donations'] + offline_donation_endpoints + ['admin.import_legacy_donations', 'admin.import_zoho_report', 'admin.zoho_reconcile'] %}
+      {% set donations_endpoints = ['admin.donations', 'admin.cash_closing'] + offline_donation_endpoints + ['admin.import_legacy_donations', 'admin.import_zoho_report', 'admin.zoho_reconcile'] %}
       {% set programs_endpoints = iyf_camp_endpoints + bace_tracker_endpoints %}
       {% set donors_endpoints = ['admin.donors', 'admin.donor_giving', 'admin.birthdays', 'admin.donor_insights', 'admin.donor_intelligence', 'admin.lapsed_donors', 'admin.duplicate_donors', 'admin.import_donors'] %}
       {% set preaching_center_endpoints = ['admin.preaching_centers', 'admin.preaching_centers_dashboard', 'admin.preaching_center_detail', 'admin.edit_preaching_center'] %}
-      {% set settings_endpoints = ['admin.campaigns', 'admin.bace_properties', 'admin.bace_contributions', 'admin.festivals', 'admin.seva_types', 'admin.live_to_give_purposes', 'admin.preachers', 'admin.associated_withs', 'admin.associated_with_report', 'admin.dhoti_kurta_contributions', 'admin.data_backup', 'admin.manage_users', 'admin.activity_log', 'admin.daily_report_recipients', 'admin.birthday_alert_recipients'] %}
+      {% set settings_endpoints = ['admin.settings_index', 'admin.campaigns', 'admin.bace_properties', 'admin.bace_contributions', 'admin.festivals', 'admin.seva_types', 'admin.live_to_give_purposes', 'admin.preachers', 'admin.associated_withs', 'admin.associated_with_report', 'admin.dhoti_kurta_contributions', 'admin.data_backup', 'admin.manage_users', 'admin.activity_log', 'admin.daily_report_recipients', 'admin.birthday_alert_recipients'] %}
       {% if current_user.is_authenticated and current_user.role in ['bace_viewer', 'preaching_center_viewer'] %}
       <div class="navbar-nav ms-auto flex-wrap align-items-lg-center">
         {% if current_user.role == 'bace_viewer' %}
@@ -35,7 +29,7 @@
         <a class="nav-link" href="{{ url_for('admin.logout') }}">Logout</a>
       </div>
       {% else %}
-      <div class="navbar-nav ms-auto flex-wrap">
+      <div class="navbar-nav ms-auto flex-wrap align-items-lg-center">
         <a class="nav-link {% if request.endpoint == 'admin.dashboard' %}active{% endif %}" href="{{ url_for('admin.dashboard') }}">Dashboard</a>
         <a class="nav-link {% if request.endpoint == 'admin.analytics' %}active{% endif %}" href="{{ url_for('admin.analytics') }}">Analytics</a>
 
@@ -44,6 +38,7 @@
           <ul class="dropdown-menu dropdown-menu-end">
             <li><a class="dropdown-item {% if request.endpoint == 'admin.donations' %}active{% endif %}" href="{{ url_for('admin.donations') }}">Donations Log</a></li>
             <li><a class="dropdown-item {% if request.endpoint in offline_donation_endpoints %}active{% endif %}" href="{{ url_for('admin.manual_donation') }}">Offline Donation</a></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'admin.cash_closing' %}active{% endif %}" href="{{ url_for('admin.cash_closing') }}">💵 Cash Counter Closing</a></li>
             {% if current_user.is_authenticated and current_user.role == 'admin' %}
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.import_legacy_donations' %}active{% endif %}" href="{{ url_for('admin.import_legacy_donations') }}">Import Historical Data</a></li>
@@ -89,6 +84,8 @@
         <div class="nav-item dropdown">
           <a class="nav-link dropdown-toggle {% if request.endpoint in settings_endpoints %}active{% endif %}" href="#" role="button" aria-expanded="false">Settings</a>
           <ul class="dropdown-menu dropdown-menu-end">
+            <li><a class="dropdown-item fw-bold {% if request.endpoint == 'admin.settings_index' %}active{% endif %}" href="{{ url_for('admin.settings_index') }}">⚙️ Settings Hub</a></li>
+            <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.campaigns' %}active{% endif %}" href="{{ url_for('admin.campaigns') }}">Campaigns</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.bace_properties' %}active{% endif %}" href="{{ url_for('admin.bace_properties') }}">BACE</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.bace_contributions' %}active{% endif %}" href="{{ url_for('admin.bace_contributions') }}">BACE Contribution Logs</a></li>
@@ -108,6 +105,13 @@
             <li><a class="dropdown-item {% if request.endpoint == 'admin.birthday_alert_recipients' %}active{% endif %}" href="{{ url_for('admin.birthday_alert_recipients') }}">Birthday Alert Recipients</a></li>
             {% endif %}
           </ul>
+        </div>
+
+        <div class="nav-item">
+          <button type="button" class="btn btn-sm btn-outline-light d-inline-flex align-items-center gap-1 my-1 ms-lg-2 text-white border-white-50" id="btn-open-cmd-k" title="Universal Search (Cmd+K / Ctrl+K)">
+            <span>🔍 Search</span>
+            <kbd class="bg-white text-dark small px-1 rounded" style="font-size:0.65rem;">⌘K</kbd>
+          </button>
         </div>
 
         {% if current_user.is_authenticated %}
@@ -200,6 +204,185 @@
     if (!message) return;
     if (!confirm(message)) e.preventDefault();
   }, true);
+})();
+</script>
+<!-- Universal Command Palette Modal (Cmd+K / Ctrl+K) -->
+<div id="cmd-k-modal" style="display: none; position: fixed; inset: 0; z-index: 9999; background: rgba(15, 36, 68, 0.65); backdrop-filter: blur(2px); align-items: flex-start; justify-content: center; padding-top: 10vh;">
+  <div style="background: #ffffff; width: 100%; max-width: 620px; border-radius: 12px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35); overflow: hidden; display: flex; flex-direction: column; max-height: 75vh;">
+    <div class="d-flex align-items-center px-3 py-2 border-bottom bg-light">
+      <span class="text-muted me-2" style="font-size: 1.1rem;">🔍</span>
+      <input type="text" id="cmd-k-input" aria-label="Search pages and donors" class="form-control border-0 bg-transparent shadow-none" placeholder="Search pages (e.g. Cash Closing, Settings) or donors by name, phone, PAN..." autocomplete="off" style="font-size: 1rem;">
+      <kbd class="small text-muted border bg-white px-2 py-1 rounded" style="font-size: 0.7rem;">ESC</kbd>
+    </div>
+    <div id="cmd-k-body" class="p-2" style="overflow-y: auto;">
+      <div id="cmd-k-nav-section">
+        <div class="px-2 py-1 small fw-bold text-uppercase text-muted" style="font-size: 0.72rem; letter-spacing: 0.5px;">Navigation</div>
+        <div id="cmd-k-nav-list" class="list-group list-group-flush">
+          <a href="{{ url_for('admin.dashboard') }}" class="list-group-item list-group-item-action py-2 px-3 rounded border-0 d-flex align-items-center justify-content-between cmd-item">
+            <span>📊 Dashboard</span>
+            <span class="text-muted small">Home &amp; Key KPIs</span>
+          </a>
+          <a href="{{ url_for('admin.manual_donation') }}" class="list-group-item list-group-item-action py-2 px-3 rounded border-0 d-flex align-items-center justify-content-between cmd-item">
+            <span>⚡ Offline Donation (Counter Mode)</span>
+            <span class="text-muted small">Fast Entry &amp; Receipt</span>
+          </a>
+          <a href="{{ url_for('admin.cash_closing') }}" class="list-group-item list-group-item-action py-2 px-3 rounded border-0 d-flex align-items-center justify-content-between cmd-item">
+            <span>💵 Cash Counter Closing</span>
+            <span class="text-muted small">Denomination Calculator</span>
+          </a>
+          <a href="{{ url_for('admin.donations') }}" class="list-group-item list-group-item-action py-2 px-3 rounded border-0 d-flex align-items-center justify-content-between cmd-item">
+            <span>🧾 Donations Log</span>
+            <span class="text-muted small">All Contributions</span>
+          </a>
+          <a href="{{ url_for('admin.donors') }}" class="list-group-item list-group-item-action py-2 px-3 rounded border-0 d-flex align-items-center justify-content-between cmd-item">
+            <span>👥 Donors Directory</span>
+            <span class="text-muted small">Profiles &amp; Contacts</span>
+          </a>
+          <a href="{{ url_for('admin.birthdays') }}" class="list-group-item list-group-item-action py-2 px-3 rounded border-0 d-flex align-items-center justify-content-between cmd-item">
+            <span>🎂 Birthday &amp; Anniversary Calendar</span>
+            <span class="text-muted small">Preaching Outreach</span>
+          </a>
+          <a href="{{ url_for('admin.settings_index') }}" class="list-group-item list-group-item-action py-2 px-3 rounded border-0 d-flex align-items-center justify-content-between cmd-item">
+            <span>⚙️ Settings Hub</span>
+            <span class="text-muted small">Configure Master Data</span>
+          </a>
+          <a href="{{ url_for('admin.analytics') }}" class="list-group-item list-group-item-action py-2 px-3 rounded border-0 d-flex align-items-center justify-content-between cmd-item">
+            <span>📈 Analytics &amp; Reports</span>
+            <span class="text-muted small">Trends &amp; Insights</span>
+          </a>
+          <a href="{{ url_for('admin.preaching_centers_dashboard') }}" class="list-group-item list-group-item-action py-2 px-3 rounded border-0 d-flex align-items-center justify-content-between cmd-item">
+            <span>🏛️ Preaching Centers</span>
+            <span class="text-muted small">Collection Dashboard</span>
+          </a>
+          <a href="{{ url_for('admin.iyf_camps') }}" class="list-group-item list-group-item-action py-2 px-3 rounded border-0 d-flex align-items-center justify-content-between cmd-item">
+            <span>🏕️ IYF Camps</span>
+            <span class="text-muted small">Youth Camp Registration</span>
+          </a>
+          <a href="{{ url_for('admin.bace_dashboard') }}" class="list-group-item list-group-item-action py-2 px-3 rounded border-0 d-flex align-items-center justify-content-between cmd-item">
+            <span>🏢 BACE Rent Tracker</span>
+            <span class="text-muted small">Student Rent Grid</span>
+          </a>
+        </div>
+      </div>
+      <div id="cmd-k-donors-section" style="display: none;" class="mt-2">
+        <div class="px-2 py-1 small fw-bold text-uppercase text-muted" style="font-size: 0.72rem; letter-spacing: 0.5px;">Matching Donors</div>
+        <div id="cmd-k-donors-list" class="list-group list-group-flush"></div>
+      </div>
+    </div>
+    <div class="p-2 border-top bg-light text-muted small d-flex justify-content-between px-3" style="font-size: 0.75rem;">
+      <span>Use <kbd>↑</kbd> <kbd>↓</kbd> to navigate, <kbd>Enter</kbd> to select</span>
+      <span><kbd>Esc</kbd> to close</span>
+    </div>
+  </div>
+</div>
+
+<script>
+// Universal Command Palette (Cmd+K / Ctrl+K)
+(function () {
+  const modal = document.getElementById('cmd-k-modal');
+  const input = document.getElementById('cmd-k-input');
+  const openBtn = document.getElementById('btn-open-cmd-k');
+  const navList = document.getElementById('cmd-k-nav-list');
+  const navItems = navList ? Array.from(navList.querySelectorAll('.cmd-item')) : [];
+  const donorsSection = document.getElementById('cmd-k-donors-section');
+  const donorsList = document.getElementById('cmd-k-donors-list');
+
+  if (!modal || !input) return;
+
+  function openPalette() {
+    modal.style.display = 'flex';
+    input.value = '';
+    filterItems('');
+    input.focus();
+  }
+
+  function closePalette() {
+    modal.style.display = 'none';
+  }
+
+  if (openBtn) {
+    openBtn.addEventListener('click', openPalette);
+  }
+
+  window.addEventListener('keydown', function (e) {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      if (modal.style.display === 'flex') {
+        closePalette();
+      } else {
+        openPalette();
+      }
+    } else if (e.key === 'Escape' && modal.style.display === 'flex') {
+      closePalette();
+    }
+  });
+
+  modal.addEventListener('click', function (e) {
+    if (e.target === modal) closePalette();
+  });
+
+  let searchTimer = null;
+  function filterItems(query) {
+    const q = (query || '').toLowerCase().trim();
+    navItems.forEach(item => {
+      const text = item.textContent.toLowerCase();
+      item.style.display = (!q || text.includes(q)) ? 'flex' : 'none';
+    });
+
+    if (q.length < 2) {
+      if (donorsSection) donorsSection.style.display = 'none';
+      if (donorsList) donorsList.innerHTML = '';
+      return;
+    }
+
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      fetch('/admin/api/donors/search?q=' + encodeURIComponent(q))
+        .then(r => r.json())
+        .then(data => {
+          const donors = data.donors || [];
+          if (!donors.length) {
+            if (donorsSection) donorsSection.style.display = 'none';
+            if (donorsList) donorsList.innerHTML = '';
+            return;
+          }
+          if (donorsList) {
+            donorsList.innerHTML = donors.map(d => `
+              <a href="/admin/donors/${d.id}" class="list-group-item list-group-item-action py-2 px-3 rounded border-0 d-flex align-items-center justify-content-between cmd-item">
+                <div>
+                  <div class="fw-semibold text-dark">👤 ${d.full_name}</div>
+                  <div class="small text-muted">📱 ${d.phone || 'No phone'} ${d.pan ? '· PAN: ' + d.pan : ''} ${d.city ? '· ' + d.city : ''}</div>
+                </div>
+                <span class="badge bg-light text-secondary border">View Profile &rarr;</span>
+              </a>
+            `).join('');
+          }
+          if (donorsSection) donorsSection.style.display = 'block';
+        })
+        .catch(() => {});
+    }, 200);
+  }
+
+  input.addEventListener('input', function () {
+    filterItems(this.value);
+  });
+})();
+
+// 1-Click Clipboard Copy Handler
+(function () {
+  document.addEventListener('click', function (e) {
+    const trigger = e.target.closest('[data-copy]');
+    if (!trigger) return;
+    const val = trigger.getAttribute('data-copy');
+    if (!val) return;
+    navigator.clipboard.writeText(val).then(() => {
+      const origHtml = trigger.innerHTML;
+      trigger.innerHTML = '<span class="text-success fw-bold">✓ Copied!</span>';
+      setTimeout(() => {
+        trigger.innerHTML = origHtml;
+      }, 1400);
+    }).catch(() => {});
+  });
 })();
 </script>
 {% endblock %}

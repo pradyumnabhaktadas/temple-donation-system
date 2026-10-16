@@ -12,7 +12,7 @@ from functools import wraps
 
 from flask import (
     Blueprint, render_template, request, redirect, url_for, flash,
-    current_app, Response, abort,
+    current_app, Response, abort, jsonify,
 )
 from flask_login import login_user, logout_user, login_required, current_user
 from sqlalchemy import func, extract, or_
@@ -1217,6 +1217,106 @@ def analytics():
     )
 
 
+@bp.route("/api/donors/search")
+@login_required
+def api_donors_search():
+    """Live typeahead search for the offline donation form and command palette."""
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 2:
+        return jsonify({"donors": []})
+
+    cleaned_digits = re.sub(r"\D", "", q)
+    filter_expr = Donor.full_name.ilike(f"%{q}%") | Donor.email.ilike(f"%{q}%")
+    if len(cleaned_digits) >= 3:
+        filter_expr = filter_expr | Donor.phone.contains(cleaned_digits) | Donor.whatsapp_number.contains(cleaned_digits)
+    if len(q) <= 10 and any(ch.isalnum() for ch in q):
+        filter_expr = filter_expr | Donor.pan.ilike(f"%{q}%")
+
+    matches = Donor.query.filter(filter_expr).order_by(Donor.id.desc()).limit(8).all()
+    results = [
+        {
+            "id": d.id,
+            "full_name": d.full_name,
+            "phone": d.phone or "",
+            "whatsapp_number": d.whatsapp_number or "",
+            "email": d.email or "",
+            "pan": d.pan or "",
+            "address": d.address or "",
+            "city": d.city or "",
+            "state": d.state or "",
+            "pincode": d.pincode or "",
+            "donor_type": d.donor_type or "",
+            "display": f"{d.full_name} ({d.phone or 'No phone'}"
+            + (f", PAN: {d.pan}" if d.pan else "")
+            + (f", {d.city}" if d.city else "")
+            + ")",
+        }
+        for d in matches
+    ]
+    return jsonify({"donors": results})
+
+
+@bp.route("/cash-closing")
+@login_required
+def cash_closing():
+    """Daily cash counter closing and denomination verification for reception devotees and cashiers."""
+    date_str = request.args.get("date")
+    if date_str:
+        try:
+            closing_date = datetime.date.fromisoformat(date_str)
+        except ValueError:
+            closing_date = now_ist().date()
+    else:
+        closing_date = now_ist().date()
+
+    day_start = datetime.datetime.combine(closing_date, datetime.time.min)
+    day_end = datetime.datetime.combine(closing_date, datetime.time.max)
+
+    # Coarse UTC bound for database query (with 6 hours buffer for IST offset)
+    query_start = day_start - datetime.timedelta(hours=6)
+    query_end = day_end + datetime.timedelta(hours=6)
+
+    candidates = (
+        Donation.query.filter(
+            Donation.status == "success",
+            Donation.donation_date >= query_start,
+            Donation.donation_date <= query_end,
+        )
+        .order_by(Donation.donation_date.asc())
+        .all()
+    )
+
+    day_donations = [d for d in candidates if to_ist(d.donation_date).date() == closing_date]
+
+    cash_donations = [d for d in day_donations if d.payment_mode == "cash"]
+    cash_total = sum(float(d.amount) for d in cash_donations)
+
+    modes_summary = {}
+    for d in day_donations:
+        m = d.payment_mode or "unknown"
+        bucket = modes_summary.setdefault(m, {"count": 0, "total": 0.0})
+        bucket["count"] += 1
+        bucket["total"] += float(d.amount)
+
+    total_collections = sum(b["total"] for b in modes_summary.values())
+
+    return render_template(
+        "admin/cash_closing.html",
+        closing_date=closing_date,
+        cash_donations=cash_donations,
+        cash_total=cash_total,
+        modes_summary=modes_summary,
+        total_collections=total_collections,
+    )
+
+
+@bp.route("/settings")
+@login_required
+def settings_index():
+    """Central settings and configuration hub."""
+    return render_template("admin/settings_index.html")
+
+
 DONORS_PER_PAGE = 30
 DONATIONS_PER_PAGE = 50
 
@@ -1484,6 +1584,7 @@ def donor_detail(donor_id):
     return render_template(
         "admin/donor_detail.html", donor=donor, donations=donations, available_fys=available_fys,
         donor_type_labels=DONOR_TYPE_LABELS, donation_frequency_labels=DONATION_FREQUENCY_LABELS,
+        today=now_ist().date(),
     )
 
 
@@ -3015,11 +3116,18 @@ def manual_donation():
                 f"Donation recorded with receipt {result['receipt_number']}, but generating the PDF failed. "
                 f"Check the donor's record and regenerate the receipt if needed.", "warning",
             )
-        return redirect(url_for("admin.donor_detail", donor_id=result["donor"].id))
+        if form.get("keep_open") == "1":
+            return redirect(url_for("admin.manual_donation", success_id=result["donation"].id))
+        return redirect(url_for("admin.donor_detail", donor_id=result["donor"].id, just_recorded=result["donation"].id))
 
     active_tab = "bulk" if request.args.get("tab") == "bulk" else "single"
+    success_donation = None
+    success_id = request.args.get("success_id", type=int)
+    if success_id:
+        success_donation = Donation.query.get(success_id)
     return render_template(
         "admin/offline_donation.html", active_tab=active_tab,
+        success_donation=success_donation,
         bulk_results=None, bulk_created=None, bulk_skipped=None,
         **_offline_donation_form_context(),
     )

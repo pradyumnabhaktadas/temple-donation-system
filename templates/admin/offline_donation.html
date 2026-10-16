@@ -9,9 +9,60 @@
 </div>
 
 <div class="offline-tab-pane" data-pane="single" style="{{ '' if active_tab == 'single' else 'display:none;' }}">
+  {% if success_donation %}
+  <div class="card border-success shadow-sm mb-4" style="max-width:600px; background-color: #f8fff9;">
+    <div class="card-body">
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <span class="badge bg-success fs-6">✅ Donation Recorded</span>
+        <span class="text-muted small">{{ success_donation.donation_date.strftime('%d-%b-%Y') }}</span>
+      </div>
+      <div class="row g-2 mb-3 align-items-center">
+        <div class="col-sm-7">
+          <h4 class="mb-0 text-success fw-bold">₹ {{ '{:,.2f}'.format(success_donation.amount) }}</h4>
+          <div class="fw-semibold text-dark">{{ success_donation.donor.full_name }}</div>
+          <div class="small text-muted">Receipt: <strong>{{ success_donation.receipt_number or 'No receipt' }}</strong> &middot; {{ success_donation.payment_mode | replace('_', ' ') | title }}</div>
+        </div>
+        <div class="col-sm-5 text-sm-end">
+          <a href="{{ url_for('admin.donor_detail', donor_id=success_donation.donor_id) }}" class="btn btn-sm btn-outline-secondary">View Profile &rarr;</a>
+        </div>
+      </div>
+      <div class="d-flex flex-wrap gap-2 pt-2 border-top">
+        {% if success_donation.receipt_number %}
+        <a href="{{ url_for('public.download_receipt', donation_id=success_donation.id, t=receipt_token(success_donation.id)) }}" target="_blank" class="btn btn-sm btn-outline-success">
+          🖨️ Print Receipt
+        </a>
+        {% endif %}
+        {% set phone_clean = (success_donation.donor.whatsapp_number or success_donation.donor.phone or '') | replace('+', '') | replace(' ', '') | replace('-', '') %}
+        {% if phone_clean %}
+          {% if phone_clean | length == 10 %}
+            {% set wa_phone = '91' + phone_clean %}
+          {% else %}
+            {% set wa_phone = phone_clean %}
+          {% endif %}
+          {% set wa_msg = 'Hare Krishna ' + success_donation.donor.full_name + ' prabhu/mataji, pamho! 🙏 Thank you for your kind donation of Rs. ' + (success_donation.amount | string) + ' towards ' + success_donation.campaign.name + ' (Receipt No: ' + (success_donation.receipt_number or '') + '). May Lord Krishna bless you and your family with devotional service!' %}
+          <a href="https://wa.me/{{ wa_phone }}?text={{ wa_msg | urlencode }}" target="_blank" class="btn btn-sm btn-outline-primary" style="color: #25D366; border-color: #25D366;">
+            💬 WhatsApp
+          </a>
+        {% endif %}
+        <a href="{{ url_for('admin.manual_donation') }}" class="btn btn-sm btn-light border ms-auto">
+          ➕ New Entry
+        </a>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <p class="text-muted small mb-3">Log a single cash, cheque, or bank transfer donation -- generates a real receipt number and PDF immediately.</p>
   <form method="post" action="{{ url_for('admin.manual_donation') }}" class="card card-body shadow-sm p-4" style="max-width:600px">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="form-check form-switch mb-3 p-2 bg-light rounded border">
+      <input class="form-check-input ms-0 me-2" type="checkbox" name="keep_open" value="1" id="keep_open" checked>
+      <label class="form-check-label fw-bold" for="keep_open">
+        ⚡ Counter Mode (Keep form open for next donation)
+      </label>
+      <div class="form-text ms-4">Perfect for temple reception desk: saves entry, displays receipt actions above, and readies form for next devotee.</div>
+    </div>
     <div class="mb-3">
       <label class="form-label" for="campaign_id">Campaign / Purpose</label>
       <select class="form-select" name="campaign_id" id="campaign_id" required>
@@ -131,15 +182,23 @@
       <label class="form-label" for="donation_date">Donation Date</label>
       <input type="date" class="form-control" name="donation_date" id="donation_date" value="{{ today.isoformat() }}">
     </div>
-    <div class="row">
-      <div class="col-md-6 mb-3">
-        <label class="form-label" for="full_name">Donor Full Name</label>
-        <input type="text" class="form-control" name="full_name" id="full_name" required>
+    <div class="row position-relative">
+      <div class="col-md-6 mb-3 position-relative">
+        <label class="form-label" for="full_name">Donor Full Name <span class="badge bg-light text-primary border ms-1" style="font-size: 0.7rem; font-weight: normal;">Type to search</span></label>
+        <div class="input-group">
+          <input type="text" class="form-control" name="full_name" id="full_name" autocomplete="off" placeholder="e.g. Ramesh Patel" required>
+          <span class="input-group-text bg-white" id="name-search-spinner" style="display:none;"><span class="spinner-border spinner-border-sm text-secondary" role="status"></span></span>
+        </div>
+        <div id="donor-typeahead-dropdown" class="list-group position-absolute shadow-lg w-100" style="z-index: 1050; display: none; max-height: 260px; overflow-y: auto; top: 100%; left: 0;"></div>
       </div>
-      <div class="col-md-6 mb-3">
+      <div class="col-md-6 mb-3 position-relative">
         <label class="form-label" for="phone">Phone</label>
-        <input type="tel" class="form-control" name="phone" id="phone">
+        <input type="tel" class="form-control" name="phone" id="phone" autocomplete="off" placeholder="10-digit mobile number">
       </div>
+    </div>
+    <div id="donor-autofill-alert" class="alert alert-info py-2 px-3 small d-flex align-items-center justify-content-between mb-3" style="display: none;">
+      <span>✨ Autofilled from existing donor: <strong id="autofill-donor-name"></strong></span>
+      <button type="button" class="btn btn-sm btn-link p-0 text-decoration-none" id="btn-clear-autofill">Clear autofill</button>
     </div>
     <div class="row">
       <div class="col-md-6 mb-3">
@@ -366,6 +425,127 @@
 
   paymentModeSelect.addEventListener('change', syncPaymentModeFields);
   syncPaymentModeFields();
+})();
+
+(function () {
+  const nameInput = document.getElementById('full_name');
+  const phoneInput = document.getElementById('phone');
+  const whatsappInput = document.getElementById('whatsapp_number');
+  const emailInput = document.getElementById('email');
+  const panInput = document.getElementById('pan');
+  const addressInput = document.getElementById('address');
+  const cityInput = document.getElementById('city');
+  const stateInput = document.getElementById('state');
+  const pincodeInput = document.getElementById('pincode');
+  const dropdown = document.getElementById('donor-typeahead-dropdown');
+  const spinner = document.getElementById('name-search-spinner');
+  const autofillAlert = document.getElementById('donor-autofill-alert');
+  const autofillName = document.getElementById('autofill-donor-name');
+  const clearBtn = document.getElementById('btn-clear-autofill');
+
+  if (!nameInput || !dropdown) return;
+
+  let debounceTimer = null;
+
+  function doSearch(query) {
+    if (!query || query.trim().length < 2) {
+      dropdown.style.display = 'none';
+      dropdown.innerHTML = '';
+      if (spinner) spinner.style.display = 'none';
+      return;
+    }
+
+    if (spinner) spinner.style.display = '';
+
+    fetch('/admin/api/donors/search?q=' + encodeURIComponent(query.trim()))
+      .then(r => r.json())
+      .then(data => {
+        if (spinner) spinner.style.display = 'none';
+        const donors = data.donors || [];
+        if (!donors.length) {
+          dropdown.style.display = 'none';
+          dropdown.innerHTML = '';
+          return;
+        }
+
+        dropdown.innerHTML = donors.map(d => `
+          <button type="button" class="list-group-item list-group-item-action py-2 px-3 text-start donor-option" data-donor='${JSON.stringify(d).replace(/'/g, "&#39;")}'>
+            <div class="fw-semibold text-dark">${d.full_name}</div>
+            <div class="small text-muted">
+              📱 ${d.phone || 'No phone'} ${d.pan ? '· PAN: ' + d.pan : ''} ${d.city ? '· ' + d.city : ''}
+            </div>
+          </button>
+        `).join('');
+        dropdown.style.display = 'block';
+
+        dropdown.querySelectorAll('.donor-option').forEach(btn => {
+          btn.addEventListener('click', function (e) {
+            e.preventDefault();
+            const donor = JSON.parse(this.dataset.donor);
+            applyDonor(donor);
+          });
+        });
+      })
+      .catch(() => {
+        if (spinner) spinner.style.display = 'none';
+      });
+  }
+
+  function applyDonor(donor) {
+    nameInput.value = donor.full_name || '';
+    if (phoneInput && donor.phone) phoneInput.value = donor.phone;
+    if (whatsappInput && donor.whatsapp_number) whatsappInput.value = donor.whatsapp_number;
+    if (emailInput && donor.email) emailInput.value = donor.email;
+    if (panInput && donor.pan) panInput.value = donor.pan;
+    if (addressInput && donor.address) addressInput.value = donor.address;
+    if (cityInput && donor.city) cityInput.value = donor.city;
+    if (stateInput && donor.state) stateInput.value = donor.state;
+    if (pincodeInput && donor.pincode) pincodeInput.value = donor.pincode;
+
+    dropdown.style.display = 'none';
+    dropdown.innerHTML = '';
+
+    if (autofillAlert && autofillName) {
+      autofillName.textContent = donor.full_name + (donor.phone ? ' (' + donor.phone + ')' : '');
+      autofillAlert.style.display = 'flex';
+    }
+  }
+
+  nameInput.addEventListener('input', function () {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => doSearch(this.value), 250);
+  });
+
+  if (phoneInput) {
+    phoneInput.addEventListener('input', function () {
+      if (this.value.trim().length >= 4) {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => doSearch(this.value), 250);
+      }
+    });
+  }
+
+  if (clearBtn) {
+    clearBtn.addEventListener('click', function () {
+      if (autofillAlert) autofillAlert.style.display = 'none';
+      nameInput.value = '';
+      if (phoneInput) phoneInput.value = '';
+      if (whatsappInput) whatsappInput.value = '';
+      if (emailInput) emailInput.value = '';
+      if (panInput) panInput.value = '';
+      if (addressInput) addressInput.value = '';
+      if (cityInput) cityInput.value = '';
+      if (stateInput) stateInput.value = '';
+      if (pincodeInput) pincodeInput.value = '';
+      nameInput.focus();
+    });
+  }
+
+  document.addEventListener('click', function (e) {
+    if (!nameInput.contains(e.target) && !dropdown.contains(e.target)) {
+      dropdown.style.display = 'none';
+    }
+  });
 })();
 </script>
 {% endblock %}
