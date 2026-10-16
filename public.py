@@ -597,7 +597,12 @@ def create_order():
             return jsonify({"error": "This preaching center collection link is no longer available."}), 400
         # Center links deliberately do not collect an Associated With value.
         associated_with_id = None
-        if live_to_give_purpose_id and not PreachingCenterPurpose.query.filter_by(
+        # A center link is a Live To Give form. Without this check a request
+        # could attach a center slug to any campaign (BACE rent, Annadan...)
+        # and inflate that center's totals with money meant for something else.
+        if campaign.name != "Live To Give":
+            return jsonify({"error": "This collection link only accepts Live To Give contributions."}), 400
+        if not live_to_give_purpose_id or not PreachingCenterPurpose.query.filter_by(
             preaching_center_id=preaching_center.id,
             live_to_give_purpose_id=live_to_give_purpose_id,
         ).first():
@@ -1842,6 +1847,7 @@ def internal_birthday_alert_send():
             "email_recipients_count": len(result["email_recipients"]), "email_error": result["email_error"],
             "whatsapp_sent_count": result["whatsapp_sent_count"],
             "whatsapp_recipients_count": len(result["whatsapp_recipients"]), "whatsapp_error": result["whatsapp_error"],
+            "delivered": result["delivered"],
         })
     return jsonify(response)
 

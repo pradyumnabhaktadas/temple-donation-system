@@ -35,6 +35,7 @@ from models import (
     Camp, Donation, Donor, Campaign, BaceProperty, Festival, SevaType,
     LiveToGivePurpose, Preacher, AssociatedWith, ReceiptCounter, DonorLoginOTP,
     AdminActivityLog, AdminUser, DailyReportRecipient, BirthdayAlertRecipient, ZohoForm,
+    PreachingCenter, PreachingCenterPurpose,
     BaceRentPayment, BaceStudent, BaceRentCharge, BaceRentMonthClose,
     BaceRentAdjustment,
 )
@@ -56,6 +57,8 @@ MODELS_IN_DELETE_ORDER = [
     # Before Campaign -- it holds a foreign key to it.
     ZohoForm,
     Donation,
+    # Before PreachingCenter and LiveToGivePurpose -- it holds foreign keys to both.
+    PreachingCenterPurpose,
     DonorLoginOTP,
     AdminActivityLog,
     ReceiptCounter,
@@ -78,6 +81,8 @@ MODELS_IN_DELETE_ORDER = [
     DailyReportRecipient,
     BirthdayAlertRecipient,
     AdminUser,
+    # After Donation and AdminUser -- both hold a foreign key to it.
+    PreachingCenter,
 ]
 
 

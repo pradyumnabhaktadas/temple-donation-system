@@ -275,10 +275,24 @@ def create_app(test_config=None, serving=None):
             # The public header lists only live collection links.  Because
             # this comes from the database, a newly-created center appears
             # automatically without another template or deployment change.
-            "public_preaching_centers": PreachingCenter.query.filter_by(
-                is_active=True
-            ).order_by(PreachingCenter.name).all(),
+            "public_preaching_centers": _public_preaching_centers(),
         }
+
+    def _public_preaching_centers():
+        """Active centers for the public header dropdown.
+
+        Skipped on admin pages (they never show it) and fail-safe: this runs
+        on every template render, including the error pages, so a database
+        hiccup here must not turn a 500 page into a second 500.
+        """
+        if request.blueprint == "admin":
+            return []
+        try:
+            return PreachingCenter.query.filter_by(is_active=True).order_by(PreachingCenter.name).all()
+        except Exception:
+            db.session.rollback()
+            app.logger.exception("Could not load preaching centers for the site header")
+            return []
 
     @app.errorhandler(CSRFError)
     def handle_csrf_error(e):

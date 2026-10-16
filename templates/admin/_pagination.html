@@ -1,9 +1,14 @@
 {% if pagination and pagination.pages > 1 %}
+{# view_args carries path parameters (e.g. center_id) that url_for needs to rebuild the same page. #}
+{% set path_args = request.view_args or {} %}
 {% set prev_args = request.args.to_dict() %}
+{% set _ = prev_args.update(path_args) %}
 {% set _ = prev_args.update({'page': pagination.prev_num}) %}
 {% set next_args = request.args.to_dict() %}
+{% set _ = next_args.update(path_args) %}
 {% set _ = next_args.update({'page': pagination.next_num}) %}
 {% set last_args = request.args.to_dict() %}
+{% set _ = last_args.update(path_args) %}
 {% set _ = last_args.update({'page': pagination.pages}) %}
 <nav class="mt-3 d-flex align-items-center flex-wrap gap-2">
   <ul class="pagination pagination-sm mb-0">

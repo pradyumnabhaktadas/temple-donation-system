@@ -30,13 +30,20 @@ def upgrade():
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("name"), sa.UniqueConstraint("slug"),
     )
-    op.add_column("donations", sa.Column("preaching_center_id", sa.Integer(), nullable=True))
-    op.add_column("donations", sa.Column("preaching_center_name", sa.String(length=150), nullable=True))
-    op.create_index("ix_donations_preaching_center_id", "donations", ["preaching_center_id"])
-    op.create_foreign_key("fk_donations_preaching_center", "donations", "preaching_centers", ["preaching_center_id"], ["id"])
-    op.add_column("admin_users", sa.Column("preaching_center_id", sa.Integer(), nullable=True))
-    op.create_index("ix_admin_users_preaching_center_id", "admin_users", ["preaching_center_id"])
-    op.create_foreign_key("fk_admin_users_preaching_center", "admin_users", "preaching_centers", ["preaching_center_id"], ["id"])
+    # batch_alter_table so the same migration runs on SQLite (the test suite's
+    # db_deploy tests) as well as PostgreSQL (production): SQLite can't ALTER
+    # a table to add a constraint. On PostgreSQL batch mode emits the same
+    # plain ALTER TABLE statements as before, so the resulting schema is
+    # identical to what production already has.
+    with op.batch_alter_table("donations") as batch_op:
+        batch_op.add_column(sa.Column("preaching_center_id", sa.Integer(), nullable=True))
+        batch_op.add_column(sa.Column("preaching_center_name", sa.String(length=150), nullable=True))
+        batch_op.create_index("ix_donations_preaching_center_id", ["preaching_center_id"])
+        batch_op.create_foreign_key("fk_donations_preaching_center", "preaching_centers", ["preaching_center_id"], ["id"])
+    with op.batch_alter_table("admin_users") as batch_op:
+        batch_op.add_column(sa.Column("preaching_center_id", sa.Integer(), nullable=True))
+        batch_op.create_index("ix_admin_users_preaching_center_id", ["preaching_center_id"])
+        batch_op.create_foreign_key("fk_admin_users_preaching_center", "preaching_centers", ["preaching_center_id"], ["id"])
     op.create_table(
         "preaching_center_purposes",
         sa.Column("preaching_center_id", sa.Integer(), nullable=False),
@@ -49,11 +56,13 @@ def upgrade():
 
 def downgrade():
     op.drop_table("preaching_center_purposes")
-    op.drop_constraint("fk_admin_users_preaching_center", "admin_users", type_="foreignkey")
-    op.drop_index("ix_admin_users_preaching_center_id", table_name="admin_users")
-    op.drop_column("admin_users", "preaching_center_id")
-    op.drop_constraint("fk_donations_preaching_center", "donations", type_="foreignkey")
-    op.drop_index("ix_donations_preaching_center_id", table_name="donations")
-    op.drop_column("donations", "preaching_center_name")
-    op.drop_column("donations", "preaching_center_id")
+    with op.batch_alter_table("admin_users") as batch_op:
+        batch_op.drop_constraint("fk_admin_users_preaching_center", type_="foreignkey")
+        batch_op.drop_index("ix_admin_users_preaching_center_id")
+        batch_op.drop_column("preaching_center_id")
+    with op.batch_alter_table("donations") as batch_op:
+        batch_op.drop_constraint("fk_donations_preaching_center", type_="foreignkey")
+        batch_op.drop_index("ix_donations_preaching_center_id")
+        batch_op.drop_column("preaching_center_name")
+        batch_op.drop_column("preaching_center_id")
     op.drop_table("preaching_centers")

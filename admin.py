@@ -5,7 +5,7 @@ import re
 import secrets
 import datetime
 import threading
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
 from collections import defaultdict
 from functools import wraps
@@ -16,7 +16,8 @@ from flask import (
 )
 from flask_login import login_user, logout_user, login_required, current_user
 from sqlalchemy import func, extract, or_
-from sqlalchemy.orm import defer, load_only
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import defer, joinedload, load_only
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from extensions import db, limiter
@@ -29,7 +30,10 @@ from models import (
     DONOR_TYPES, DONOR_TYPE_LABELS, DONATION_FREQUENCIES, DONATION_FREQUENCY_LABELS,
 )
 from utils import csv_safe_row, get_financial_year, is_valid_pan, is_valid_phone, normalize_phone, now_ist, to_ist, ist_day_bounds_utc, bace_student_payment_token
-from pdf_utils import generate_receipt_pdf
+from pdf_utils import generate_receipt_pdf, generate_center_share_card
+from preaching_center_stats import (
+    EMPTY_STATS, center_stats, dashboard_rows, monthly_totals, target_progress, top_donors,
+)
 from public import (
     find_or_create_donor, _org_cfg, high_value_pan_address_error, _finalize_success,
     _send_receipt_notifications_background, _send_cancellation_notifications_background,
@@ -58,6 +62,7 @@ BACE_VIEWER_ENDPOINTS = frozenset({
 })
 CENTER_VIEWER_ENDPOINTS = frozenset({
     "admin.preaching_center_detail", "admin.export_preaching_center", "admin.preaching_center_qr",
+    "admin.preaching_center_share_card",
     "admin.change_password", "admin.logout",
 })
 
@@ -653,6 +658,7 @@ def dashboard():
 
     return render_template(
         "admin/dashboard.html",
+        center_rows=dashboard_rows(today, active_only=True),
         today_total=float(today_total),
         month_total=float(month_total),
         year_total=float(year_total),
@@ -4447,6 +4453,108 @@ def import_donors():
     )
 
 
+# --- Preaching centers ---------------------------------------------------
+_CENTER_STATUSES = ("success", "pending", "failed", "cancelled")
+_MAX_CENTER_TARGET = Decimal("9999999999.99")   # the column is numeric(12,2)
+_CENTER_PAGE_SIZE = 50
+
+
+def _parse_center_target(raw):
+    """Returns (Decimal | None, error | None) for the optional target field.
+
+    Rejects NaN/Infinity (Decimal accepts both, and comparing NaN raises
+    InvalidOperation -- a 500) and anything that would overflow numeric(12,2).
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return None, None
+    try:
+        value = Decimal(raw)
+    except InvalidOperation:
+        return None, "Target amount must be a number."
+    if not value.is_finite():
+        return None, "Target amount must be a number."
+    if value < 0:
+        return None, "Target amount cannot be negative."
+    if value > _MAX_CENTER_TARGET:
+        return None, "Target amount is too large."
+    return value.quantize(Decimal("0.01")), None
+
+
+def _center_name_taken(name, exclude_id=None):
+    query = PreachingCenter.query.filter(func.lower(PreachingCenter.name) == name.strip().lower())
+    if exclude_id is not None:
+        query = query.filter(PreachingCenter.id != exclude_id)
+    return query.first() is not None
+
+
+def _purpose_by_name(name):
+    return LiveToGivePurpose.query.filter(func.lower(LiveToGivePurpose.name) == name.strip().lower()).first()
+
+
+def center_public_url(slug):
+    """The donor-facing link for a center, built on PUBLIC_BASE_URL.
+
+    Never from the request's own host: an admin who opened the site through
+    the *.onrender.com address would otherwise print QR codes and share links
+    pointing at it instead of givetokrishna.com.
+    """
+    path = url_for("public.preaching_center_donate_form", slug=slug)
+    base = (current_app.config.get("PUBLIC_BASE_URL") or "").rstrip("/")
+    return f"{base}{path}" if base else url_for("public.preaching_center_donate_form", slug=slug, _external=True)
+
+
+@bp.context_processor
+def _center_template_helpers():
+    return {"center_public_url": center_public_url}
+
+
+def _viewer_may_not_see(center):
+    return current_user.role == "preaching_center_viewer" and current_user.preaching_center_id != center.id
+
+
+def _parse_iso_date(value):
+    try:
+        return datetime.date.fromisoformat((value or "").strip())
+    except ValueError:
+        return None
+
+
+def _center_donation_query(center):
+    """The center's donations narrowed by ?status=, ?q= (donor / phone / receipt), ?from= and ?to=.
+
+    Returns (query, filters). status defaults to 'success'; '' means every status.
+    Dates are IST calendar days, inclusive at both ends.
+    """
+    status = request.args.get("status", "success")
+    if status not in _CENTER_STATUSES:
+        status = "" if status == "" else "success"
+    term = (request.args.get("q") or "").strip()[:80]
+    date_from = _parse_iso_date(request.args.get("from"))
+    date_to = _parse_iso_date(request.args.get("to"))
+
+    query = Donation.query.join(Donor, Donor.id == Donation.donor_id).filter(
+        Donation.preaching_center_id == center.id
+    )
+    if status:
+        query = query.filter(Donation.status == status)
+    if term:
+        like = "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        query = query.filter(or_(
+            Donor.full_name.ilike(like, escape="\\"), Donor.phone.ilike(like, escape="\\"),
+            Donation.receipt_number.ilike(like, escape="\\"),
+        ))
+    if date_from:
+        query = query.filter(Donation.donation_date >= ist_day_bounds_utc(date_from)[0])
+    if date_to:
+        query = query.filter(Donation.donation_date < ist_day_bounds_utc(date_to)[1])
+    return query, {
+        "status": status, "q": term,
+        "date_from": date_from.isoformat() if date_from else "",
+        "date_to": date_to.isoformat() if date_to else "",
+    }
+
+
 @bp.route("/preaching-centers", methods=["GET", "POST"])
 @login_required
 def preaching_centers():
@@ -4460,20 +4568,16 @@ def preaching_centers():
         if not name or not _valid_center_slug(slug):
             flash("Enter a center name and a unique slug using lowercase letters, numbers, and hyphens (reserved names are not allowed).")
             return redirect(url_for("admin.preaching_centers"))
-        if PreachingCenter.query.filter((PreachingCenter.name == name) | (PreachingCenter.slug == slug)).first():
+        if _center_name_taken(name) or PreachingCenter.query.filter_by(slug=slug).first():
             flash("A preaching center with that name or link name already exists.")
             return redirect(url_for("admin.preaching_centers"))
         period = request.form.get("target_period") or None
         if period not in (None, "monthly", "financial_year"):
             flash("Invalid target period.")
             return redirect(url_for("admin.preaching_centers"))
-        raw_target = request.form.get("target_amount", "").strip()
-        try:
-            target = Decimal(raw_target) if raw_target else None
-        except Exception:
-            target = None
-        if target is not None and target < 0:
-            flash("Target amount cannot be negative.")
+        target, error = _parse_center_target(request.form.get("target_amount"))
+        if error:
+            flash(error)
             return redirect(url_for("admin.preaching_centers"))
         center = PreachingCenter(
             name=name, slug=slug, city=request.form.get("city", "").strip() or None,
@@ -4484,21 +4588,34 @@ def preaching_centers():
         )
         db.session.add(center)
         db.session.flush()
-        # Center collection links deliberately start with only the two
-        # purposes requested by the temple; admins can add any other active
-        # Live To Give purpose later on the edit page.
+        # Center collection links start with the two purposes requested by the
+        # temple; admins can change them on the edit page. If either purpose
+        # does not exist yet it is created -- and the admin is told, because a
+        # new purpose also appears on the main Live To Give form.
+        created_purposes = []
         for purpose_name in ("Deity Seva", "Monthly Nitya Seva"):
-            purpose = LiveToGivePurpose.query.filter_by(name=purpose_name).first()
+            purpose = _purpose_by_name(purpose_name)
             if purpose is None:
                 purpose = LiveToGivePurpose(name=purpose_name, is_80g=False)
                 db.session.add(purpose)
                 db.session.flush()
+                created_purposes.append(purpose_name)
             db.session.add(PreachingCenterPurpose(
                 preaching_center_id=center.id, live_to_give_purpose_id=purpose.id
             ))
         log_activity("preaching_center_create", "preaching_center", center.id, f"Created '{center.name}' ({center.slug})")
-        db.session.commit()
-        flash(f"Preaching center '{center.name}' created. Its link is /pc/{center.slug}.")
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash("A preaching center with that name or link name already exists.")
+            return redirect(url_for("admin.preaching_centers"))
+        flash(f"Preaching center '{center.name}' created. Its link is {center_public_url(center.slug)}.")
+        if created_purposes:
+            flash(
+                "Added to the Live To Give purpose list (so they also show on the main donation form): "
+                + ", ".join(created_purposes) + "."
+            )
         return redirect(url_for("admin.preaching_centers"))
 
     if current_user.role == "preaching_center_viewer":
@@ -4506,10 +4623,8 @@ def preaching_centers():
             abort(403)
         return redirect(url_for("admin.preaching_center_detail", center_id=current_user.preaching_center_id))
     centers = PreachingCenter.query.order_by(PreachingCenter.name).all()
-    total_rows = db.session.query(
-        Donation.preaching_center_id, func.coalesce(func.sum(Donation.amount), 0), func.count(Donation.id)
-    ).filter(Donation.status == "success", Donation.preaching_center_id.isnot(None)).group_by(Donation.preaching_center_id).all()
-    totals = {center_id: (total, count) for center_id, total, count in total_rows}
+    stats = center_stats()
+    totals = {cid: (s["lifetime"], s["count"]) for cid, s in stats.items()}
     return render_template("admin/preaching_centers.html", centers=centers, totals=totals)
 
 
@@ -4522,31 +4637,13 @@ def preaching_centers_dashboard():
             abort(403)
         return redirect(url_for("admin.preaching_center_detail", center_id=current_user.preaching_center_id))
     today = now_ist().date()
-    month_start = today.replace(day=1)
-    fy_start = datetime.date(today.year if today.month >= 4 else today.year - 1, 4, 1)
-    centers = PreachingCenter.query.order_by(PreachingCenter.name).all()
-    donations = Donation.query.filter(
-        Donation.preaching_center_id.isnot(None), Donation.status == "success"
-    ).all()
-    rows = {center.id: {"center": center, "all": Decimal("0"), "month": Decimal("0"), "fy": Decimal("0"), "count": 0} for center in centers}
-    for donation in donations:
-        row = rows.get(donation.preaching_center_id)
-        if not row:
-            continue
-        paid_on = to_ist(donation.donation_date).date()
-        amount = Decimal(donation.amount)
-        row["all"] += amount
-        row["count"] += 1
-        if paid_on >= month_start:
-            row["month"] += amount
-        if paid_on >= fy_start:
-            row["fy"] += amount
-    center_rows = list(rows.values())
+    center_rows = dashboard_rows(today)
     summary = {
-        "all": sum((row["all"] for row in center_rows), Decimal("0")),
-        "month": sum((row["month"] for row in center_rows), Decimal("0")),
-        "fy": sum((row["fy"] for row in center_rows), Decimal("0")),
-        "count": sum(row["count"] for row in center_rows),
+        "today": sum((r["stats"]["today"] for r in center_rows), Decimal("0")),
+        "month": sum((r["stats"]["month"] for r in center_rows), Decimal("0")),
+        "fy": sum((r["stats"]["fy"] for r in center_rows), Decimal("0")),
+        "all": sum((r["stats"]["lifetime"] for r in center_rows), Decimal("0")),
+        "count": sum(r["stats"]["count"] for r in center_rows),
     }
     return render_template("admin/preaching_centers_dashboard.html", rows=center_rows, summary=summary, today=today)
 
@@ -4573,41 +4670,30 @@ def edit_preaching_center(center_id):
         if not name:
             flash("Center name is required.")
             return redirect(url_for("admin.edit_preaching_center", center_id=center.id))
-        duplicate = PreachingCenter.query.filter(
-            PreachingCenter.name == name, PreachingCenter.id != center.id
-        ).first()
-        if duplicate:
+        if _center_name_taken(name, exclude_id=center.id):
             flash("Another preaching center already uses that name.")
             return redirect(url_for("admin.edit_preaching_center", center_id=center.id))
         period = request.form.get("target_period") or None
         if period not in (None, "monthly", "financial_year"):
             flash("Invalid target period.")
             return redirect(url_for("admin.edit_preaching_center", center_id=center.id))
-        raw_target = request.form.get("target_amount", "").strip()
-        try:
-            target = Decimal(raw_target) if raw_target else None
-        except Exception:
-            flash("Target amount must be a number.")
+        target, error = _parse_center_target(request.form.get("target_amount"))
+        if error:
+            flash(error)
             return redirect(url_for("admin.edit_preaching_center", center_id=center.id))
-        if target is not None and target < 0:
-            flash("Target amount cannot be negative.")
-            return redirect(url_for("admin.edit_preaching_center", center_id=center.id))
-        center.name = name
-        center.city = request.form.get("city", "").strip() or None
-        center.address = request.form.get("address", "").strip() or None
-        center.contact_name = request.form.get("contact_name", "").strip() or None
-        center.contact_phone = request.form.get("contact_phone", "").strip() or None
-        center.target_amount = target
-        center.target_period = period
         submitted_purpose_ids = request.form.getlist("purpose_ids")
-        purpose_ids = {int(value) for value in submitted_purpose_ids if value.isdigit()}
-        new_purpose_name = request.form.get("new_purpose_name", "").strip()
+        # str.isdigit() is True for characters int() rejects (e.g. superscript
+        # two), so require plain ASCII digits.
+        purpose_ids = {int(v) for v in submitted_purpose_ids if v.isascii() and v.isdigit()}
+        created_purpose = None
+        new_purpose_name = request.form.get("new_purpose_name", "").strip()[:150]
         if new_purpose_name:
-            purpose = LiveToGivePurpose.query.filter_by(name=new_purpose_name).first()
+            purpose = _purpose_by_name(new_purpose_name)
             if purpose is None:
                 purpose = LiveToGivePurpose(name=new_purpose_name, is_80g=False)
                 db.session.add(purpose)
                 db.session.flush()
+                created_purpose = purpose.name
             purpose_ids.add(purpose.id)
         # Preserve the current choices for older/internal edit clients
         # which submit only the metadata fields. The HTML form always sends
@@ -4618,16 +4704,35 @@ def edit_preaching_center(center_id):
         valid_ids = {purpose.id for purpose in LiveToGivePurpose.query.filter_by(is_active=True).all()}
         purpose_ids &= valid_ids
         if not purpose_ids:
+            db.session.rollback()
             flash("Choose at least one active purpose for this collection link.")
             return redirect(url_for("admin.edit_preaching_center", center_id=center.id))
+        center.name = name
+        center.city = request.form.get("city", "").strip() or None
+        center.address = request.form.get("address", "").strip() or None
+        center.contact_name = request.form.get("contact_name", "").strip() or None
+        center.contact_phone = request.form.get("contact_phone", "").strip() or None
+        center.target_amount = target
+        center.target_period = period
+        # Keep the name copied onto each donation in step with a rename.
+        Donation.query.filter_by(preaching_center_id=center.id).update(
+            {"preaching_center_name": name}, synchronize_session=False
+        )
         PreachingCenterPurpose.query.filter_by(preaching_center_id=center.id).delete()
         for purpose_id in purpose_ids:
             db.session.add(PreachingCenterPurpose(
                 preaching_center_id=center.id, live_to_give_purpose_id=purpose_id
             ))
         log_activity("preaching_center_edit", "preaching_center", center.id, f"Updated '{center.name}' metadata")
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash("Another preaching center already uses that name.")
+            return redirect(url_for("admin.edit_preaching_center", center_id=center.id))
         flash("Preaching center updated. Its collection link has not changed.")
+        if created_purpose:
+            flash(f"'{created_purpose}' was added to the Live To Give purpose list, so it also shows on the main donation form.")
         return redirect(url_for("admin.preaching_centers"))
     selected_purpose_ids = {link.live_to_give_purpose_id for link in center.purpose_links}
     purposes = LiveToGivePurpose.query.filter_by(is_active=True).order_by(LiveToGivePurpose.name).all()
@@ -4639,34 +4744,34 @@ def edit_preaching_center(center_id):
 @login_required
 def preaching_center_detail(center_id):
     center = PreachingCenter.query.get_or_404(center_id)
-    if current_user.role == "preaching_center_viewer" and current_user.preaching_center_id != center.id:
+    if _viewer_may_not_see(center):
         abort(403)
-    status = request.args.get("status", "success")
-    query = Donation.query.filter_by(preaching_center_id=center.id)
-    if status:
-        query = query.filter_by(status=status)
-    donations = query.order_by(Donation.donation_date.desc()).limit(200).all()
-    # Group in Python after converting to IST, rather than using a database
-    # date-format function. The latter is different between SQLite (tests)
-    # and PostgreSQL (Render), and can otherwise put late-night donations in
-    # the wrong month.
-    by_month = defaultdict(Decimal)
-    successful = Donation.query.filter_by(
-        preaching_center_id=center.id, status="success"
-    ).order_by(Donation.donation_date.desc()).all()
-    for donation in successful:
-        by_month[to_ist(donation.donation_date).strftime("%Y-%m")] += Decimal(donation.amount)
-    by_month = dict(sorted(by_month.items(), reverse=True))
-    return render_template("admin/preaching_center_detail.html", center=center, donations=donations, by_month=by_month, status=status)
+    query, filters = _center_donation_query(center)
+    page = request.args.get("page", 1, type=int)
+    pagination = query.options(
+        joinedload(Donation.donor), joinedload(Donation.campaign)
+    ).order_by(Donation.donation_date.desc(), Donation.id.desc()).paginate(
+        page=page, per_page=_CENTER_PAGE_SIZE, error_out=False
+    )
+    stats = center_stats(center_ids=[center.id]).get(center.id, EMPTY_STATS)
+    return render_template(
+        "admin/preaching_center_detail.html", center=center, pagination=pagination,
+        donations=pagination.items, stats=stats, progress=target_progress(center, stats),
+        by_month=monthly_totals(center.id), top_donors=top_donors(center.id), filters=filters,
+        status=filters["status"], statuses=_CENTER_STATUSES,
+    )
 
 
 @bp.route("/preaching-centers/<int:center_id>/export.csv")
 @login_required
 def export_preaching_center(center_id):
     center = PreachingCenter.query.get_or_404(center_id)
-    if current_user.role == "preaching_center_viewer" and current_user.preaching_center_id != center.id:
+    if _viewer_may_not_see(center):
         abort(403)
-    rows = Donation.query.filter_by(preaching_center_id=center.id).order_by(Donation.donation_date.desc()).all()
+    query, _filters = _center_donation_query(center)
+    rows = query.options(
+        joinedload(Donation.donor), joinedload(Donation.campaign)
+    ).order_by(Donation.donation_date.desc(), Donation.id.desc()).all()
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["Date", "Donor", "Amount", "Campaign", "Purpose", "Payment ID", "Receipt", "Status", "Center"])
@@ -4686,14 +4791,30 @@ def export_preaching_center(center_id):
 def preaching_center_qr(center_id):
     """On-demand printable QR image; nothing is persisted beyond the center link."""
     center = PreachingCenter.query.get_or_404(center_id)
-    if current_user.role == "preaching_center_viewer" and current_user.preaching_center_id != center.id:
+    if _viewer_may_not_see(center):
         abort(403)
     import qrcode
-    image = qrcode.make(url_for("public.preaching_center_donate_form", slug=center.slug, _external=True))
+    image = qrcode.make(center_public_url(center.slug))
     output = io.BytesIO()
     image.save(output, format="PNG")
     return Response(output.getvalue(), mimetype="image/png", headers={
         "Content-Disposition": f'inline; filename="{center.slug}-donate-qr.png"'
+    })
+
+
+@bp.route("/preaching-centers/<int:center_id>/share-card.pdf")
+@login_required
+def preaching_center_share_card(center_id):
+    """A one-page printable poster: center name, donation link and QR code."""
+    center = PreachingCenter.query.get_or_404(center_id)
+    if _viewer_may_not_see(center):
+        abort(403)
+    pdf = generate_center_share_card(
+        center.name, center.city, center_public_url(center.slug),
+        current_app.config.get("ORG_NAME") or "ISKCON",
+    )
+    return Response(pdf, mimetype="application/pdf", headers={
+        "Content-Disposition": f'inline; filename="{center.slug}-share-card.pdf"'
     })
 
 

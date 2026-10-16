@@ -74,14 +74,22 @@ def send_birthday_alert(app, alert_date=None, force=False):
         + f" whatsapp_sent={whatsapp_sent_count}/{len(whatsapp_numbers)}"
         + (f" whatsapp_error={whatsapp_error[:120]!r}" if whatsapp_error else "")
     )
+    # Only a delivered alert counts as "sent for today". If there were no
+    # recipients, SMTP wasn't configured, or every send failed, writing the
+    # sent marker would make the next run (or a retry after fixing the
+    # recipient list) skip the day as already_sent and the reminder would
+    # never go out. A separate action keeps the attempt visible in the
+    # activity log without blocking a retry.
+    delivered = bool(email_sent or whatsapp_sent_count)
     db.session.add(AdminActivityLog(
-        admin_username="system", action="birthday_alert_sent", target_type="birthday_alert",
-        target_id=date_key, details=details,
+        admin_username="system",
+        action="birthday_alert_sent" if delivered else "birthday_alert_not_delivered",
+        target_type="birthday_alert", target_id=date_key, details=details,
     ))
     db.session.commit()
     return {
         "alert_date": data["alert_date"], "data": data, "email_sent": email_sent,
         "email_recipients": emails, "email_error": email_error,
         "whatsapp_sent_count": whatsapp_sent_count, "whatsapp_recipients": whatsapp_numbers,
-        "whatsapp_error": whatsapp_error,
+        "whatsapp_error": whatsapp_error, "delivered": delivered,
     }

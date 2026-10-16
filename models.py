@@ -1,4 +1,6 @@
 import datetime
+from sqlalchemy import func
+from sqlalchemy.orm import deferred
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -170,7 +172,9 @@ class Donor(db.Model):
 
     @property
     def total_donated(self):
-        return sum(d.amount for d in self.donations if d.status == "success")
+        return db.session.query(func.coalesce(func.sum(Donation.amount), 0)).filter(
+            Donation.donor_id == self.id, Donation.status == "success"
+        ).scalar() or 0
 
     @property
     def donation_count(self):
@@ -241,7 +245,11 @@ class Campaign(db.Model):
 
     @property
     def total_collected(self):
-        return sum(d.amount for d in self.donations if d.status == "success")
+        # One SUM in the database. Iterating self.donations loaded every
+        # donation row of the campaign into memory just to add up amounts.
+        return db.session.query(func.coalesce(func.sum(Donation.amount), 0)).filter(
+            Donation.campaign_id == self.id, Donation.status == "success"
+        ).scalar() or 0
 
     def __repr__(self):
         return f"<Campaign {self.name}>"
@@ -595,7 +603,11 @@ class Donation(db.Model):
     # persistent filesystem, and rides along with your regular Postgres
     # backups instead of needing a separate backup story. See README
     # "Receipt storage" for the migration note on existing installs.
-    receipt_pdf = db.Column(db.LargeBinary)
+    # deferred: production holds ~245 MB of these (about 240 KB each). Without
+    # this every query that loads Donation rows -- the Donations list, a donor's
+    # history, campaign totals -- dragged every PDF into memory too. They now
+    # load only when .receipt_pdf is actually read (the download route).
+    receipt_pdf = deferred(db.Column(db.LargeBinary))
 
     donation_date = db.Column(db.DateTime, default=datetime.datetime.utcnow, index=True)
 

@@ -1,11 +1,69 @@
 {% extends "admin/base_admin.html" %}
 {% block title %}{{ center.name }} Collection{% endblock %}
+{% macro inr0(value) %}Rs. {{ '{:,.0f}'.format(value) }}{% endmacro %}
 {% block content %}
-<a href="{{ url_for('admin.preaching_centers') }}">&larr; Back to Preaching Centers</a>
-<h3 class="mt-2">{{ center.name }}</h3><p class="text-muted">Collection link: <a target="_blank" href="{{ url_for('public.preaching_center_donate_form', slug=center.slug) }}">{{ url_for('public.preaching_center_donate_form', slug=center.slug, _external=True) }}</a></p>
-<a class="btn btn-sm btn-outline-secondary mb-3" href="{{ url_for('admin.export_preaching_center', center_id=center.id) }}">Download CSV</a>
-<a class="btn btn-sm btn-outline-secondary mb-3" target="_blank" href="{{ url_for('admin.preaching_center_qr', center_id=center.id) }}">Open printable QR</a>
-<div class="row mb-4"><div class="col-md-5"><div class="card card-body shadow-sm"><h6>Monthly successful collection</h6>{% for month, total in by_month.items() %}<div class="d-flex justify-content-between border-bottom py-1"><span>{{ month }}</span><strong>Rs. {{ '{:,.0f}'.format(total) }}</strong></div>{% else %}<span class="text-muted">No successful donations yet.</span>{% endfor %}</div></div></div>
-<div class="d-flex gap-2 mb-2"><a class="btn btn-sm {% if status == 'success' %}btn-gold{% else %}btn-outline-secondary{% endif %}" href="{{ url_for('admin.preaching_center_detail', center_id=center.id, status='success') }}">Successful</a><a class="btn btn-sm {% if not status %}btn-gold{% else %}btn-outline-secondary{% endif %}" href="{{ url_for('admin.preaching_center_detail', center_id=center.id, status='') }}">All statuses</a></div>
-<div class="table-responsive"><table class="table bg-white shadow-sm"><thead><tr><th>Date</th><th>Donor</th><th>Amount</th><th>Purpose</th><th>Status</th><th>Receipt</th></tr></thead><tbody>{% for d in donations %}<tr><td>{{ d.donation_date.strftime('%d-%b-%Y') }}</td><td>{{ d.donor.full_name }}</td><td>Rs. {{ '{:,.0f}'.format(d.amount) }}</td><td>{{ d.specific_purpose or d.campaign.name }}</td><td>{{ d.status | capitalize }}</td><td>{{ d.receipt_number or '-' }}</td></tr>{% else %}<tr><td colspan="6" class="text-muted">No donations.</td></tr>{% endfor %}</tbody></table></div>
+{% if current_user.role != 'preaching_center_viewer' %}<a href="{{ url_for('admin.preaching_centers') }}">&larr; Back to Preaching Centers</a>{% endif %}
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mt-2">
+  <div>
+    <h3 class="mb-1">{{ center.name }} {% if not center.is_active %}<span class="badge bg-secondary align-middle">Inactive</span>{% endif %}</h3>
+    <p class="text-muted mb-1">{{ center.city or '' }}{% if center.contact_name %} &middot; {{ center.contact_name }}{% endif %}{% if center.contact_phone %} &middot; {{ center.contact_phone }}{% endif %}</p>
+    <p class="text-muted mb-0">Collection link: <a target="_blank" href="{{ center_public_url(center.slug) }}">{{ center_public_url(center.slug) }}</a></p>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.export_preaching_center', center_id=center.id, **request.args) }}">Download CSV</a>
+    <a class="btn btn-sm btn-outline-secondary" target="_blank" href="{{ url_for('admin.preaching_center_qr', center_id=center.id) }}">QR image</a>
+    <a class="btn btn-sm btn-outline-secondary" target="_blank" href="{{ url_for('admin.preaching_center_share_card', center_id=center.id) }}">Printable share card</a>
+  </div>
+</div>
+
+<div class="row g-3 my-2">
+  <div class="col-6 col-md-3"><div class="card card-body shadow-sm"><small class="text-muted">Today</small><h5 class="mb-0">{{ inr0(stats.today) }}</h5></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body shadow-sm"><small class="text-muted">This month</small><h5 class="mb-0">{{ inr0(stats.month) }}</h5></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body shadow-sm"><small class="text-muted">Financial year</small><h5 class="mb-0">{{ inr0(stats.fy) }}</h5></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body shadow-sm"><small class="text-muted">All time</small><h5 class="mb-0">{{ inr0(stats.lifetime) }}</h5></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body shadow-sm"><small class="text-muted">Successful donations</small><h5 class="mb-0">{{ stats.count }}</h5></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body shadow-sm"><small class="text-muted">Unique donors</small><h5 class="mb-0">{{ stats.donors }}</h5></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body shadow-sm"><small class="text-muted">Last donation</small><h5 class="mb-0">{{ (stats.last_donation | to_ist).strftime('%d %b %Y') if stats.last_donation else '-' }}</h5></div></div>
+  <div class="col-6 col-md-3"><div class="card card-body shadow-sm">
+    {% if progress %}
+      <small class="text-muted">{{ 'Monthly' if progress.period == 'monthly' else 'Financial-year' }} target {{ inr0(progress.target) }}</small>
+      <div class="progress my-1" style="height:8px;"><div class="progress-bar" style="width: {{ [progress.pct, 100] | min | round(0) }}%"></div></div>
+      <small>{{ progress.pct | round(0) | int }}% reached &middot; <strong>{{ inr0(progress.pending) }}</strong> to go</small>
+    {% else %}<small class="text-muted">Target</small><h5 class="mb-0">Not set</h5>{% endif %}
+  </div></div>
+</div>
+
+<div class="row mb-4 g-3">
+  <div class="col-md-6"><div class="card card-body shadow-sm"><h6>Monthly successful collection</h6>
+    {% for month, total in by_month.items() %}<div class="d-flex justify-content-between border-bottom py-1"><span>{{ month }}</span><strong>{{ inr0(total) }}</strong></div>{% else %}<span class="text-muted">No successful donations yet.</span>{% endfor %}
+  </div></div>
+  <div class="col-md-6"><div class="card card-body shadow-sm"><h6>Top donors</h6>
+    {% for d in top_donors %}<div class="d-flex justify-content-between border-bottom py-1"><span>{{ d.name }} <small class="text-muted">({{ d.count }})</small></span><strong>{{ inr0(d.amount) }}</strong></div>{% else %}<span class="text-muted">No successful donations yet.</span>{% endfor %}
+  </div></div>
+</div>
+
+<form class="row g-2 align-items-end mb-3" method="get">
+  <div class="col-md-3"><label class="form-label small mb-0">Search donor, phone or receipt</label><input class="form-control form-control-sm" name="q" value="{{ filters.q }}"></div>
+  <div class="col-md-2"><label class="form-label small mb-0">From</label><input class="form-control form-control-sm" type="date" name="from" value="{{ filters.date_from }}"></div>
+  <div class="col-md-2"><label class="form-label small mb-0">To</label><input class="form-control form-control-sm" type="date" name="to" value="{{ filters.date_to }}"></div>
+  <div class="col-md-2"><label class="form-label small mb-0">Status</label>
+    <select class="form-select form-select-sm" name="status">
+      <option value="" {% if not status %}selected{% endif %}>All statuses</option>
+      {% for s in statuses %}<option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s | capitalize }}</option>{% endfor %}
+    </select></div>
+  <div class="col-md-3 d-flex gap-2"><button class="btn btn-sm btn-gold">Filter</button><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.preaching_center_detail', center_id=center.id) }}">Reset</a></div>
+</form>
+
+<div class="table-responsive"><table class="table bg-white shadow-sm">
+  <thead><tr><th>Date (IST)</th><th>Donor</th><th>Amount</th><th>Purpose</th><th>Status</th><th>Receipt</th></tr></thead>
+  <tbody>
+  {% for d in donations %}<tr>
+    <td>{{ (d.donation_date | to_ist).strftime('%d-%b-%Y') if d.donation_date else '-' }}</td>
+    <td>{{ d.donor.full_name }}</td><td>{{ inr0(d.amount) }}</td>
+    <td>{{ d.specific_purpose or d.campaign.name }}</td><td>{{ d.status | capitalize }}</td><td>{{ d.receipt_number or '-' }}</td>
+  </tr>{% else %}<tr><td colspan="6" class="text-muted">No donations match.</td></tr>{% endfor %}
+  </tbody>
+</table></div>
+<p class="text-muted small">{{ pagination.total }} donation{{ '' if pagination.total == 1 else 's' }} match the filters.</p>
+{% include "admin/_pagination.html" %}
 {% endblock %}

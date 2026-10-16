@@ -53,6 +53,47 @@ class TestBirthdayAlerts:
             assert whatsapp_calls[0][0] == "9876500803"
             assert send_birthday_alert(app, alert_date=datetime.date(2026, 9, 20))["skipped"] == "already_sent"
 
+    def test_a_day_with_nobody_to_notify_is_not_marked_sent(self, app, monkeypatch):
+        """No recipients (or every send failing) must not use up the day: once a
+        recipient is added the same alert has to go out on the next run."""
+        from extensions import db
+        from models import AdminActivityLog, BirthdayAlertRecipient, Donor
+        with app.app_context():
+            db.session.add(Donor(full_name="Birthday Donor", phone="9876500801", dob=datetime.date(1990, 9, 20)))
+            db.session.commit()
+            sent = []
+            monkeypatch.setattr("email_utils.send_birthday_alert_email",
+                                lambda cfg, to, data, org: ((sent.append(to) or True), None) if to else (False, None))
+            from birthday_alert_utils import send_birthday_alert
+            day = datetime.date(2026, 9, 20)
+
+            first = send_birthday_alert(app, alert_date=day)
+            assert first["delivered"] is False and sent == []
+            assert AdminActivityLog.query.filter_by(action="birthday_alert_sent").count() == 0
+            assert AdminActivityLog.query.filter_by(action="birthday_alert_not_delivered").count() == 1
+
+            db.session.add(BirthdayAlertRecipient(contact_type="email", value="admin@example.org"))
+            db.session.commit()
+            second = send_birthday_alert(app, alert_date=day)
+            assert second.get("skipped") is None and second["delivered"] is True
+            assert sent == [["admin@example.org"]]
+            assert send_birthday_alert(app, alert_date=day)["skipped"] == "already_sent"
+
+    def test_a_failed_send_does_not_use_up_the_day_either(self, app, monkeypatch):
+        from extensions import db
+        from models import AdminActivityLog, BirthdayAlertRecipient, Donor
+        with app.app_context():
+            db.session.add_all([
+                Donor(full_name="Birthday Donor", phone="9876500801", dob=datetime.date(1990, 9, 20)),
+                BirthdayAlertRecipient(contact_type="email", value="admin@example.org"),
+            ])
+            db.session.commit()
+            monkeypatch.setattr("email_utils.send_birthday_alert_email", lambda cfg, to, data, org: (False, "SMTP down"))
+            from birthday_alert_utils import send_birthday_alert
+            result = send_birthday_alert(app, alert_date=datetime.date(2026, 9, 20))
+            assert result["delivered"] is False and result["email_error"] == "SMTP down"
+            assert AdminActivityLog.query.filter_by(action="birthday_alert_sent").count() == 0
+
     def test_leap_day_is_observed_on_february_28_in_non_leap_year(self):
         from birthday_alert_utils import birthday_matches_date
         assert birthday_matches_date(datetime.date(2000, 2, 29), datetime.date(2027, 2, 28))

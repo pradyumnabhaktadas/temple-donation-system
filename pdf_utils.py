@@ -887,3 +887,62 @@ def _wrap_text(text, width):
     if current:
         lines.append(current)
     return lines
+
+
+def generate_center_share_card(center_name, city, url, org_name):
+    """One A5 page for printing or sharing: org, center name, QR code and the link.
+
+    The QR code is drawn as vector graphics by reportlab itself, so printing
+    stays sharp at any size and no imaging library is needed.
+    """
+    from reportlab.graphics import renderPDF
+    from reportlab.graphics.barcode.qr import QrCodeWidget
+    from reportlab.graphics.shapes import Drawing
+    from reportlab.lib.pagesizes import A5
+
+    width, height = A5
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A5)
+    pdf.setTitle(f"{center_name} - donation link")
+
+    def fit(text, font, size, max_width):
+        while size > 8 and pdfmetrics.stringWidth(text, font, size) > max_width:
+            size -= 1
+        return size
+
+    bold = SERIF_BOLD if "SERIF_BOLD" in globals() else "Times-Bold"
+    regular = SERIF if "SERIF" in globals() else "Times-Roman"
+    margin = 18 * mm
+    usable = width - 2 * margin
+
+    pdf.setFillColor(colors.HexColor("#7a1f1f"))
+    size = fit(org_name, bold, 16, usable)
+    pdf.setFont(bold, size)
+    pdf.drawCentredString(width / 2, height - 22 * mm, org_name)
+
+    pdf.setFillColor(colors.black)
+    size = fit(center_name, bold, 26, usable)
+    pdf.setFont(bold, size)
+    pdf.drawCentredString(width / 2, height - 40 * mm, center_name)
+    if city:
+        pdf.setFont(regular, 13)
+        pdf.drawCentredString(width / 2, height - 48 * mm, city)
+
+    pdf.setFont(regular, 15)
+    pdf.drawCentredString(width / 2, height - 62 * mm, "Scan to donate")
+
+    side = 85 * mm
+    qr = QrCodeWidget(url)
+    x0, y0, x1, y1 = qr.getBounds()
+    drawing = Drawing(side, side, transform=[side / (x1 - x0), 0, 0, side / (y1 - y0), 0, 0])
+    drawing.add(qr)
+    renderPDF.draw(drawing, pdf, (width - side) / 2, height - 62 * mm - 8 * mm - side)
+
+    pdf.setFont(regular, fit(url, regular, 13, usable))
+    pdf.drawCentredString(width / 2, 24 * mm, url)
+    pdf.setFont(regular, 10)
+    pdf.setFillColor(colors.HexColor("#555555"))
+    pdf.drawCentredString(width / 2, 16 * mm, "Every contribution is recorded for this center.")
+    pdf.showPage()
+    pdf.save()
+    return buffer.getvalue()

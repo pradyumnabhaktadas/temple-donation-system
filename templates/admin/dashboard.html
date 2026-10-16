@@ -155,6 +155,23 @@
   </div>
 </div>
 
+{% if center_rows %}
+<div class="card card-body shadow-sm mb-4">
+  <div class="dashboard-panel-title"><h6>📍 Preaching Centers</h6><span class="panel-note">Already included in the totals above &middot; <a href="{{ url_for('admin.preaching_centers_dashboard') }}">full center dashboard</a></span></div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0">
+      <thead><tr><th>Center</th><th class="text-end">Today</th><th class="text-end">This month</th><th class="text-end">Financial year</th></tr></thead>
+      <tbody>
+        {% for row in center_rows %}
+        <tr><td><a href="{{ url_for('admin.preaching_center_detail', center_id=row.center.id) }}">{{ row.center.name }}</a></td>
+          <td class="text-end">Rs. {{ row.stats.today | inr }}</td><td class="text-end">Rs. {{ row.stats.month | inr }}</td><td class="text-end">Rs. {{ row.stats.fy | inr }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 {# Moved to the foot of the dashboard: these are follow-up items, not
    collection figures. Leading with them meant opening the dashboard on a
    list of money that was never received, pushing the actual totals below

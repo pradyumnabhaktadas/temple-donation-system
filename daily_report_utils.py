@@ -24,6 +24,9 @@ import datetime
 
 from extensions import db
 from models import AdminActivityLog, Campaign, DailyReportRecipient, Donation
+from html import escape as html_escape
+
+from preaching_center_stats import report_section
 from utils import format_inr, now_ist, to_ist
 
 import email_utils
@@ -96,6 +99,9 @@ def compute_report(report_date=None):
         "today": _period_totals(rows, report_date, report_end),
         "week": _period_totals(rows, week_start, report_end),
         "month": _period_totals(rows, month_start, report_end),
+        # Per-center split (already part of the totals above). Empty when no
+        # center had a successful donation this month.
+        "centers": report_section(report_date, week_start, month_start),
     }
 
 
@@ -179,6 +185,28 @@ def _render_email_html(data, org_name):
         </div>
         """
 
+    def centers_html(centers):
+        """Which preaching centers the totals above came from. Omitted when
+        no center collected anything, like the reconciliation box."""
+        if not centers:
+            return ""
+        rows = "".join(
+            f'<tr><td style="padding:4px 8px 4px 0;">{html_escape(c["name"])}</td>'
+            f'<td style="padding:4px 8px;text-align:right;">Rs. {format_inr(float(c["today"][0]))}</td>'
+            f'<td style="padding:4px 8px;text-align:right;">Rs. {format_inr(float(c["week"][0]))}</td>'
+            f'<td style="padding:4px 0;text-align:right;">Rs. {format_inr(float(c["month"][0]))}</td></tr>'
+            for c in centers
+        )
+        return f"""
+        <h3 style="margin:22px 0 6px;color:#7a1f1f;">Preaching Centers</h3>
+        <p style="margin:0 0 6px;font-size:12px;color:#888;">Already included in the totals above.</p>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <tr style="color:#888;"><td></td><td style="text-align:right;padding:4px 8px;">Today</td>
+            <td style="text-align:right;padding:4px 8px;">This week</td><td style="text-align:right;">This month</td></tr>
+          {rows}
+        </table>
+        """
+
     return f"""
     <div style="font-family:Georgia,'Times New Roman',serif;color:#222;max-width:600px;">
       <h2 style="color:#7a1f1f;margin-bottom:4px;">{org_name} -- Daily Collection Report</h2>
@@ -187,6 +215,7 @@ def _render_email_html(data, org_name):
       {section_html("Today's Collection", data['today'])}
       {section_html(f"This Week's Collection (since {data['week_start'].strftime('%d %b')})", data['week'])}
       {section_html(f"This Month's Collection ({data['month_start'].strftime('%B %Y')})", data['month'])}
+      {centers_html(data.get('centers'))}
       <p style="margin-top:24px;font-size:12px;color:#999;">
         This is an automated report generated at 4:00 AM. Manage recipients under
         Admin &rarr; Settings &rarr; Daily Report Recipients.

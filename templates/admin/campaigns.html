@@ -48,13 +48,14 @@
           {% if c.min_amount %}<div class="text-muted small">Minimum: Rs. {{ c.min_amount | inr }}</div>{% endif %}
         </div>
         <div class="text-end">
-          <div class="fw-bold">Rs. {{ c.total_collected | inr }}</div>
+          {% set collected = c.total_collected %}
+          <div class="fw-bold">Rs. {{ collected | inr }}</div>
           {% if c.target_amount %}<div class="text-muted small">of Rs. {{ c.target_amount | inr }} goal</div>{% endif %}
         </div>
       </div>
 
       {% if c.target_amount %}
-      {% set pct = (c.total_collected / c.target_amount * 100) if c.target_amount else 0 %}
+      {% set pct = (collected / c.target_amount * 100) if c.target_amount else 0 %}
       <div class="progress mt-2" style="height: 8px;" role="progressbar" aria-valuenow="{{ pct | round(0) }}" aria-valuemin="0" aria-valuemax="100">
         <div class="progress-bar" style="width: {{ [pct, 100] | min }}%; background-color: var(--saffron-dark);"></div>
       </div>

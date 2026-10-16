@@ -148,6 +148,7 @@ class TestExistingDatabase:
             "                  # failure mode, this time for a column instead of a\n"
             "                  # table).\n"
             "                  'ALTER TABLE campaigns DROP COLUMN suppress_receipt',\n"
+            "                  'ALTER TABLE donations DROP COLUMN preaching_center_name',\n"
             "                  # 069fa9d71441 -- same reasoning again, but for indexes:\n"
             "                  # create_all() above already built these from the\n"
             "                  # current models.py (index=True on each column), so the\n"
@@ -168,42 +169,47 @@ class TestExistingDatabase:
             "                  'DROP INDEX ix_admin_users_bace_property_id',\n"
             "                  'DROP INDEX ix_donations_razorpay_payment_id'):\n"
             "            conn.execute(sa.text(s))\n"
-            "    # associated_with_id carries a foreign key, which plain ALTER\n"
-            "    # TABLE DROP COLUMN can't remove in SQLite ('unknown column ...\n"
-            "    # in foreign key definition') -- go through Alembic's batch\n"
-            "    # mode (the same machinery the real migration's downgrade()\n"
-            "    # uses) so the table is properly recreated without it.\n"
-            "    from alembic.migration import MigrationContext\n"
-            "    from alembic.operations import Operations\n"
-            "    with db.engine.connect() as conn:\n"
-            "        ctx = MigrationContext.configure(conn)\n"
-            "        alembic_op = Operations(ctx)\n"
-            "        with alembic_op.batch_alter_table('donations') as batch_op:\n"
-            "            batch_op.drop_column('associated_with_id')\n"
-            # bace_student_id carries a foreign key to bace_students, which
-            # is dropped below as a post-baseline table. Leaving the column
-            # behind leaves a foreign key pointing at nothing, and SQLite's
-            # batch mode reflects every FK on a table it recreates -- so
-            # the *earlier* f4a08d3c6e12 migration, which batch-alters
-            # donations, died with NoSuchTableError: bace_students. Same
-            # class of problem as associated_with_id above, one table
-            # further out.
-            "            batch_op.drop_column('bace_student_id')\n"
             # Every table that did not exist at the baseline revision is
-            # dropped, found by *subtraction* from a fixed list of the
-            # baseline's own tables -- not by naming each newer table.
-            # This used to be a hand-maintained DROP TABLE per migration,
-            # and every new-table migration silently broke three tests
-            # here ("table X already exists": create_all() had already
-            # built it from the current models, so the migration's
-            # create_table collided) until somebody remembered to add a
-            # line. With the baseline set below, a new table is handled
-            # automatically; only a new *column or index on an existing
-            # baseline table* still needs stripping by name, above.
+            # dropped below, found by *subtraction* from this fixed list of
+            # the baseline's own tables rather than by naming each newer one.
             "    BASELINE_TABLES = {'admin_activity_logs', 'admin_users', 'bace_properties',\n"
             "        'campaigns', 'donations', 'donor_login_otps', 'donors', 'festivals',\n"
             "        'live_to_give_purposes', 'preachers', 'receipt_counters', 'seva_types',\n"
             "        'alembic_version'}\n"
+            # The same idea for columns. A column on a baseline table that
+            # carries a foreign key to a post-baseline table (associated_with_id,
+            # bace_student_id, preaching_center_id ...) has to go too: leaving
+            # it behind leaves a foreign key pointing at nothing, and SQLite's
+            # batch mode reflects every FK on a table it recreates, so an
+            # *earlier* migration dies with NoSuchTableError. Plain ALTER TABLE
+            # DROP COLUMN can't remove a column that is in a foreign key
+            # ('unknown column ... in foreign key definition'), so go through
+            # Alembic's batch mode, which recreates the table. Found by
+            # inspection, so the next new foreign-key column is handled with
+            # no edit here. (Plain new columns/indexes with no foreign key
+            # still have to be named in the DROP list above.)
+            "    from alembic.migration import MigrationContext\n"
+            "    from alembic.operations import Operations\n"
+            "    with db.engine.connect() as conn:\n"
+            "        insp = sa.inspect(conn)\n"
+            "        fk_columns = {}\n"
+            "        for t in BASELINE_TABLES - {'alembic_version'}:\n"
+            "            for fk in insp.get_foreign_keys(t):\n"
+            "                if fk['referred_table'] not in BASELINE_TABLES:\n"
+            "                    fk_columns.setdefault(t, set()).update(fk['constrained_columns'])\n"
+            "        # Alembic's batch mode re-creates every index it reflected,\n"
+            "        # including one on a column that is about to be removed.\n"
+            "        for t, cols in fk_columns.items():\n"
+            "            for ix in insp.get_indexes(t):\n"
+            "                if ix['name'] and not ix['name'].startswith('sqlite_') and set(ix['column_names']) & cols:\n"
+            "                    conn.execute(sa.text('DROP INDEX ' + ix['name']))\n"
+            "        conn.commit()\n"
+            "        ctx = MigrationContext.configure(conn)\n"
+            "        alembic_op = Operations(ctx)\n"
+            "        for t, cols in fk_columns.items():\n"
+            "            with alembic_op.batch_alter_table(t) as batch_op:\n"
+            "                for c in sorted(cols):\n"
+            "                    batch_op.drop_column(c)\n"
             "    with db.engine.begin() as conn:\n"
             "        # Foreign keys are not enforced by SQLite unless switched on,\n"
             "        # so drop order between the dropped tables doesn't matter.\n"

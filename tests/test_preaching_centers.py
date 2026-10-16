@@ -107,13 +107,15 @@ class TestPreachingCenterPublicCollection:
         assert b"/pc/inactive-center" not in response.data
 
     def test_order_records_center_server_side(self, app, client):
-        from models import Campaign, Donation, PreachingCenter
+        from models import Campaign, Donation, LiveToGivePurpose, PreachingCenter
         login(client)
         _create_center(client)
-        campaign = Campaign.query.filter_by(name="Annadan").one()
+        self._live_to_give(app)
+        campaign = Campaign.query.filter_by(name="Live To Give").one()
+        purpose = LiveToGivePurpose.query.filter_by(name="Deity Seva").one()
         response = client.post("/api/create-order", json={
             "amount": 501, "full_name": "Center Donor", "phone": "9876501100",
-            "consent": "on", "campaign_id": campaign.id, "pan": "ABCDE1234F",
+            "consent": "on", "campaign_id": campaign.id, "live_to_give_purpose_id": purpose.id,
             "preaching_center_slug": "dwarka",
         })
         assert response.status_code == 200

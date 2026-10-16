@@ -37,8 +37,11 @@ timeout = int(os.environ.get("GUNICORN_TIMEOUT", 90))
 
 # Recycle workers periodically -- cheap insurance against slow memory growth
 # over a long-running worker's life (PDF/image generation, SMTP sockets).
-max_requests = 200
-max_requests_jitter = 50
+# Render polls /healthz continuously and every poll counts as a request, so
+# 200 meant a fresh worker (and a reset of the in-memory rate-limit counters)
+# roughly every 15 minutes. 2000 keeps the memory insurance without that churn.
+max_requests = 2000
+max_requests_jitter = 300
 
 accesslog = "-"   # log to stdout, so your host's log aggregator picks it up
 errorlog = "-"
