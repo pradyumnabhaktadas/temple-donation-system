@@ -261,6 +261,32 @@ class TestComputeReport:
             assert data_26["today"]["amount"] == 777
             assert data_25["today"]["amount"] == 0
 
+    def test_week_boundary_crosses_prior_month(self, app):
+        """When report_date is early in a month and week_start (Monday) falls
+        in the previous month, donations made earlier in the week in the previous
+        month must still be included in the weekly total."""
+        from extensions import db
+        from models import Campaign
+        from daily_report_utils import compute_report
+
+        with app.app_context():
+            annadan = Campaign.query.filter_by(name="Annadan").first()
+            donor = _mk_donor(db, "Month Turnover Donor", "9876500609")
+            # 2026-11-01 is a Sunday.
+            # week_start is Monday 2026-10-26.
+            # Seed a donation on 2026-10-28 (Wednesday of that week)
+            _mk_donation(db, donor, annadan, 5000, "cash",
+                         datetime.datetime(2026, 10, 28, 10, 0, 0))
+            # Seed a donation on 2026-11-01 (Sunday, today)
+            _mk_donation(db, donor, annadan, 2000, "cash",
+                         datetime.datetime(2026, 11, 1, 10, 0, 0))
+            db.session.commit()
+
+            data = compute_report(report_date=datetime.date(2026, 11, 1))
+            assert data["today"]["amount"] == 2000
+            assert data["week"]["amount"] == 7000  # 5000 from Oct 28 + 2000 from Nov 1
+            assert data["month"]["amount"] == 2000  # only Nov 1 belongs to November
+
     def test_empty_period_has_zero_totals_and_no_campaigns(self, app):
         from daily_report_utils import compute_report
         with app.app_context():

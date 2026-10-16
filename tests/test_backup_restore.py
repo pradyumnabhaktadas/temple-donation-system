@@ -80,6 +80,46 @@ class TestBackupContents:
         db.session.expire_all()
         assert AssociatedWith.query.one().name == "IYF Dwarka Temple Preaching"
 
+    def test_backup_includes_all_domain_models(self, app, client):
+        """Every domain model in models.py must be registered in backup_utils._BACKUP_TABLES
+        except for credentials and internal logs, so future models are never accidentally missed."""
+        from backup_utils import _BACKUP_TABLES
+        import models
+        backed_up_models = {model for _, model, _ in _BACKUP_TABLES}
+        all_models = set(models.db.Model.__subclasses__())
+        excluded = {models.AdminUser, models.DonorLoginOTP, models.AdminActivityLog, models.ZohoForm}
+        missing = (all_models - excluded) - backed_up_models
+        assert not missing, f"Models missing from backup_utils._BACKUP_TABLES: {missing}"
+
+    def test_preaching_center_and_composite_pk_round_trip_through_restore(self, app, client):
+        from extensions import db
+        from models import PreachingCenter, PreachingCenterPurpose, LiveToGivePurpose
+        login(client)
+        with app.app_context():
+            center = PreachingCenter(name="Dwarka Sector 12 Center", slug="dwarka-sec12", is_active=True)
+            purpose = LiveToGivePurpose.query.first() or LiveToGivePurpose(name="General Donation", is_80g=True)
+            db.session.add_all([center, purpose])
+            db.session.flush()
+            link = PreachingCenterPurpose(preaching_center_id=center.id, live_to_give_purpose_id=purpose.id)
+            db.session.add(link)
+            db.session.commit()
+
+        backup = _take_backup(client)
+
+        with app.app_context():
+            PreachingCenterPurpose.query.delete()
+            c = PreachingCenter.query.filter_by(slug="dwarka-sec12").one()
+            c.name = "Modified Name"
+            db.session.commit()
+
+        resp = _upload(client, backup, mode="apply", confirm="RESTORE")
+        assert b"Restore complete" in resp.data
+
+        with app.app_context():
+            restored_center = PreachingCenter.query.filter_by(slug="dwarka-sec12").one()
+            assert restored_center.name == "Dwarka Sector 12 Center"
+            assert PreachingCenterPurpose.query.count() >= 1
+
     def test_backup_excludes_credentials(self, app, client):
         """Login secrets must not leave the database in a portable file."""
         login(client)

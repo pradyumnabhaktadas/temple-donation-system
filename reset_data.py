@@ -56,6 +56,8 @@ CONFIRMATION_PHRASE = "DELETE ALL DATA"
 MODELS_IN_DELETE_ORDER = [
     # Before Campaign -- it holds a foreign key to it.
     ZohoForm,
+    # Before Donation -- it holds foreign key source_donation_id to Donation.
+    BaceRentPayment,
     Donation,
     # Before PreachingCenter and LiveToGivePurpose -- it holds foreign keys to both.
     PreachingCenterPurpose,
@@ -66,7 +68,6 @@ MODELS_IN_DELETE_ORDER = [
     Campaign,
     # Before BaceProperty -- BaceStudent holds a foreign key to it, and
     # the whole rent ledger below holds foreign keys to BaceStudent.
-    BaceRentPayment,
     BaceRentCharge,
     BaceRentMonthClose,
     BaceRentAdjustment,

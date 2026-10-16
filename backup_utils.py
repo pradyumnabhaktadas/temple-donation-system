@@ -30,6 +30,8 @@ from extensions import db
 from models import (
     Donor, Donation, Campaign, BaceProperty, Festival, SevaType,
     LiveToGivePurpose, Preacher, AssociatedWith, ReceiptCounter, DailyReportRecipient, BirthdayAlertRecipient,
+    Camp, PreachingCenter, PreachingCenterPurpose,
+    BaceStudent, BaceRentCharge, BaceRentPayment, BaceRentAdjustment, BaceRentMonthClose,
 )
 
 # (CSV filename, model, columns-to-exclude) -- one entry per table included
@@ -42,11 +44,19 @@ _BACKUP_TABLES = [
     ("festivals.csv", Festival, []),
     ("seva_types.csv", SevaType, []),
     ("live_to_give_purposes.csv", LiveToGivePurpose, []),
+    ("camps.csv", Camp, []),
     ("associated_withs.csv", AssociatedWith, []),
+    ("preaching_centers.csv", PreachingCenter, []),
+    ("preaching_center_purposes.csv", PreachingCenterPurpose, []),
     ("daily_report_recipients.csv", DailyReportRecipient, []),
     ("birthday_alert_recipients.csv", BirthdayAlertRecipient, []),
     ("donors.csv", Donor, []),
+    ("bace_students.csv", BaceStudent, []),
+    ("bace_rent_charges.csv", BaceRentCharge, []),
+    ("bace_rent_adjustments.csv", BaceRentAdjustment, []),
+    ("bace_rent_month_closes.csv", BaceRentMonthClose, []),
     ("donations.csv", Donation, ["receipt_pdf", "razorpay_raw_payload"]),
+    ("bace_rent_payments.csv", BaceRentPayment, []),
     ("receipt_counters.csv", ReceiptCounter, []),
 ]
 
@@ -65,7 +75,8 @@ def _table_to_csv_bytes(model, exclude_columns):
     # including Donation.receipt_pdf / razorpay_raw_payload. Those fields
     # are deliberately excluded from a backup but were still being loaded
     # by the old ORM query, which pushed the Render Cron Job above 512 MB.
-    query = db.session.query(*(getattr(model, col) for col in columns)).order_by(model.id).yield_per(500)
+    order_cols = [getattr(model, c) for c in model.__table__.primary_key.columns.keys()]
+    query = db.session.query(*(getattr(model, col) for col in columns)).order_by(*order_cols).yield_per(500)
     for row in query:
         writer.writerow(row)
     return buf.getvalue().encode("utf-8")
@@ -83,7 +94,8 @@ def _write_table_to_zip(zf, csv_name, model, exclude_columns):
         with io.TextIOWrapper(raw_member, encoding="utf-8", newline="") as text_member:
             writer = csv.writer(text_member)
             writer.writerow(columns)
-            query = db.session.query(*(getattr(model, col) for col in columns)).order_by(model.id).yield_per(500)
+            order_cols = [getattr(model, c) for c in model.__table__.primary_key.columns.keys()]
+            query = db.session.query(*(getattr(model, col) for col in columns)).order_by(*order_cols).yield_per(500)
             for row in query:
                 writer.writerow(row)
 
@@ -247,7 +259,7 @@ def _restore_table(db, model, exclude_columns, csv_bytes, dry_run):
     is deleted here -- that's what wipe does, at the caller's level."""
     columns = {c.name: c for c in model.__table__.columns if c.name not in exclude_columns}
     reader = csv.DictReader(io.StringIO(csv_bytes.decode("utf-8", errors="replace")))
-    pk_name = list(model.__table__.primary_key.columns.keys())[0]
+    pk_names = list(model.__table__.primary_key.columns.keys())
 
     inserted = updated = 0
     for raw_row in reader:
@@ -255,8 +267,13 @@ def _restore_table(db, model, exclude_columns, csv_bytes, dry_run):
             name: _convert_value(raw_row.get(name), col.type.python_type)
             for name, col in columns.items()
         }
-        pk_value = values.get(pk_name)
-        existing = model.query.get(pk_value) if pk_value is not None else None
+        if len(pk_names) == 1:
+            pk_val = values.get(pk_names[0])
+            existing = model.query.get(pk_val) if pk_val is not None else None
+        else:
+            pk_tuple = tuple(values.get(k) for k in pk_names)
+            existing = model.query.get(pk_tuple) if all(v is not None for v in pk_tuple) else None
+
         if existing:
             updated += 1
             if not dry_run:
@@ -280,13 +297,16 @@ def _sync_postgres_sequence(db, model):
     if db.engine.dialect.name != "postgresql":
         return
     table = model.__table__.name
-    pk_name = list(model.__table__.primary_key.columns.keys())[0]
-    db.session.execute(
-        db.text(
-            f"SELECT setval(pg_get_serial_sequence('{table}', '{pk_name}'), "
-            f"COALESCE((SELECT MAX({pk_name}) FROM {table}), 1))"
-        )
-    )
+    for col in model.__table__.primary_key.columns:
+        seq = db.session.execute(
+            db.text(f"SELECT pg_get_serial_sequence('{table}', '{col.name}')")
+        ).scalar()
+        if seq:
+            db.session.execute(
+                db.text(
+                    f"SELECT setval('{seq}', COALESCE((SELECT MAX({col.name}) FROM {table}), 1))"
+                )
+            )
 
 
 def restore_backup_zip(db, zip_bytes, wipe=False, dry_run=True):

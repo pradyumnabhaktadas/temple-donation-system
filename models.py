@@ -571,7 +571,10 @@ class Donation(db.Model):
     # a complete record of everything Razorpay sent, beyond the specific
     # fields pulled out above, in case you ever need to reconcile something
     # those fields don't cover.
-    razorpay_raw_payload = db.Column(db.Text)
+    # deferred: prevents multi-kilobyte JSON payloads from loading into memory
+    # when listing donations or computing collection summaries. Loads only
+    # when .razorpay_raw_payload is explicitly accessed for debugging/reconciliation.
+    razorpay_raw_payload = deferred(db.Column(db.Text))
 
     # Populated only by the webhook's payment.dispute.* events (see
     # public.razorpay_webhook) -- a donor disputing/charging back a

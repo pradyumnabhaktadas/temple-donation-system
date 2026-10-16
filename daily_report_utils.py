@@ -77,11 +77,12 @@ def compute_report(report_date=None):
     month_start = report_date.replace(day=1)
     report_end = report_date + datetime.timedelta(days=1)  # exclusive upper bound
 
-    # Coarse SQL-side lower bound only (a few hours of slack either side of
-    # month_start's IST midnight, converted loosely to UTC) -- the precise
-    # per-row IST bucketing happens in Python below via to_ist(), same
-    # division of labour as admin.analytics()'s all_pop_donations pull.
-    query_lower_bound = datetime.datetime.combine(month_start, datetime.time.min) - datetime.timedelta(hours=12)
+    # Coarse SQL-side lower bound: use the earliest of week_start and
+    # month_start (with a few hours of slack either side of IST midnight) so
+    # week totals near the start of a calendar month aren't truncated when
+    # Monday falls in the preceding month.
+    earliest_start = min(week_start, month_start)
+    query_lower_bound = datetime.datetime.combine(earliest_start, datetime.time.min) - datetime.timedelta(hours=12)
 
     rows = []
     for amt, dt, campaign_name in (
