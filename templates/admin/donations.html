@@ -229,6 +229,7 @@
             {% if d.festival %}<tr><th class="text-muted">Festival</th><td>{{ d.festival.name }}</td></tr>{% endif %}
             {% if d.seva_type %}<tr><th class="text-muted">Seva Type</th><td>{{ d.seva_type.name }}</td></tr>{% endif %}
             {% if d.live_to_give_purpose %}<tr><th class="text-muted">Donation Purpose</th><td>{{ d.live_to_give_purpose.name }}</td></tr>{% endif %}
+            {% if d.course %}<tr><th class="text-muted">Course</th><td>{{ d.course.name }}</td></tr>{% endif %}
             <tr><th class="text-muted">I am associated with</th><td>{{ d.associated_with.name if d.associated_with else '-' }}</td></tr>
             <tr><th class="text-muted">Amount</th><td>Rs. {{ d.amount | inr }}</td></tr>
             <tr><th class="text-muted">Payment Mode</th><td>{{ d.payment_mode.replace('_',' ').title() }}</td></tr>

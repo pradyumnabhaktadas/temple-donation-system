@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block title %}Courses Fee / Donation - {{ org_name }}{% endblock %}
+{% block content %}
+<section class="donation-hero">
+  <div class="donation-hero-copy">
+    <p class="hero-eyebrow">Vedic Education &amp; Courses</p>
+    <h1>Courses <em>Fee / Donation</em></h1>
+    <p class="hero-lede">Register or contribute towards our spiritual courses like Bhakti Shastri, Bhakti Vaibhav, and Bhagavad Gita studies -- a receipt is generated automatically after payment.</p>
+  </div>
+  <div class="hero-lotus" aria-hidden="true"><div class="lotus-glow"><img src="{{ url_for('static', filename='branding/iskcon_dwarka_logo.png') }}" alt="" class="lotus-glow-logo"></div><i></i><i></i><i></i><i></i></div>
+</section>
+
+<div class="row justify-content-center donation-layout">
+  <div class="col-xl-8 col-lg-9">
+    {% if not razorpay_enabled %}
+      <div class="alert alert-warning py-2 text-center">Demo mode: live Razorpay keys are not configured, so payment will be simulated. See README to go live.</div>
+    {% endif %}
+    {% if not courses %}
+      <div class="alert alert-warning py-2 text-center">No courses are configured yet. An admin can add them under Admin -&gt; Courses.</div>
+    {% endif %}
+
+    <form id="courses-form" class="donation-card">
+      <div class="donation-card-head">
+        <div><span class="section-kicker">Courses</span><h2>Course fee / donation details</h2></div>
+        <span class="secure-pill">⌁ Secure payment</span>
+      </div>
+
+      <input type="hidden" name="campaign_id" value="{{ campaign.id }}">
+
+      <div class="form-section">
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <label class="form-label" for="full_name">Name</label>
+            <input type="text" class="form-control" name="full_name" id="full_name" placeholder="Enter your full name" required>
+          </div>
+          <div class="col-md-6 mb-3">
+            <label class="form-label" for="course_id">Course</label>
+            <select class="form-select" name="course_id" id="course_id" required {% if not courses %}disabled{% endif %}>
+              <option value="" disabled selected data-amount="">-- Select a course --</option>
+              {% for c in courses %}
+                <option value="{{ c.id }}" data-amount="{{ c.suggested_amount or '' }}">
+                  {{ c.name }}{% if c.suggested_amount %} (Rs. {{ c.suggested_amount | inr }}){% endif %}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <label class="form-label" for="phone">Phone</label>
+            <input type="tel" class="form-control" name="phone" id="phone" required
+                   maxlength="20" pattern="[6-9][0-9]{9}|\+[1-9][0-9]{7,14}" inputmode="tel" title="10-digit Indian mobile number, or + and country code for numbers outside India">
+          </div>
+          <div class="col-md-6 mb-0">
+            <label class="form-label" for="email">Email <span class="text-muted">(optional -- your receipt will be sent here)</span></label>
+            <input type="email" class="form-control" name="email" id="email">
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="d-flex justify-content-between align-items-center"><label class="form-label mb-0" for="amount">Amount</label></div>
+        <div class="currency-input"><span>₹</span><input type="number" min="1" step="1" class="form-control" name="amount" id="amount" placeholder="Enter course fee / donation amount" required></div>
+        <div id="amount-in-words" class="field-note text-muted mt-1" style="display:none; font-style: italic;"></div>
+      </div>
+
+      <div class="form-section" id="pan-address-fields" {% if not campaign.is_80g %}style="display:none;"{% endif %}>
+        <p class="field-note text-muted mb-2" id="high-value-note" {% if campaign.is_80g %}style="display:none;"{% endif %}>
+          PAN and address are mandatory for contributions above Rs. 49,000, per Income Tax rules.
+        </p>
+        <div class="row mb-0">
+          <div class="col-md-6 mb-3">
+            <label class="form-label" for="pan">PAN{% if campaign.is_80g %} <span class="text-muted">(required for 80G receipt)</span>{% endif %}</label>
+            <input type="text" class="form-control" name="pan" id="pan" style="text-transform:uppercase" maxlength="10"
+                   pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10 characters, e.g. ABCDE1234F" {% if campaign.is_80g %}required{% endif %}>
+          </div>
+        </div>
+        <div class="mb-0">
+          <label class="form-label" for="address">Address</label>
+          <textarea class="form-control" name="address" id="address" rows="2"></textarea>
+        </div>
+      </div>
+
+      <div class="form-section mb-0">
+        <label class="form-label" for="remarks">Remarks <span class="text-muted">(optional)</span></label>
+        <input type="text" class="form-control" name="remarks" id="remarks" maxlength="300" placeholder="e.g. batch / roll no. or notes">
+      </div>
+
+      <div class="consent-box form-check">
+        <input class="form-check-input" type="checkbox" name="consent" id="consent" required>
+        <label class="form-check-label small text-muted" for="consent">
+          I agree that {{ org_name }} may store my name and contact details to process this course contribution and issue a receipt.
+          This information will not be shared for any other purpose.
+        </label>
+      </div>
+
+      <button type="submit" class="btn btn-gold donation-submit w-100" id="pay-btn" {% if not courses %}disabled{% endif %}>
+        {% if razorpay_enabled %}<span>Continue to secure payment</span><span>→</span>{% else %}<span>Simulate payment success</span><span>→</span>{% endif %}
+      </button>
+      <p class="donation-reassurance">Your payment is handled securely. A receipt is generated after successful payment.</p>
+      <p class="donation-reassurance" id="status-note" style="display:none;"></p>
+    </form>
+  </div>
+</div>
+
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script src="{{ url_for('static', filename='js/donation-payment.js') }}"></script>
+<script>
+(function () {
+  const courseSelect = document.getElementById('course_id');
+  const amountInput = document.getElementById('amount');
+  const amountWordsEl = document.getElementById('amount-in-words');
+
+  function inrToWords(num) {
+    let n = Math.floor(Number(num) || 0);
+    if (n <= 0 || n > 999999999) return '';
+    const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+      'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+    const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+    function twoDigits(x) {
+      if (x < 20) return ones[x];
+      return tens[Math.floor(x / 10)] + (x % 10 ? ' ' + ones[x % 10] : '');
+    }
+    let parts = [];
+    if (n >= 10000000) { parts.push(twoDigits(Math.floor(n / 10000000)) + ' Crore'); n %= 10000000; }
+    if (n >= 100000) { parts.push(twoDigits(Math.floor(n / 100000)) + ' Lakh'); n %= 100000; }
+    if (n >= 1000) { parts.push(twoDigits(Math.floor(n / 1000)) + ' Thousand'); n %= 1000; }
+    if (n >= 100) { parts.push(ones[Math.floor(n / 100)] + ' Hundred'); n %= 100; }
+    if (n > 0) { parts.push(twoDigits(n)); }
+    return 'Rupees ' + parts.join(' ') + ' Only';
+  }
+
+  function updateAmountWords() {
+    if (!amountWordsEl) return;
+    const words = inrToWords(amountInput.value);
+    amountWordsEl.textContent = words;
+    amountWordsEl.style.display = words ? 'block' : 'none';
+  }
+
+  if (courseSelect) {
+    courseSelect.addEventListener('change', () => {
+      const selected = courseSelect.options[courseSelect.selectedIndex];
+      const suggested = selected ? selected.dataset.amount : '';
+      if (suggested) amountInput.value = suggested;
+      updateAmountWords();
+      updatePanAddressRequirement();
+    });
+  }
+  amountInput.addEventListener('input', updateAmountWords);
+
+  const CAMPAIGN_IS_80G = {{ campaign.is_80g | tojson }};
+  const panInput = document.getElementById('pan');
+  const addressInput = document.getElementById('address');
+  const highValueNote = document.getElementById('high-value-note');
+  const panAddressFields = document.getElementById('pan-address-fields');
+  const HIGH_VALUE_PAN_THRESHOLD = 49000;
+
+  function updatePanAddressRequirement() {
+    const isHighValue = (parseFloat(amountInput.value) || 0) > HIGH_VALUE_PAN_THRESHOLD;
+    if (CAMPAIGN_IS_80G) {
+      panInput.required = true;
+      addressInput.required = isHighValue;
+      highValueNote.style.display = isHighValue ? '' : 'none';
+    } else {
+      panAddressFields.style.display = isHighValue ? '' : 'none';
+      panInput.required = isHighValue;
+      addressInput.required = isHighValue;
+    }
+  }
+  amountInput.addEventListener('input', updatePanAddressRequirement);
+  updatePanAddressRequirement();
+
+  TempleDonationPayment.init({
+    formId: 'courses-form',
+    description: 'Course Fee / Donation',
+    orgName: {{ org_name | tojson }},
+    razorpayEnabled: {{ razorpay_enabled | tojson }},
+    logoUrl: {{ url_for('static', filename='branding/iskcon_dwarka_logo.png', _external=True) | tojson }},
+  });
+})();
+</script>
+{% endblock %}

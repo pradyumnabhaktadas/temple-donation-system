@@ -1,0 +1,371 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Courses Collections Dashboard{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h3 class="mb-0">🎓 Courses Collections Dashboard</h3>
+    <div class="small text-muted mt-1">
+      Course fee &amp; donation collections (Bhakti Shastri, Bhakti Vaibhav, etc.)
+      &middot; Public link: <a href="{{ url_for('public.courses_form') }}" target="_blank">/courses ↗</a>
+      {% if campaign %}
+      &middot; Receipt mode:
+      {% if campaign.is_80g %}
+      <span class="badge bg-success-subtle text-success border border-success-subtle">80G Eligible</span>
+      {% else %}
+      <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">Regular (Non-80G)</span>
+      {% endif %}
+      {% endif %}
+    </div>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a class="btn btn-sm btn-outline-primary" href="{{ url_for('public.courses_form') }}" target="_blank">🌐 Open Public Form</a>
+    {% if current_user.role == 'admin' %}
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.courses_manage') }}">⚙️ Manage Courses</a>
+    {% endif %}
+  </div>
+</div>
+
+{# Navigation tabs: Collections Dashboard vs Record Offline Course Payment #}
+<ul class="nav nav-tabs mb-4">
+  <li class="nav-item">
+    <a class="nav-link {% if tab != 'single' %}active{% endif %}"
+       href="{{ url_for('admin.courses_dashboard') }}">📊 Collections &amp; Student Log</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if tab == 'single' %}active{% endif %}"
+       href="{{ url_for('admin.courses_dashboard', tab='single') }}">➕ Record Offline Course Fee</a>
+  </li>
+</ul>
+
+{% if tab == 'single' %}
+<div class="card card-body shadow-sm p-4" style="max-width:860px">
+  <h5 class="mb-1">Record Offline Course Fee / Donation</h5>
+  <p class="text-muted small mb-3">
+    Record a cash, UPI/bank transfer, or cheque payment collected for a course. Generates an official receipt under the <strong>{{ campaign.name }}</strong> campaign.
+  </p>
+
+  <form method="post" action="{{ url_for('admin.course_record_offline') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="course_record_full_name">Student / Participant Name <span class="text-danger">*</span></label>
+        <input type="text" class="form-control" name="full_name" id="course_record_full_name" placeholder="Full Name" required>
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="course_record_course_id">Course <span class="text-danger">*</span></label>
+        <select class="form-select" name="course_id" id="course_record_course_id" required>
+          <option value="" disabled selected>-- Select a Course --</option>
+          {% for c in courses if c.is_active %}
+          <option value="{{ c.id }}" data-fee="{{ c.suggested_amount or '' }}">
+            {{ c.name }}{% if c.suggested_amount %} (Suggested: Rs. {{ '{:,.0f}'.format(c.suggested_amount) }}){% endif %}
+          </option>
+          {% endfor %}
+        </select>
+        {% if current_user.role == 'admin' %}
+        <div class="form-text">Need to add or edit a course? <a href="{{ url_for('admin.courses_manage') }}">Manage Courses</a>.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-md-4 mb-3">
+        <label class="form-label" for="course_record_amount">Amount (Rs.) <span class="text-danger">*</span></label>
+        <input type="number" step="0.01" min="1" class="form-control" name="amount" id="course_record_amount" required>
+      </div>
+      <div class="col-md-4 mb-3">
+        <label class="form-label" for="course_record_phone">Mobile Number <span class="text-muted">(optional)</span></label>
+        <input type="tel" class="form-control" name="phone" id="course_record_phone" placeholder="10-digit mobile">
+      </div>
+      <div class="col-md-4 mb-3">
+        <label class="form-label" for="course_record_email">Email <span class="text-muted">(optional)</span></label>
+        <input type="email" class="form-control" name="email" id="course_record_email" placeholder="student@example.com">
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-md-4 mb-3">
+        <label class="form-label" for="course_record_payment_mode">Payment Mode</label>
+        <select class="form-select" name="payment_mode" id="course_record_payment_mode">
+          <option value="cash">Cash</option>
+          <option value="bank_transfer">Bank Transfer / UPI</option>
+          <option value="online">Online</option>
+          <option value="cheque">Cheque</option>
+        </select>
+      </div>
+      <div class="col-md-4 mb-3">
+        <label class="form-label" for="course_record_donation_date">Payment Date</label>
+        <input type="date" class="form-control" name="donation_date" id="course_record_donation_date" value="{{ today.isoformat() }}">
+      </div>
+      <div class="col-md-4 mb-3" id="course-txn-field" style="display:none;">
+        <label class="form-label" for="course_record_bank_transaction_id">Transaction / UTR / Cheque Ref <span class="text-danger">*</span></label>
+        <input type="text" class="form-control" name="bank_transaction_id" id="course_record_bank_transaction_id">
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-md-8 mb-3">
+        <label class="form-label" for="course_record_remarks">Remarks / Batch Details <span class="text-muted">(optional)</span></label>
+        <input type="text" class="form-control" name="remarks" id="course_record_remarks" maxlength="300" placeholder="e.g. Weekend Batch, Module 1">
+      </div>
+      <div class="col-md-4 mb-3 d-flex align-items-end">
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" name="send_notifications" value="yes" id="course_record_send_notifications" checked>
+          <label class="form-check-label small" for="course_record_send_notifications">
+            Send receipt via Email/WhatsApp
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-gold">Record Course Payment</button>
+  </form>
+</div>
+
+<script>
+(function () {
+  var courseSelect = document.getElementById('course_record_course_id');
+  var amountInput = document.getElementById('course_record_amount');
+  if (courseSelect && amountInput) {
+    courseSelect.addEventListener('change', function () {
+      var opt = courseSelect.options[courseSelect.selectedIndex];
+      var fee = opt ? opt.getAttribute('data-fee') : '';
+      if (fee && !amountInput.value) {
+        amountInput.value = Math.round( parseFloat(fee) );
+      }
+    });
+  }
+  var mode = document.getElementById('course_record_payment_mode');
+  var field = document.getElementById('course-txn-field');
+  var input = document.getElementById('course_record_bank_transaction_id');
+  if (mode && field && input) {
+    function sync() {
+      var isCash = mode.value === 'cash';
+      field.style.display = isCash ? 'none' : '';
+      input.required = !isCash;
+      if (isCash) input.value = '';
+    }
+    mode.addEventListener('change', sync);
+    sync();
+  }
+})();
+</script>
+
+{% else %}
+
+{# KPI Summary Row #}
+<div class="row g-3 mb-4">
+  <div class="col-sm-6 col-lg-3">
+    <div class="card card-body shadow-sm h-100 border-start border-4 border-warning">
+      <div class="text-muted small text-uppercase fw-semibold">Total Collected</div>
+      <div class="fs-4 fw-bold mt-1">Rs. {{ grand_total | inr }}</div>
+      <div class="small text-muted">Across filtered course payments</div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-lg-3">
+    <div class="card card-body shadow-sm h-100">
+      <div class="text-muted small text-uppercase fw-semibold">Total Payments</div>
+      <div class="fs-4 fw-bold mt-1">{{ total_count }}</div>
+      <div class="small text-muted">Successful student registrations</div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-lg-3">
+    <div class="card card-body shadow-sm h-100">
+      <div class="text-muted small text-uppercase fw-semibold">This Month</div>
+      <div class="fs-4 fw-bold mt-1 text-success">Rs. {{ this_month_total | inr }}</div>
+      <div class="small text-muted">{{ today.strftime('%B %Y') }}</div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-lg-3">
+    <div class="card card-body shadow-sm h-100">
+      <div class="text-muted small text-uppercase fw-semibold">Active Courses</div>
+      <div class="fs-4 fw-bold mt-1">{{ active_courses_count }}</div>
+      <div class="small text-muted">Offered on public /courses page</div>
+    </div>
+  </div>
+</div>
+
+{# Filter & Export Bar #}
+<form class="row g-2 mb-4 align-items-center" id="course-report-filters">
+  <div class="col-auto">
+    <select name="course_id" class="form-select form-select-sm" onchange="this.form.submit()" aria-label="Filter by course">
+      <option value="">All courses</option>
+      {% for c in courses %}
+      <option value="{{ c.id }}" {% if course_id == c.id %}selected{% endif %}>{{ c.name }}{% if not c.is_active %} (Inactive){% endif %}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <select name="mode" class="form-select form-select-sm" onchange="this.form.submit()" aria-label="Filter by payment mode">
+      <option value="">All modes</option>
+      <option value="online" {% if mode == 'online' %}selected{% endif %}>Online</option>
+      <option value="cash" {% if mode == 'cash' %}selected{% endif %}>Cash</option>
+      <option value="bank_transfer" {% if mode == 'bank_transfer' %}selected{% endif %}>Bank Transfer</option>
+      <option value="cheque" {% if mode == 'cheque' %}selected{% endif %}>Cheque</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <input type="text" name="q" class="form-control form-control-sm" value="{{ q }}" placeholder="Search student name, phone, receipt..." aria-label="Search student name, phone, or receipt">
+  </div>
+  <div class="col-auto">
+    <input type="date" name="date_from" class="form-control form-control-sm" value="{{ date_from }}" aria-label="From date">
+  </div>
+  <div class="col-auto">
+    <input type="date" name="date_to" class="form-control form-control-sm" value="{{ date_to }}" aria-label="To date">
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-sm btn-outline-secondary">Filter</button>
+    {% if course_id or mode or q or date_from or date_to %}
+    <a href="{{ url_for('admin.courses_dashboard') }}" class="btn btn-link btn-sm">Clear</a>
+    {% endif %}
+  </div>
+  <div class="col-auto ms-auto d-flex gap-2 flex-wrap">
+    <button type="submit" class="btn btn-sm btn-outline-secondary"
+            formaction="{{ url_for('admin.courses_export', report='course') }}">⬇ Course-wise CSV</button>
+    <button type="submit" class="btn btn-sm btn-outline-secondary"
+            formaction="{{ url_for('admin.courses_export', report='monthly') }}">⬇ Monthly CSV</button>
+    <button type="submit" class="btn btn-sm btn-outline-secondary"
+            formaction="{{ url_for('admin.courses_export', report='detail') }}">⬇ Student Detail CSV</button>
+  </div>
+</form>
+
+{# Course-wise and Monthly Breakdown Tables #}
+<div class="row g-4 mb-4">
+  <div class="col-lg-6">
+    <div class="card card-body shadow-sm h-100">
+      <h6 class="mb-3">Collected per Course</h6>
+      {% if course_totals %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0 bg-white">
+          <thead>
+            <tr>
+              <th>Course</th>
+              <th class="text-end">Payments</th>
+              <th class="text-end">Total Collected</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c_name, count, total in course_totals %}
+            <tr>
+              <td class="fw-semibold">{{ c_name }}</td>
+              <td class="text-end">{{ count }}</td>
+              <td class="text-end">Rs. {{ total | inr }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr class="fw-bold">
+              <td>All courses</td>
+              <td class="text-end">{{ total_count }}</td>
+              <td class="text-end">Rs. {{ grand_total | inr }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted mb-0">No course payments recorded for this selection yet.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card card-body shadow-sm h-100">
+      <h6 class="mb-3">Collected by Month</h6>
+      {% if monthly_totals %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0 bg-white">
+          <thead>
+            <tr>
+              <th>Month</th>
+              <th class="text-end">Payments</th>
+              <th class="text-end">Total Collected</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for label, count, total in monthly_totals %}
+            <tr>
+              <td>{{ label }}</td>
+              <td class="text-end">{{ count }}</td>
+              <td class="text-end">Rs. {{ total | inr }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr class="fw-bold">
+              <td>All months</td>
+              <td class="text-end">{{ monthly_totals | sum(attribute=1) }}</td>
+              <td class="text-end">Rs. {{ monthly_totals | sum(attribute=2) | inr }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted mb-0">Nothing to show for this selection.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{# Student / Participant Course Payments Log #}
+<div class="card card-body shadow-sm">
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h6 class="mb-0">Student Course Fee / Donation Log ({{ entries | length }}{% if entries | length == 200 %}+{% endif %})</h6>
+    <a class="btn btn-sm btn-gold" href="{{ url_for('admin.courses_dashboard', tab='single') }}">➕ Record Offline Payment</a>
+  </div>
+
+  {% if entries %}
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0 bg-white">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Receipt No</th>
+          <th>Name</th>
+          <th>Phone</th>
+          <th>Course</th>
+          <th class="text-end">Amount</th>
+          <th>Mode</th>
+          <th>Reference / Remarks</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in entries %}
+        <tr>
+          <td class="text-nowrap small">{{ (d.donation_date | to_ist).strftime('%d %b %Y') if d.donation_date else '-' }}</td>
+          <td class="small text-nowrap">
+            {% if d.receipt_number %}
+            <a href="{{ url_for('public.download_receipt', donation_id=d.id, t=receipt_token(d.id)) }}" target="_blank">{{ d.receipt_number }}</a>
+            {% else %}-{% endif %}
+          </td>
+          <td>
+            {% if d.donor %}
+            <a href="{{ url_for('admin.donor_detail', donor_id=d.donor.id) }}" class="fw-semibold text-decoration-none">{{ d.donor.full_name }}</a>
+            {% else %}-{% endif %}
+          </td>
+          <td class="small text-muted">{{ d.donor.phone if d.donor and d.donor.phone else '-' }}</td>
+          <td>
+            {% if d.course %}
+            <span class="badge bg-warning-subtle text-dark border border-warning-subtle">{{ d.course.name }}</span>
+            {% else %}
+            <span class="text-muted small">Unspecified</span>
+            {% endif %}
+          </td>
+          <td class="text-end fw-semibold text-nowrap">Rs. {{ d.amount | inr }}</td>
+          <td class="small text-muted text-nowrap">{{ (d.payment_mode or '').replace('_', ' ').title() }}</td>
+          <td class="small text-muted">
+            {{ d.reference_display or '' }}
+            {% if d.remarks %}<div class="text-muted fst-italic">{{ d.remarks }}</div>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted mb-0">No student course payments match the current filters.</p>
+  {% endif %}
+</div>
+
+{% endif %}
+{% endblock %}

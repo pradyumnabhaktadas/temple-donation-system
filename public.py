@@ -48,7 +48,7 @@ from werkzeug.exceptions import HTTPException
 from extensions import db, csrf, limiter
 from models import (
     Donor, Campaign, Donation, ReceiptCounter, BaceProperty, BaceStudent, Festival, SevaType, LiveToGivePurpose,
-    AssociatedWith, PreachingCenter, PreachingCenterPurpose, AdminActivityLog, ZohoForm,
+    Course, AssociatedWith, PreachingCenter, PreachingCenterPurpose, AdminActivityLog, ZohoForm,
 )
 from pdf_utils import generate_receipt_pdf, receipt_pdf_path
 from email_utils import send_receipt_email, send_cancellation_email
@@ -431,6 +431,43 @@ def festival_seva_form():
     )
 
 
+@bp.route("/courses")
+def courses_form():
+    """Dedicated collection form for Course Fees / Donations -- fixed to the
+    "Course Fees" campaign, with a Course picker (Bhakti Shastri, Bhakti
+    Vaibhav, etc.) managed at Admin -> Courses."""
+    campaign = Campaign.query.filter_by(name="Course Fees").first()
+    if campaign is None:
+        campaign = Campaign(name="Course Fees", is_80g=False, is_active=True)
+        db.session.add(campaign)
+        db.session.commit()
+    elif not campaign.is_active:
+        flash("The Course Fees campaign isn't active right now -- please contact the office.")
+        return redirect(url_for("public.donate_form"))
+
+    if Course.query.count() == 0:
+        for cname in (
+            "Bhakti Shastri",
+            "Bhakti Vaibhav",
+            "Bhakti Vedanta",
+            "Bhakti Sarvabhauma",
+            "Bhagavad Gita Course",
+            "Discover Yourself (DYS)",
+        ):
+            db.session.add(Course(name=cname))
+        db.session.commit()
+
+    courses = Course.query.filter_by(is_active=True).order_by(Course.name).all()
+    return render_template(
+        "courses.html",
+        campaign=campaign,
+        courses=courses,
+        razorpay_enabled=current_app.config["RAZORPAY_ENABLED"],
+        razorpay_key_id=current_app.config["RAZORPAY_KEY_ID"],
+        org_name=current_app.config["ORG_NAME"],
+    )
+
+
 @bp.route("/dhoti-kurta-contribution")
 def dhoti_kurta_form():
     """Deliberately not linked from the main nav, homepage, or any of the
@@ -514,6 +551,7 @@ def sitemap_xml():
         {"loc": url_for("public.about_us", _external=True), "priority": "0.8"},
         {"loc": url_for("public.festival_seva_form", _external=True), "priority": "0.8"},
         {"loc": url_for("public.bace_rent_form", _external=True), "priority": "0.8"},
+        {"loc": url_for("public.courses_form", _external=True), "priority": "0.8"},
     ]
     xml_lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
     for page in pages:
@@ -569,14 +607,15 @@ def create_order():
         return jsonify({"error": high_value_error}), 400
 
     # Optional fields only meaningful for the dedicated BACE Contribution /
-    # Festival Seva / Live To Give forms -- which campaign a request claims
-    # to be for is incidental (any campaign_id could technically send one),
+    # Festival Seva / Live To Give / Courses forms -- which campaign a request
+    # claims to be for is incidental (any campaign_id could technically send one),
     # so validate each against the database rather than trust the caller.
     try:
         bace_property_id = _validated_fk_id(data, "bace_property_id", BaceProperty)
         festival_id = _validated_fk_id(data, "festival_id", Festival)
         seva_type_id = _validated_fk_id(data, "seva_type_id", SevaType)
         live_to_give_purpose_id = _validated_fk_id(data, "live_to_give_purpose_id", LiveToGivePurpose)
+        course_id = _validated_fk_id(data, "course_id", Course)
         # "I am associated with" -- offered on Give to Krishna (Live To
         # Give) and Festival Seva, but validated here unconditionally like
         # every other optional FK above: which forms a client claims to be
@@ -743,6 +782,7 @@ def create_order():
             Donation.festival_id == festival_id,
             Donation.seva_type_id == seva_type_id,
             Donation.live_to_give_purpose_id == live_to_give_purpose_id,
+            Donation.course_id == course_id,
             Donation.associated_with_id == associated_with_id,
             Donation.preaching_center_id == (preaching_center.id if preaching_center else None),
             Donation.donation_date >= dedup_cutoff,
@@ -770,6 +810,7 @@ def create_order():
             festival_id=festival_id,
             seva_type_id=seva_type_id,
             live_to_give_purpose_id=live_to_give_purpose_id,
+            course_id=course_id,
             associated_with_id=associated_with_id,
             preaching_center_id=preaching_center.id if preaching_center else None,
             preaching_center_name=preaching_center.name if preaching_center else None,

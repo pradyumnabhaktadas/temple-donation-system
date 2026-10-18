@@ -57,6 +57,16 @@
       </div>
     </div>
 
+    <div class="mb-3" id="course-field" style="display:none;">
+      <label class="form-label" for="course_id">Course</label>
+      <select class="form-select" id="course_id" name="course_id">
+        <option value="">-- choose --</option>
+        {% for c in courses %}
+        <option value="{{ c.id }}" {% if donation.course_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
     <div class="mb-3" id="live-to-give-purpose-field" style="display:none;">
       <label class="form-label">Donation purpose</label>
       <select class="form-select" id="live_to_give_purpose_id" name="live_to_give_purpose_id">
@@ -109,6 +119,7 @@
   const festivalFields = document.getElementById('festival-fields');
   const liveToGivePurposeField = document.getElementById('live-to-give-purpose-field');
   const liveToGiveReceiptTypeField = document.getElementById('live-to-give-receipt-type-field');
+  const courseField = document.getElementById('course-field');
 
   function sync() {
     const selected = campaignSelect.options[campaignSelect.selectedIndex];
@@ -117,6 +128,7 @@
     festivalFields.style.display = name === 'Festivals' ? '' : 'none';
     liveToGivePurposeField.style.display = name === 'Live To Give' ? '' : 'none';
     liveToGiveReceiptTypeField.style.display = name === 'Live To Give' ? '' : 'none';
+    if (courseField) courseField.style.display = name === 'Course Fees' ? '' : 'none';
   }
 
   campaignSelect.addEventListener('change', sync);

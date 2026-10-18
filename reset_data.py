@@ -32,7 +32,7 @@ import sys
 from app import create_app
 from extensions import db
 from models import (
-    Camp, Donation, Donor, Campaign, BaceProperty, Festival, SevaType,
+    Camp, Course, Donation, Donor, Campaign, BaceProperty, Festival, SevaType,
     LiveToGivePurpose, Preacher, AssociatedWith, ReceiptCounter, DonorLoginOTP,
     AdminActivityLog, AdminUser, DailyReportRecipient, BirthdayAlertRecipient, ZohoForm,
     PreachingCenter, PreachingCenterPurpose,
@@ -76,6 +76,7 @@ MODELS_IN_DELETE_ORDER = [
     Festival,
     SevaType,
     LiveToGivePurpose,
+    Course,
     Preacher,
     AssociatedWith,
     Camp,

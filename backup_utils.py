@@ -29,7 +29,7 @@ import zipfile
 from extensions import db
 from models import (
     Donor, Donation, Campaign, BaceProperty, Festival, SevaType,
-    LiveToGivePurpose, Preacher, AssociatedWith, ReceiptCounter, DailyReportRecipient, BirthdayAlertRecipient,
+    LiveToGivePurpose, Course, Preacher, AssociatedWith, ReceiptCounter, DailyReportRecipient, BirthdayAlertRecipient,
     Camp, PreachingCenter, PreachingCenterPurpose,
     BaceStudent, BaceRentCharge, BaceRentPayment, BaceRentAdjustment, BaceRentMonthClose,
 )
@@ -44,6 +44,7 @@ _BACKUP_TABLES = [
     ("festivals.csv", Festival, []),
     ("seva_types.csv", SevaType, []),
     ("live_to_give_purposes.csv", LiveToGivePurpose, []),
+    ("courses.csv", Course, []),
     ("camps.csv", Camp, []),
     ("associated_withs.csv", AssociatedWith, []),
     ("preaching_centers.csv", PreachingCenter, []),

@@ -116,3 +116,15 @@ def test_donations_log_fields_are_all_labelled(app, client):
     login(client)
     html = client.get("/admin/donations?status=all").data.decode()
     _assert_every_field_is_labelled(html, "/admin/donations")
+
+
+def test_courses_pages_fields_are_all_labelled(app, client):
+    from conftest import login
+    html = client.get("/courses").data.decode()
+    _assert_every_field_is_labelled(html, "/courses")
+
+    login(client)
+    for url in ("/admin/courses", "/admin/courses?tab=single", "/admin/courses/manage"):
+        page_html = client.get(url).data.decode()
+        _assert_every_field_is_labelled(page_html, url)
+

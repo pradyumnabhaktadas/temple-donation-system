@@ -53,6 +53,7 @@
           <a href="{{ url_for('public.about_us') }}" class="text-decoration-none {% if request.endpoint == 'public.about_us' %}fw-bold{% endif %}">About Us</a>
           <a href="{{ url_for('public.festival_seva_form') }}" class="text-decoration-none {% if request.endpoint == 'public.festival_seva_form' %}fw-bold{% endif %}">Festival Seva</a>
           <a href="{{ url_for('public.bace_rent_form') }}" class="text-decoration-none {% if request.endpoint == 'public.bace_rent_form' %}fw-bold{% endif %}">BACE Contribution</a>
+          <a href="{{ url_for('public.courses_form') }}" class="text-decoration-none {% if request.endpoint == 'public.courses_form' %}fw-bold{% endif %}">Courses</a>
           {% if public_preaching_centers %}
           <div class="nav-item dropdown site-center-nav">
             <a class="text-decoration-none dropdown-toggle {% if request.endpoint == 'public.preaching_center_donate_form' %}fw-bold{% endif %}" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">Preaching Centers</a>
@@ -142,6 +143,7 @@
           <li><a href="{{ url_for('public.about_us') }}"><span>About Us</span><span class="footer-link-chevron" aria-hidden="true">&rsaquo;</span></a></li>
           <li><a href="{{ url_for('public.festival_seva_form') }}"><span>Festival Seva</span><span class="footer-link-chevron" aria-hidden="true">&rsaquo;</span></a></li>
           <li><a href="{{ url_for('public.bace_rent_form') }}"><span>BACE Contribution</span><span class="footer-link-chevron" aria-hidden="true">&rsaquo;</span></a></li>
+          <li><a href="{{ url_for('public.courses_form') }}"><span>Courses</span><span class="footer-link-chevron" aria-hidden="true">&rsaquo;</span></a></li>
           <li><a href="{{ url_for('public.dhoti_kurta_form') }}"><span>Dhoti Kurta Contribution</span><span class="footer-link-chevron" aria-hidden="true">&rsaquo;</span></a></li>
         </ul>
       </div>

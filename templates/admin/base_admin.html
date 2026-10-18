@@ -10,13 +10,14 @@
     </button>
     <div class="collapse navbar-collapse" id="adminNav">
       {% set offline_donation_endpoints = ['admin.manual_donation', 'admin.bulk_import_donations'] %}
-      {% set iyf_camp_endpoints = ['admin.iyf_camps', 'admin.iyf_camp_single', 'admin.iyf_camp_bulk'] %}
+      {% set iyf_camp_endpoints = ['admin.iyf_camps', 'admin.iyf_camp_single', 'admin.iyf_camp_bulk', 'admin.iyf_camp_collections', 'admin.camps'] %}
+      {% set courses_endpoints = ['admin.courses_dashboard', 'admin.course_record_offline', 'admin.courses_manage'] %}
       {% set bace_tracker_endpoints = ['admin.bace_dashboard', 'admin.bace_students', 'admin.bace_student_edit', 'admin.bace_payments', 'admin.bace_tracker_grid', 'admin.bace_pending_list'] %}
       {% set donations_endpoints = ['admin.donations', 'admin.cash_closing', 'admin.form_10bd_audit'] + offline_donation_endpoints + ['admin.import_legacy_donations', 'admin.import_zoho_report', 'admin.zoho_reconcile'] %}
-      {% set programs_endpoints = iyf_camp_endpoints + bace_tracker_endpoints %}
+      {% set programs_endpoints = iyf_camp_endpoints + courses_endpoints + bace_tracker_endpoints %}
       {% set donors_endpoints = ['admin.donors', 'admin.donor_giving', 'admin.birthdays', 'admin.donor_insights', 'admin.donor_intelligence', 'admin.lapsed_donors', 'admin.duplicate_donors', 'admin.import_donors'] %}
       {% set preaching_center_endpoints = ['admin.preaching_centers', 'admin.preaching_centers_dashboard', 'admin.preaching_center_detail', 'admin.edit_preaching_center'] %}
-      {% set settings_endpoints = ['admin.settings_index', 'admin.campaigns', 'admin.bace_properties', 'admin.bace_contributions', 'admin.festivals', 'admin.seva_types', 'admin.live_to_give_purposes', 'admin.preachers', 'admin.associated_withs', 'admin.associated_with_report', 'admin.dhoti_kurta_contributions', 'admin.data_backup', 'admin.manage_users', 'admin.activity_log', 'admin.daily_report_recipients', 'admin.birthday_alert_recipients'] %}
+      {% set settings_endpoints = ['admin.settings_index', 'admin.campaigns', 'admin.bace_properties', 'admin.bace_contributions', 'admin.festivals', 'admin.seva_types', 'admin.live_to_give_purposes', 'admin.courses_manage', 'admin.preachers', 'admin.associated_withs', 'admin.associated_with_report', 'admin.dhoti_kurta_contributions', 'admin.data_backup', 'admin.manage_users', 'admin.activity_log', 'admin.daily_report_recipients', 'admin.birthday_alert_recipients'] %}
       {% if current_user.is_authenticated and current_user.role in ['bace_viewer', 'preaching_center_viewer'] %}
       <div class="navbar-nav ms-auto flex-wrap align-items-lg-center">
         {% if current_user.role == 'bace_viewer' %}
@@ -60,8 +61,9 @@
         <div class="nav-item dropdown">
           <a class="nav-link dropdown-toggle {% if request.endpoint in programs_endpoints %}active{% endif %}" href="#" role="button" aria-expanded="false">Programs</a>
           <ul class="dropdown-menu dropdown-menu-end">
-            <li><a class="dropdown-item {% if request.endpoint in iyf_camp_endpoints %}active{% endif %}" href="{{ url_for('admin.iyf_camps') }}">IYF Camps</a></li>
-            <li><a class="dropdown-item {% if request.endpoint in bace_tracker_endpoints %}active{% endif %}" href="{{ url_for('admin.bace_dashboard') }}">BACE Rent Tracker</a></li>
+            <li><a class="dropdown-item {% if request.endpoint in courses_endpoints %}active{% endif %}" href="{{ url_for('admin.courses_dashboard') }}">🎓 Courses</a></li>
+            <li><a class="dropdown-item {% if request.endpoint in iyf_camp_endpoints %}active{% endif %}" href="{{ url_for('admin.iyf_camps') }}">🏕️ IYF Camps</a></li>
+            <li><a class="dropdown-item {% if request.endpoint in bace_tracker_endpoints %}active{% endif %}" href="{{ url_for('admin.bace_dashboard') }}">🏠 BACE Rent Tracker</a></li>
           </ul>
         </div>
 
@@ -88,6 +90,7 @@
             <li><a class="dropdown-item fw-bold {% if request.endpoint == 'admin.settings_index' %}active{% endif %}" href="{{ url_for('admin.settings_index') }}">⚙️ Settings Hub</a></li>
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.campaigns' %}active{% endif %}" href="{{ url_for('admin.campaigns') }}">Campaigns</a></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'admin.courses_manage' %}active{% endif %}" href="{{ url_for('admin.courses_manage') }}">Courses</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.bace_properties' %}active{% endif %}" href="{{ url_for('admin.bace_properties') }}">BACE</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.bace_contributions' %}active{% endif %}" href="{{ url_for('admin.bace_contributions') }}">BACE Contribution Logs</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'admin.festivals' %}active{% endif %}" href="{{ url_for('admin.festivals') }}">Festivals</a></li>
@@ -238,6 +241,10 @@
           <a href="{{ url_for('admin.donations') }}" class="list-group-item list-group-item-action py-2 px-3 rounded border-0 d-flex align-items-center justify-content-between cmd-item">
             <span>🧾 Donations Log</span>
             <span class="text-muted small">All Contributions</span>
+          </a>
+          <a href="{{ url_for('admin.courses_dashboard') }}" class="list-group-item list-group-item-action py-2 px-3 rounded border-0 d-flex align-items-center justify-content-between cmd-item">
+            <span>🎓 Courses Collections Dashboard</span>
+            <span class="text-muted small">Bhakti Shastri, Bhakti Vaibhav, etc.</span>
           </a>
           <a href="{{ url_for('admin.donors') }}" class="list-group-item list-group-item-action py-2 px-3 rounded border-0 d-flex align-items-center justify-content-between cmd-item">
             <span>👥 Donors Directory</span>

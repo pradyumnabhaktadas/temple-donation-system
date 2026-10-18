@@ -22,7 +22,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from extensions import db, limiter
 from models import (
-    Camp,
+    Camp, Course,
     Donor, Campaign, Donation, AdminUser, ReceiptCounter, BaceProperty, Festival, SevaType,
     LiveToGivePurpose, Preacher, AssociatedWith, PreachingCenter, PreachingCenterPurpose, AdminActivityLog, DailyReportRecipient, BirthdayAlertRecipient,
     BaceStudent, BaceRentCharge, BaceRentPayment, BaceRentAdjustment, BaceRentMonthClose, BACE_PAYMENT_MODES,
@@ -2382,6 +2382,7 @@ def _offline_donation_form_context():
         "festivals": Festival.query.filter_by(is_active=True).order_by(Festival.name).all(),
         "seva_types": SevaType.query.filter_by(is_active=True).order_by(SevaType.name).all(),
         "live_to_give_purposes": LiveToGivePurpose.query.filter_by(is_active=True).order_by(LiveToGivePurpose.name).all(),
+        "courses": Course.query.filter_by(is_active=True).order_by(Course.name).all(),
         "associated_withs": AssociatedWith.query.filter_by(is_active=True)
             .order_by(AssociatedWith.display_order, AssociatedWith.name).all(),
         # now_ist(), not datetime.date.today() -- see the same fix applied
@@ -2449,6 +2450,12 @@ def reassign_donation_campaign(donation_id):
         if error:
             flash(error)
             return redirect(url_for("admin.reassign_donation_campaign", donation_id=donation_id))
+        course_id, error = _validated_id_from_form(
+            request.form, "course_id", Course, "course"
+        )
+        if error:
+            flash(error)
+            return redirect(url_for("admin.reassign_donation_campaign", donation_id=donation_id))
         preaching_center_id, error = _validated_id_from_form(
             request.form, "preaching_center_id", PreachingCenter, "preaching center"
         )
@@ -2461,6 +2468,9 @@ def reassign_donation_campaign(donation_id):
             return redirect(url_for("admin.reassign_donation_campaign", donation_id=donation_id))
         if new_campaign.name == "Festivals" and not festival_id:
             flash("Please choose which festival this donation is for.")
+            return redirect(url_for("admin.reassign_donation_campaign", donation_id=donation_id))
+        if new_campaign.name == "Course Fees" and not course_id:
+            flash("Please choose which course this payment is for.")
             return redirect(url_for("admin.reassign_donation_campaign", donation_id=donation_id))
 
         receipt_type = request.form.get("receipt_type")
@@ -2504,6 +2514,9 @@ def reassign_donation_campaign(donation_id):
         donation.seva_type_id = seva_type_id if new_campaign.name == "Festivals" else None
         donation.live_to_give_purpose_id = (
             live_to_give_purpose_id if new_campaign.name == "Live To Give" else None
+        )
+        donation.course_id = (
+            course_id if new_campaign.name == "Course Fees" else None
         )
         donation.is_80g_requested = is_80g_requested if new_campaign.name == "Live To Give" else None
         center = PreachingCenter.query.get(preaching_center_id) if preaching_center_id else None
@@ -2864,7 +2877,7 @@ def _payment_reference_error(payment_mode, cheque_number=None, bank_transaction_
 def _create_offline_donation(
     *, donor_data, campaign, amount, payment_mode, donation_date, recorded_by,
     bace_property_id=None, festival_id=None, seva_type_id=None, live_to_give_purpose_id=None,
-    associated_with_id=None,
+    course_id=None, associated_with_id=None,
     is_80g_requested=None, cheque_number=None, cheque_bank_name=None, bank_transaction_id=None,
     remarks=None, send_notifications=True, camp_name=None, batch_name=None,
 ):
@@ -2930,6 +2943,7 @@ def _create_offline_donation(
             festival_id=festival_id,
             seva_type_id=seva_type_id,
             live_to_give_purpose_id=live_to_give_purpose_id,
+            course_id=course_id,
             associated_with_id=associated_with_id,
             is_80g_requested=is_80g_requested,
             cheque_number=(cheque_number or "").strip()[:50] or None,
@@ -3072,6 +3086,12 @@ def manual_donation():
         if error:
             flash(error)
             return redirect(url_for("admin.manual_donation"))
+        course_id, error = _validated_id_from_form(
+            form, "course_id", Course, "course"
+        )
+        if error:
+            flash(error)
+            return redirect(url_for("admin.manual_donation"))
         associated_with_id, error = _validated_id_from_form(
             form, "associated_with_id", AssociatedWith, "associated-with option"
         )
@@ -3130,6 +3150,7 @@ def manual_donation():
             festival_id=festival_id,
             seva_type_id=seva_type_id,
             live_to_give_purpose_id=live_to_give_purpose_id,
+            course_id=course_id,
             associated_with_id=associated_with_id,
             is_80g_requested=is_80g_requested,
             cheque_number=cheque_number,
@@ -9197,3 +9218,446 @@ def restore_backup_upload():
         flash("Not in this backup (left as-is): " + ", ".join(result["missing"]) + ".")
 
     return redirect(url_for("admin.data_backup"))
+
+
+# --- Courses Collections Dashboard & Course Management --------------------
+
+COURSE_FEES_CAMPAIGN_NAME = "Course Fees"
+DEFAULT_COURSE_NAMES = [
+    "Bhakti Shastri",
+    "Bhakti Vaibhav",
+    "Bhakti Vedanta",
+    "Bhakti Sarvabhauma",
+    "Bhagavad Gita Course",
+    "Discover Yourself (DYS)",
+]
+
+
+def _course_fees_campaign(create=True):
+    """The campaign course fee / course donation collections are recorded under.
+    Starts as Non-80G (is_80g=False) by default, and respects whatever 80G
+    or receipt setting the admin configures on the 'Course Fees' campaign."""
+    campaign = Campaign.query.filter_by(name=COURSE_FEES_CAMPAIGN_NAME).first()
+    if campaign is None and create:
+        campaign = Campaign(
+            name=COURSE_FEES_CAMPAIGN_NAME,
+            description="Course fees and study contributions (Bhakti Shastri, Bhakti Vaibhav, etc.).",
+            is_80g=False,
+        )
+        db.session.add(campaign)
+        db.session.commit()
+    return campaign
+
+
+def _ensure_courses_seeded():
+    campaign = _course_fees_campaign(create=True)
+    if Course.query.count() == 0:
+        for name in DEFAULT_COURSE_NAMES:
+            db.session.add(Course(name=name, is_active=True))
+        db.session.commit()
+    return campaign
+
+
+def _normalize_course_name(value):
+    if not value:
+        return None
+    return " ".join(str(value).split())[:150] or None
+
+
+def _course_report_filters(campaign=None):
+    """Resolve the course/mode/search/date filters shared by the Courses
+    Collections Dashboard and its CSV exports."""
+    if campaign is None:
+        campaign = _course_fees_campaign(create=False)
+
+    if campaign is not None:
+        query = Donation.query.filter(
+            or_(Donation.course_id.isnot(None), Donation.campaign_id == campaign.id),
+            Donation.status == "success",
+        )
+    else:
+        query = Donation.query.filter(
+            Donation.course_id.isnot(None),
+            Donation.status == "success",
+        )
+
+    course_id = request.args.get("course_id", type=int)
+    if course_id:
+        query = query.filter(Donation.course_id == course_id)
+
+    mode = (request.args.get("mode") or "").strip().lower()
+    if mode in ("online", "cash", "bank_transfer", "cheque"):
+        query = query.filter(Donation.payment_mode == mode)
+    else:
+        mode = ""
+
+    q = (request.args.get("q") or "").strip()
+    if q:
+        like_pat = f"%{q}%"
+        query = query.outerjoin(Donor, Donation.donor_id == Donor.id).filter(
+            or_(
+                Donor.full_name.ilike(like_pat),
+                Donor.phone.ilike(like_pat),
+                Donor.email.ilike(like_pat),
+                Donation.receipt_number.ilike(like_pat),
+                Donation.razorpay_payment_id.ilike(like_pat),
+                Donation.bank_transaction_id.ilike(like_pat),
+                Donation.cheque_number.ilike(like_pat),
+            )
+        )
+
+    date_from_raw = (request.args.get("date_from") or "").strip()
+    date_to_raw = (request.args.get("date_to") or "").strip()
+    try:
+        if date_from_raw:
+            query = query.filter(
+                Donation.donation_date >= datetime.datetime.strptime(date_from_raw, "%Y-%m-%d")
+            )
+        if date_to_raw:
+            query = query.filter(
+                Donation.donation_date
+                < datetime.datetime.strptime(date_to_raw, "%Y-%m-%d") + datetime.timedelta(days=1)
+            )
+    except ValueError:
+        date_from_raw = date_to_raw = ""
+
+    return query, {
+        "course_id": course_id,
+        "mode": mode,
+        "q": q,
+        "date_from": date_from_raw,
+        "date_to": date_to_raw,
+    }
+
+
+def _course_totals(query):
+    """Aggregate count and total per course for the filtered query."""
+    rows = (
+        query.outerjoin(Course, Donation.course_id == Course.id)
+        .with_entities(
+            func.coalesce(Course.name, "Unspecified Course"),
+            func.count(Donation.id),
+            func.coalesce(func.sum(Donation.amount), 0),
+        )
+        .group_by(func.coalesce(Course.name, "Unspecified Course"))
+        .order_by(func.coalesce(func.sum(Donation.amount), 0).desc())
+        .all()
+    )
+    return [(name, int(count), float(total)) for name, count, total in rows]
+
+
+def _course_monthly_totals(query):
+    rows = (
+        query.with_entities(
+            extract("year", Donation.donation_date).label("y"),
+            extract("month", Donation.donation_date).label("m"),
+            func.count(Donation.id),
+            func.coalesce(func.sum(Donation.amount), 0),
+        )
+        .group_by("y", "m")
+        .order_by("y", "m")
+        .all()
+    )
+    out = []
+    for y, m, count, total in rows:
+        label = datetime.date(int(y), int(m), 1).strftime("%b %Y")
+        out.append((label, int(count), float(total)))
+    return out
+
+
+@bp.route("/courses")
+@login_required
+def courses_dashboard():
+    campaign = _ensure_courses_seeded()
+    courses = Course.query.order_by(Course.is_active.desc(), Course.name).all()
+    query, filters = _course_report_filters(campaign)
+
+    course_totals = _course_totals(query)
+    monthly_totals_list = _course_monthly_totals(query)
+
+    grand_total = sum(t for _, _, t in course_totals)
+    total_count = sum(c for _, c, _ in course_totals)
+
+    today = now_ist().date()
+    month_start = datetime.datetime(today.year, today.month, 1)
+    this_month_total = float(
+        query.filter(Donation.donation_date >= month_start)
+        .with_entities(func.coalesce(func.sum(Donation.amount), 0))
+        .scalar()
+        or 0
+    )
+
+    entries = (
+        query.options(joinedload(Donation.donor), joinedload(Donation.course))
+        .order_by(Donation.donation_date.desc(), Donation.id.desc())
+        .limit(200)
+        .all()
+    )
+
+    return render_template(
+        "admin/courses_dashboard.html",
+        campaign=campaign,
+        courses=courses,
+        course_totals=course_totals,
+        monthly_totals=monthly_totals_list,
+        grand_total=grand_total,
+        total_count=total_count,
+        this_month_total=this_month_total,
+        active_courses_count=sum(1 for c in courses if c.is_active),
+        entries=entries,
+        today=today,
+        tab=request.args.get("tab", "collections"),
+        **filters,
+    )
+
+
+@bp.route("/courses/record", methods=["POST"])
+@login_required
+def course_record_offline():
+    campaign = _ensure_courses_seeded()
+    form = request.form
+
+    course_id, error = _validated_id_from_form(form, "course_id", Course, "course")
+    if error or not course_id:
+        flash(error or "Please choose a course from the list.")
+        return redirect(url_for("admin.courses_dashboard", tab="single"))
+    course = Course.query.get(course_id)
+
+    try:
+        amount = float(form.get("amount") or 0)
+    except ValueError:
+        amount = 0
+    if amount <= 0:
+        flash("Please enter a valid amount.")
+        return redirect(url_for("admin.courses_dashboard", tab="single"))
+
+    if not (form.get("full_name") or "").strip():
+        flash("Student / Participant name is required.")
+        return redirect(url_for("admin.courses_dashboard", tab="single"))
+
+    phone = (form.get("phone") or "").strip()
+    if phone and not is_valid_phone(phone):
+        flash("That phone number doesn't look right. Please enter a 10-digit mobile number, a foreign number starting with + and country code, or leave it blank.")
+        return redirect(url_for("admin.courses_dashboard", tab="single"))
+
+    pan = (form.get("pan") or "").strip().upper()
+    if pan and not is_valid_pan(pan):
+        flash("That PAN doesn't look right. It should be 10 characters like ABCDE1234F.")
+        return redirect(url_for("admin.courses_dashboard", tab="single"))
+
+    high_value_error = high_value_pan_address_error(amount, pan, form.get("address"))
+    if high_value_error:
+        flash(high_value_error)
+        return redirect(url_for("admin.courses_dashboard", tab="single"))
+
+    donation_date_str = form.get("donation_date")
+    try:
+        donation_date = (
+            datetime.datetime.strptime(donation_date_str, "%Y-%m-%d")
+            if donation_date_str else datetime.datetime.utcnow()
+        )
+    except ValueError:
+        flash("That payment date doesn't look right.")
+        return redirect(url_for("admin.courses_dashboard", tab="single"))
+
+    send_notifications = form.get("send_notifications") == "yes"
+
+    result = _create_offline_donation(
+        donor_data=form,
+        campaign=campaign,
+        amount=amount,
+        payment_mode=form.get("payment_mode", "cash"),
+        donation_date=donation_date,
+        recorded_by=current_user.username,
+        course_id=course.id,
+        cheque_number=form.get("cheque_number"),
+        cheque_bank_name=form.get("cheque_bank_name"),
+        bank_transaction_id=form.get("bank_transaction_id"),
+        remarks=form.get("remarks"),
+        send_notifications=send_notifications,
+    )
+
+    if not result["ok"]:
+        flash(result["error"], "danger")
+        return redirect(url_for("admin.courses_dashboard", tab="single"))
+
+    log_activity(
+        "course_fee_recorded", target_type="donation", target_id=result["donation"].id,
+        details=f"Course '{course.name}' payment Rs. {amount:.2f}, receipt {result['receipt_number']}",
+    )
+    db.session.commit()
+
+    msg = f"Recorded Rs. {amount:,.0f} for {course.name} ({result['donor'].full_name}) -- receipt {result['receipt_number']}."
+    if not result["pdf_ok"]:
+        msg += " (The receipt PDF couldn't be generated; it can be regenerated later.)"
+    flash(msg)
+    return redirect(url_for("admin.courses_dashboard"))
+
+
+@bp.route("/courses/export/<report>.csv")
+@login_required
+def courses_export(report):
+    campaign = _course_fees_campaign(create=False)
+    query, filters = _course_report_filters(campaign)
+    out = io.StringIO()
+    writer = csv.writer(out)
+
+    if report == "course":
+        writer.writerow(["Course", "Payments", "Total (Rs)"])
+        for course_name, count, total in _course_totals(query):
+            writer.writerow(csv_safe_row([course_name, count, float(total)]))
+
+    elif report == "monthly":
+        writer.writerow(["Month", "Payments", "Total (Rs)"])
+        for label, count, total in _course_monthly_totals(query):
+            writer.writerow(csv_safe_row([label, count, total]))
+
+    elif report == "detail":
+        writer.writerow([
+            "Date", "Receipt No", "Student / Donor Name", "Phone", "Email",
+            "Course", "Amount (Rs)", "Payment Mode", "Reference", "Remarks", "Recorded By",
+        ])
+        for d in query.options(joinedload(Donation.donor), joinedload(Donation.course)).order_by(Donation.donation_date.desc(), Donation.id.desc()).all():
+            donor = d.donor
+            writer.writerow(csv_safe_row([
+                d.donation_date.strftime("%d-%m-%Y") if d.donation_date else "",
+                d.receipt_number or "",
+                donor.full_name if donor else "",
+                (donor.phone or "") if donor else "",
+                (donor.email or "") if donor else "",
+                d.course.name if d.course else "Unspecified Course",
+                float(d.amount),
+                d.payment_mode or "",
+                d.reference_display or "",
+                d.remarks or "",
+                d.recorded_by or "online",
+            ]))
+    else:
+        abort(404)
+
+    parts = ["Courses", report]
+    if filters["course_id"]:
+        c_obj = Course.query.get(filters["course_id"])
+        if c_obj:
+            parts.append(re.sub(r"[^A-Za-z0-9]+", "_", c_obj.name).strip("_"))
+    if filters["date_from"] or filters["date_to"]:
+        parts.append(f"{filters['date_from'] or 'start'}_to_{filters['date_to'] or 'today'}")
+    filename = "-".join(parts) + ".csv"
+
+    return Response(
+        out.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment;filename={filename}"},
+    )
+
+
+@bp.route("/courses/manage", methods=["GET", "POST"])
+@login_required
+@admin_role_required
+def courses_manage():
+    _ensure_courses_seeded()
+    if request.method == "POST":
+        name = _normalize_course_name(request.form.get("name"))
+        if not name:
+            flash("Course name is required.")
+            return redirect(url_for("admin.courses_manage"))
+
+        if Course.query.filter(func.lower(Course.name) == name.lower()).first():
+            flash(f"There's already a course called '{name}'.")
+            return redirect(url_for("admin.courses_manage"))
+
+        raw_fee = (request.form.get("suggested_amount") or "").strip()
+        suggested_amount = None
+        if raw_fee:
+            try:
+                val = float(raw_fee)
+                if val > 0:
+                    suggested_amount = val
+            except ValueError:
+                flash("Suggested fee must be a valid number.")
+                return redirect(url_for("admin.courses_manage"))
+
+        course = Course(name=name, suggested_amount=suggested_amount, is_active=True)
+        db.session.add(course)
+        db.session.commit()
+        log_activity("course_create", target_type="course", target_id=course.id, details=f"Created course '{name}'")
+        db.session.commit()
+        flash(f"Course '{name}' added.")
+        return redirect(url_for("admin.courses_manage"))
+
+    courses_list = Course.query.order_by(Course.is_active.desc(), Course.name).all()
+    totals = dict(
+        db.session.query(Donation.course_id, func.coalesce(func.sum(Donation.amount), 0))
+        .filter(Donation.course_id.isnot(None), Donation.status == "success")
+        .group_by(Donation.course_id).all()
+    )
+    counts = dict(
+        db.session.query(Donation.course_id, func.count(Donation.id))
+        .filter(Donation.course_id.isnot(None), Donation.status == "success")
+        .group_by(Donation.course_id).all()
+    )
+    return render_template("admin/courses_manage.html", courses=courses_list, totals=totals, counts=counts)
+
+
+@bp.route("/courses/manage/<int:course_id>/edit", methods=["POST"])
+@login_required
+@admin_role_required
+def course_edit(course_id):
+    course = Course.query.get_or_404(course_id)
+    new_name = _normalize_course_name(request.form.get("name"))
+    if not new_name:
+        flash("Course name is required.")
+        return redirect(url_for("admin.courses_manage"))
+
+    clash = Course.query.filter(func.lower(Course.name) == new_name.lower(), Course.id != course.id).first()
+    if clash:
+        flash(f"There's already a course called '{clash.name}'.")
+        return redirect(url_for("admin.courses_manage"))
+
+    raw_fee = (request.form.get("suggested_amount") or "").strip()
+    suggested_amount = None
+    if raw_fee:
+        try:
+            val = float(raw_fee)
+            if val > 0:
+                suggested_amount = val
+        except ValueError:
+            flash("Suggested fee must be a valid number.")
+            return redirect(url_for("admin.courses_manage"))
+
+    old_name = course.name
+    course.name = new_name
+    course.suggested_amount = suggested_amount
+    course.is_active = request.form.get("is_active") == "yes"
+    db.session.commit()
+
+    log_activity(
+        "course_edit", target_type="course", target_id=course.id,
+        details=f"Renamed course '{old_name}' to '{new_name}'" if old_name != new_name else f"Updated course '{new_name}'",
+    )
+    db.session.commit()
+    flash(f"Course '{new_name}' updated.")
+    return redirect(url_for("admin.courses_manage"))
+
+
+@bp.route("/courses/manage/<int:course_id>/delete", methods=["POST"])
+@login_required
+@admin_role_required
+def course_delete(course_id):
+    course = Course.query.get_or_404(course_id)
+    used_count = Donation.query.filter_by(course_id=course.id).count()
+    if used_count > 0:
+        flash(
+            f"Cannot delete '{course.name}' because {used_count} payment(s) are recorded against it. "
+            "Toggle it to Inactive instead so it stays in historical reports."
+        )
+        return redirect(url_for("admin.courses_manage"))
+
+    name = course.name
+    db.session.delete(course)
+    db.session.commit()
+    log_activity("course_delete", target_type="course", target_id=course_id, details=f"Deleted course '{name}'")
+    db.session.commit()
+    flash(f"Course '{name}' deleted.")
+    return redirect(url_for("admin.courses_manage"))
+

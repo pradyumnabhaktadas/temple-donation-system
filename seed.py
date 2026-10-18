@@ -5,7 +5,7 @@ Usage: python seed.py
 """
 from app import create_app
 from extensions import db
-from models import Campaign, AdminUser, BaceProperty, Festival, SevaType, LiveToGivePurpose, AssociatedWith
+from models import Campaign, AdminUser, BaceProperty, Festival, SevaType, LiveToGivePurpose, AssociatedWith, Course
 
 CAMPAIGNS = [
     # (name, is_80g, min_amount, suppress_receipt) -- min_amount is None
@@ -76,6 +76,15 @@ SEVA_TYPES = [
     ("Full Festival Sponsorship", None),
 ]
 
+COURSES = [
+    ("Bhakti Shastri", None),
+    ("Bhakti Vaibhav", None),
+    ("Bhakti Vedanta", None),
+    ("Bhakti Sarvabhauma", None),
+    ("Bhagavad Gita Course", None),
+    ("Discover Yourself (DYS)", None),
+]
+
 # Starting list for the Live To Give form's donation-purpose dropdown --
 # editable afterwards from Admin -> Live To Give Purposes without touching
 # code. ("Sudama Seva" appeared twice in the reference list this was
@@ -141,6 +150,10 @@ with app.app_context():
     for name, suggested_amount in SEVA_TYPES:
         if not SevaType.query.filter_by(name=name).first():
             db.session.add(SevaType(name=name, suggested_amount=suggested_amount))
+
+    for name, suggested_amount in COURSES:
+        if not Course.query.filter_by(name=name).first():
+            db.session.add(Course(name=name, suggested_amount=suggested_amount))
 
     for name, is_80g in LIVE_TO_GIVE_PURPOSES:
         if not LiveToGivePurpose.query.filter_by(name=name).first():

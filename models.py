@@ -458,6 +458,27 @@ class LiveToGivePurpose(db.Model):
         return f"<LiveToGivePurpose {self.name}>"
 
 
+class Course(db.Model):
+    """A course offered by the temple -- e.g. "Bhakti Shastri", "Bhakti
+    Vaibhav", "Bhakti Vedanta", "Bhagavad Gita Course". Donations/fees
+    recorded against the "Course Fees" campaign link to which specific
+    course the payment is for; this list populates the Courses dropdown on
+    the public Courses page and in Admin -> Courses."""
+
+    __tablename__ = "courses"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False, unique=True)
+    suggested_amount = db.Column(db.Numeric(12, 2))
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    donations = db.relationship("Donation", backref="course", lazy="dynamic")
+
+    def __repr__(self):
+        return f"<Course {self.name}>"
+
+
 class Donation(db.Model):
     __tablename__ = "donations"
 
@@ -482,6 +503,10 @@ class Donation(db.Model):
     # purpose (Cow Protection, Temple Construction, Sudama Seva, ...) the
     # payment is for. NULL for every other campaign.
     live_to_give_purpose_id = db.Column(db.Integer, db.ForeignKey("live_to_give_purposes.id"), nullable=True)
+    # Only set for payments against the "Course Fees" campaign -- which
+    # specific course (Bhakti Shastri, Bhakti Vaibhav, ...) the fee/donation
+    # is for. NULL for every other campaign.
+    course_id = db.Column(db.Integer, db.ForeignKey("courses.id"), nullable=True, index=True)
     # Which preaching program/department/devotee/initiative this donation
     # is connected to -- see AssociatedWith's docstring. Deliberately
     # independent of campaign_id/live_to_give_purpose_id (Donation
@@ -726,6 +751,8 @@ class Donation(db.Model):
             return self.seva_type.name
         if self.live_to_give_purpose:
             return self.live_to_give_purpose.name
+        if self.course:
+            return self.course.name
         return ""
 
     def __repr__(self):
