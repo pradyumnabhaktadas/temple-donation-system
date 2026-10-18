@@ -435,15 +435,21 @@ def festival_seva_form():
 def courses_form():
     """Dedicated collection form for Course Fees / Donations -- fixed to the
     "Course Fees" campaign, with a Course picker (Bhakti Shastri, Bhakti
-    Vaibhav, etc.) managed at Admin -> Courses."""
+    Vaibhav, etc.) managed at Admin -> Courses. Always Non-80G and always
+    sends receipts to the donor."""
     campaign = Campaign.query.filter_by(name="Course Fees").first()
     if campaign is None:
-        campaign = Campaign(name="Course Fees", is_80g=False, is_active=True)
+        campaign = Campaign(name="Course Fees", is_80g=False, suppress_receipt=False, is_active=True)
         db.session.add(campaign)
         db.session.commit()
-    elif not campaign.is_active:
-        flash("The Course Fees campaign isn't active right now -- please contact the office.")
-        return redirect(url_for("public.donate_form"))
+    else:
+        if campaign.is_80g or campaign.suppress_receipt:
+            campaign.is_80g = False
+            campaign.suppress_receipt = False
+            db.session.commit()
+        if not campaign.is_active:
+            flash("The Course Fees campaign isn't active right now -- please contact the office.")
+            return redirect(url_for("public.donate_form"))
 
     if Course.query.count() == 0:
         for cname in (

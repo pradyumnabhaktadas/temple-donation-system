@@ -10,11 +10,7 @@
       &middot; Public link: <a href="{{ url_for('public.courses_form') }}" target="_blank">/courses ↗</a>
       {% if campaign %}
       &middot; Receipt mode:
-      {% if campaign.is_80g %}
-      <span class="badge bg-success-subtle text-success border border-success-subtle">80G Eligible</span>
-      {% else %}
-      <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">Regular (Non-80G)</span>
-      {% endif %}
+      <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">Non-80G Receipt (Auto-sent to Donor via Email/WhatsApp)</span>
       {% endif %}
     </div>
   </div>
@@ -327,6 +323,7 @@
           <th class="text-end">Amount</th>
           <th>Mode</th>
           <th>Reference / Remarks</th>
+          <th class="text-end">Receipt Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -357,11 +354,30 @@
             {{ d.reference_display or '' }}
             {% if d.remarks %}<div class="text-muted fst-italic">{{ d.remarks }}</div>{% endif %}
           </td>
+          <td class="text-end text-nowrap">
+            {% if d.receipt_number %}
+            <a href="{{ url_for('public.download_receipt', donation_id=d.id, t=receipt_token(d.id)) }}" target="_blank" class="btn btn-sm btn-outline-secondary py-0 px-2" title="Download Non-80G Receipt PDF">🖨️ PDF</a>
+            <button type="submit" form="resend-course-receipt-{{ d.id }}" class="btn btn-sm btn-outline-primary py-0 px-2" title="Resend receipt via Email/WhatsApp">✉️ Send</button>
+            {% set phone_clean = ((d.donor.whatsapp_number or d.donor.phone or '') if d.donor else '') | replace('+', '') | replace(' ', '') | replace('-', '') %}
+            {% if phone_clean %}
+              {% set wa_phone = ('91' + phone_clean) if (phone_clean | length == 10) else phone_clean %}
+              {% set receipt_url = url_for('public.download_receipt', donation_id=d.id, t=receipt_token(d.id), _external=True) %}
+              {% set wa_msg = 'Hare Krishna ' + d.donor.full_name + '! 🙏 Thank you for your payment of Rs. ' + (d.amount | int | string) + ' towards ' + (d.course.name if d.course else 'Course Fees') + ' (Receipt No: ' + d.receipt_number + '). Download your receipt here: ' + receipt_url %}
+              <a href="https://wa.me/{{ wa_phone }}?text={{ wa_msg | urlencode }}" target="_blank" class="btn btn-sm btn-outline-success py-0 px-2" title="Send receipt link on WhatsApp">💬 WA</a>
+            {% endif %}
+            {% else %}-{% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+  {% for d in entries if d.receipt_number %}
+  <form method="post" id="resend-course-receipt-{{ d.id }}" action="{{ url_for('admin.resend_receipt', donation_id=d.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="next" value="{{ url_for('admin.courses_dashboard') }}">
+  </form>
+  {% endfor %}
   {% else %}
   <p class="text-muted mb-0">No student course payments match the current filters.</p>
   {% endif %}

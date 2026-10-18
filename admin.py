@@ -2317,34 +2317,42 @@ def resend_receipt(donation_id):
     """Re-triggers receipt email and WhatsApp delivery for an existing
     successful donation on demand."""
     donation = Donation.query.get_or_404(donation_id)
+    next_url = (request.form.get("next") or "").strip()
+    if not next_url.startswith("/admin/"):
+        next_url = url_for("admin.donor_detail", donor_id=donation.donor_id)
+
     if donation.status != "success" or not donation.receipt_number:
         flash("Only a successful donation with a generated receipt can be resent.")
-        return redirect(url_for("admin.donor_detail", donor_id=donation.donor_id))
+        return redirect(next_url)
 
     pdf_bytes = donation.receipt_pdf
     if not pdf_bytes:
         try:
-            _, pdf_bytes = generate_receipt_pdf(donation, donation.donor, _org_cfg())
+            pdf_bytes = generate_receipt_pdf(donation, donation.donor, donation.campaign, _org_cfg())
             donation.receipt_pdf = pdf_bytes
             db.session.commit()
         except Exception:
             current_app.logger.exception("Failed to regenerate receipt PDF for donation %s", donation.id)
             flash("Couldn't generate the receipt PDF to resend.", "danger")
-            return redirect(url_for("admin.donor_detail", donor_id=donation.donor_id))
+            return redirect(next_url)
 
     app_obj = current_app._get_current_object()
-    threading.Thread(
-        target=_send_receipt_notifications_background,
-        args=(app_obj, donation.id, pdf_bytes),
-        daemon=True,
-    ).start()
+    if app_obj.config.get("TESTING"):
+        _send_receipt_notifications_background(app_obj, donation.id, pdf_bytes)
+    else:
+        threading.Thread(
+            target=_send_receipt_notifications_background,
+            args=(app_obj, donation.id, pdf_bytes),
+            daemon=True,
+        ).start()
 
     log_activity(
         "donation_resend_receipt", target_type="donation", target_id=donation.id,
         details=f"Resent receipt {donation.receipt_number} to {donation.donor.full_name}",
     )
-    flash(f"Receipt {donation.receipt_number} queued for delivery via email/WhatsApp.")
-    return redirect(url_for("admin.donor_detail", donor_id=donation.donor_id))
+    db.session.commit()
+    flash(f"Receipt {donation.receipt_number} queued for delivery to {donation.donor.full_name} via email/WhatsApp.")
+    return redirect(next_url)
 
 
 def _validated_id_from_form(form, key, model, label):
@@ -9235,16 +9243,21 @@ DEFAULT_COURSE_NAMES = [
 
 def _course_fees_campaign(create=True):
     """The campaign course fee / course donation collections are recorded under.
-    Starts as Non-80G (is_80g=False) by default, and respects whatever 80G
-    or receipt setting the admin configures on the 'Course Fees' campaign."""
+    Always Non-80G (is_80g=False) and always delivers receipts to the donor
+    (suppress_receipt=False)."""
     campaign = Campaign.query.filter_by(name=COURSE_FEES_CAMPAIGN_NAME).first()
     if campaign is None and create:
         campaign = Campaign(
             name=COURSE_FEES_CAMPAIGN_NAME,
             description="Course fees and study contributions (Bhakti Shastri, Bhakti Vaibhav, etc.).",
             is_80g=False,
+            suppress_receipt=False,
         )
         db.session.add(campaign)
+        db.session.commit()
+    elif campaign is not None and create and (campaign.is_80g or campaign.suppress_receipt):
+        campaign.is_80g = False
+        campaign.suppress_receipt = False
         db.session.commit()
     return campaign
 
@@ -9331,19 +9344,22 @@ def _course_report_filters(campaign=None):
 
 
 def _course_totals(query):
-    """Aggregate count and total per course for the filtered query."""
+    """Aggregate count and total per course for the filtered query.
+    Groups directly by Course.name (not func.coalesce) so PostgreSQL doesn't
+    see two separate bind parameters between SELECT and GROUP BY."""
+    total_expr = func.coalesce(func.sum(Donation.amount), 0).label("total_amount")
     rows = (
         query.outerjoin(Course, Donation.course_id == Course.id)
         .with_entities(
-            func.coalesce(Course.name, "Unspecified Course"),
+            Course.name,
             func.count(Donation.id),
-            func.coalesce(func.sum(Donation.amount), 0),
+            total_expr,
         )
-        .group_by(func.coalesce(Course.name, "Unspecified Course"))
-        .order_by(func.coalesce(func.sum(Donation.amount), 0).desc())
+        .group_by(Course.name)
+        .order_by(total_expr.desc())
         .all()
     )
-    return [(name, int(count), float(total)) for name, count, total in rows]
+    return [(name or "Unspecified Course", int(count), float(total)) for name, count, total in rows]
 
 
 def _course_monthly_totals(query):

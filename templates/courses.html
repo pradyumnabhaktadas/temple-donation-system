@@ -52,9 +52,16 @@
             <input type="tel" class="form-control" name="phone" id="phone" required
                    maxlength="20" pattern="[6-9][0-9]{9}|\+[1-9][0-9]{7,14}" inputmode="tel" title="10-digit Indian mobile number, or + and country code for numbers outside India">
           </div>
-          <div class="col-md-6 mb-0">
-            <label class="form-label" for="email">Email <span class="text-muted">(optional -- your receipt will be sent here)</span></label>
-            <input type="email" class="form-control" name="email" id="email">
+          <div class="col-md-6 mb-3">
+            <label class="form-label" for="whatsapp_number">WhatsApp Number <span class="text-muted">(if different from phone)</span></label>
+            <input type="tel" class="form-control" name="whatsapp_number" id="whatsapp_number">
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="col-md-12 mb-0">
+            <label class="form-label" for="email">Email address <span class="text-muted">(your receipt will be sent here)</span></label>
+            <input type="email" class="form-control" name="email" id="email" required>
           </div>
         </div>
       </div>
@@ -65,15 +72,15 @@
         <div id="amount-in-words" class="field-note text-muted mt-1" style="display:none; font-style: italic;"></div>
       </div>
 
-      <div class="form-section" id="pan-address-fields" {% if not campaign.is_80g %}style="display:none;"{% endif %}>
-        <p class="field-note text-muted mb-2" id="high-value-note" {% if campaign.is_80g %}style="display:none;"{% endif %}>
+      <div class="form-section" id="pan-address-fields" style="display:none;">
+        <p class="field-note text-muted mb-2" id="high-value-note">
           PAN and address are mandatory for contributions above Rs. 49,000, per Income Tax rules.
         </p>
         <div class="row mb-0">
           <div class="col-md-6 mb-3">
-            <label class="form-label" for="pan">PAN{% if campaign.is_80g %} <span class="text-muted">(required for 80G receipt)</span>{% endif %}</label>
+            <label class="form-label" for="pan">PAN</label>
             <input type="text" class="form-control" name="pan" id="pan" style="text-transform:uppercase" maxlength="10"
-                   pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10 characters, e.g. ABCDE1234F" {% if campaign.is_80g %}required{% endif %}>
+                   pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10 characters, e.g. ABCDE1234F">
           </div>
         </div>
         <div class="mb-0">
@@ -98,7 +105,7 @@
       <button type="submit" class="btn btn-gold donation-submit w-100" id="pay-btn" {% if not courses %}disabled{% endif %}>
         {% if razorpay_enabled %}<span>Continue to secure payment</span><span>→</span>{% else %}<span>Simulate payment success</span><span>→</span>{% endif %}
       </button>
-      <p class="donation-reassurance">Your payment is handled securely. A receipt is generated after successful payment.</p>
+      <p class="donation-reassurance">Your payment is handled securely. A Non-80G receipt is generated after payment and sent to your Email and WhatsApp.</p>
       <p class="donation-reassurance" id="status-note" style="display:none;"></p>
     </form>
   </div>
