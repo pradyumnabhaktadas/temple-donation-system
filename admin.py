@@ -9279,20 +9279,13 @@ def _normalize_course_name(value):
 
 def _course_report_filters(campaign=None):
     """Resolve the course/mode/search/date filters shared by the Courses
-    Collections Dashboard and its CSV exports."""
-    if campaign is None:
-        campaign = _course_fees_campaign(create=False)
-
-    if campaign is not None:
-        query = Donation.query.filter(
-            or_(Donation.course_id.isnot(None), Donation.campaign_id == campaign.id),
-            Donation.status == "success",
-        )
-    else:
-        query = Donation.query.filter(
-            Donation.course_id.isnot(None),
-            Donation.status == "success",
-        )
+    Collections Dashboard and its CSV exports.
+    Strictly includes only donations linked to a Course (i.e. collected via the
+    /courses form or recorded with a course selected)."""
+    query = Donation.query.filter(
+        Donation.course_id.isnot(None),
+        Donation.status == "success",
+    )
 
     course_id = request.args.get("course_id", type=int)
     if course_id:
@@ -9344,12 +9337,10 @@ def _course_report_filters(campaign=None):
 
 
 def _course_totals(query):
-    """Aggregate count and total per course for the filtered query.
-    Groups directly by Course.name (not func.coalesce) so PostgreSQL doesn't
-    see two separate bind parameters between SELECT and GROUP BY."""
+    """Aggregate count and total per course for the filtered query."""
     total_expr = func.coalesce(func.sum(Donation.amount), 0).label("total_amount")
     rows = (
-        query.outerjoin(Course, Donation.course_id == Course.id)
+        query.join(Course, Donation.course_id == Course.id)
         .with_entities(
             Course.name,
             func.count(Donation.id),
@@ -9359,7 +9350,7 @@ def _course_totals(query):
         .order_by(total_expr.desc())
         .all()
     )
-    return [(name or "Unspecified Course", int(count), float(total)) for name, count, total in rows]
+    return [(name, int(count), float(total)) for name, count, total in rows]
 
 
 def _course_monthly_totals(query):
