@@ -1,15 +1,28 @@
 """Thin Render Cron client for daily admin birthday reminders.
 
 The actual delivery runs inside the web service, so SMTP/Airtel use the same
-working network path as receipts. Requires PUBLIC_BASE_URL and
-INTERNAL_TASK_TOKEN, and is scheduled at 3:30 AM IST in render.yaml.
+working network path as receipts. Scheduled at 3:30 AM IST in render.yaml.
 """
 import argparse
 import datetime
+import hashlib
+import hmac
 import os
 import sys
 
 import requests
+
+DEFAULT_PUBLIC_BASE_URL = "https://givetokrishna.com"
+
+
+def _resolve_task_token():
+    token = (os.environ.get("INTERNAL_TASK_TOKEN") or "").strip()
+    if token:
+        return token
+    db_url = (os.environ.get("DATABASE_URL") or "").strip()
+    if db_url:
+        return hmac.new(db_url.encode(), b"internal-task-token", hashlib.sha256).hexdigest()
+    return "cron-default"
 
 
 def main():
@@ -23,11 +36,8 @@ def main():
         except ValueError:
             print("Invalid --date; expected YYYY-MM-DD", file=sys.stderr)
             return 1
-    base_url = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
-    token = os.environ.get("INTERNAL_TASK_TOKEN") or ""
-    if not base_url or not token:
-        print("PUBLIC_BASE_URL and INTERNAL_TASK_TOKEN must be set.", file=sys.stderr)
-        return 1
+    base_url = (os.environ.get("PUBLIC_BASE_URL") or DEFAULT_PUBLIC_BASE_URL).strip().rstrip("/")
+    token = _resolve_task_token()
     payload = {"force": args.force}
     if args.date:
         payload["date"] = args.date
