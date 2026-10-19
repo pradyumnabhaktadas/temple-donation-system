@@ -31,10 +31,11 @@ CAMPAIGNS = [
     ("Retreats and Event Registrations", False, None, False),
     ("Course Fees", False, None, False),
     ("Other Internal Collections", False, None, False),
-    # is_80g here is just the campaign's default -- the Live To Give form
-    # lets each donor pick 80G/Non-80G per donation, which overrides this
-    # (see Donation.effective_is_80g).
+    # is_80g here is just the campaign's default -- the Live To Give and
+    # Preaching Center forms let each donor pick 80G/Non-80G per donation,
+    # which overrides this (see Donation.effective_is_80g).
     ("Live To Give", True, 101, False),
+    ("Preaching Center", True, 101, False),
     # Deliberately not linked from anywhere in the main site -- only
     # reachable via the small footer link (see base.html). A receipt is
     # generated for these same as any other donation, just never emailed

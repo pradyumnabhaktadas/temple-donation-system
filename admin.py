@@ -37,6 +37,7 @@ from preaching_center_stats import (
 from public import (
     find_or_create_donor, _org_cfg, high_value_pan_address_error, _finalize_success,
     _send_receipt_notifications_background, _send_cancellation_notifications_background,
+    _preaching_center_campaign,
 )
 from backup_utils import build_backup_zip, run_backup, restore_backup_zip
 import bace_tracker
@@ -2384,6 +2385,7 @@ def _offline_donation_form_context():
     manual_donation() and bulk_import_donations() since both routes can
     render the merged offline_donation.html page (Single Entry + Bulk
     Upload live on one page/one nav tab now)."""
+    _preaching_center_campaign(create=True)
     return {
         "campaigns": Campaign.query.filter_by(is_active=True).order_by(Campaign.name).all(),
         "bace_properties": BaceProperty.query.filter_by(is_active=True).order_by(BaceProperty.name).all(),
@@ -2482,6 +2484,11 @@ def reassign_donation_campaign(donation_id):
         if new_campaign.name == "Course Fees" and not course_id:
             flash("Please choose which course this payment is for.")
             return redirect(url_for("admin.reassign_donation_campaign", donation_id=donation_id))
+        if new_campaign.name == "Preaching Center" and not preaching_center_id:
+            flash("Please choose which preaching center this donation is for.")
+            return redirect(url_for("admin.reassign_donation_campaign", donation_id=donation_id))
+        if preaching_center_id and new_campaign.name == "Live To Give":
+            new_campaign = _preaching_center_campaign(create=True)
 
         receipt_type = request.form.get("receipt_type")
         if receipt_type == "80g":
@@ -2491,9 +2498,11 @@ def reassign_donation_campaign(donation_id):
         else:
             is_80g_requested = None
 
+        has_purpose_and_receipt_type = new_campaign.name in ("Live To Give", "Preaching Center")
+
         # Same hard rule manual_donation enforces -- a purpose's own 80G
         # eligibility can't be overridden by picking "80g" here.
-        if new_campaign.name == "Live To Give" and live_to_give_purpose_id and is_80g_requested:
+        if has_purpose_and_receipt_type and live_to_give_purpose_id and is_80g_requested:
             purpose = LiveToGivePurpose.query.get(live_to_give_purpose_id)
             if purpose and not purpose.is_80g:
                 flash(
@@ -2523,12 +2532,12 @@ def reassign_donation_campaign(donation_id):
         donation.festival_id = festival_id if new_campaign.name == "Festivals" else None
         donation.seva_type_id = seva_type_id if new_campaign.name == "Festivals" else None
         donation.live_to_give_purpose_id = (
-            live_to_give_purpose_id if new_campaign.name == "Live To Give" else None
+            live_to_give_purpose_id if has_purpose_and_receipt_type else None
         )
         donation.course_id = (
             course_id if new_campaign.name == "Course Fees" else None
         )
-        donation.is_80g_requested = is_80g_requested if new_campaign.name == "Live To Give" else None
+        donation.is_80g_requested = is_80g_requested if has_purpose_and_receipt_type else None
         center = PreachingCenter.query.get(preaching_center_id) if preaching_center_id else None
         donation.preaching_center_id = center.id if center else None
         donation.preaching_center_name = center.name if center else None
@@ -2941,6 +2950,8 @@ def _create_offline_donation(
     try:
         donor = find_or_create_donor(_sanitize_donor_data(donor_data))
         center = PreachingCenter.query.get(preaching_center_id) if preaching_center_id else None
+        if center is not None:
+            campaign = _preaching_center_campaign(create=True)
 
         donation = Donation(
             donor_id=donor.id,
@@ -3002,6 +3013,7 @@ def _create_offline_donation(
         pdf_bytes = generate_receipt_pdf(donation, donor, campaign, _org_cfg())
         donation.receipt_pdf = pdf_bytes
         db.session.commit()
+        db.session.expire(donation, ["receipt_pdf"])
     except Exception:
         db.session.rollback()
         current_app.logger.exception(
@@ -3054,68 +3066,81 @@ def _create_offline_donation(
 def manual_donation():
     if request.method == "POST":
         form = request.form
+        raw_pc_id = form.get("preaching_center_id", type=int)
+
+        def _back():
+            if raw_pc_id:
+                return redirect(url_for("admin.manual_donation", preaching_center_id=raw_pc_id))
+            return redirect(url_for("admin.manual_donation"))
 
         try:
             campaign_id = int(form["campaign_id"])
             amount = float(form["amount"])
         except (KeyError, TypeError, ValueError):
             flash("Please choose a campaign and enter a valid amount.")
-            return redirect(url_for("admin.manual_donation"))
+            return _back()
         campaign = Campaign.query.get_or_404(campaign_id)
 
         pan = (form.get("pan") or "").strip()
         if pan and not is_valid_pan(pan):
             flash("That PAN doesn't look right. It should be 10 characters like ABCDE1234F.")
-            return redirect(url_for("admin.manual_donation"))
+            return _back()
 
         if not is_valid_phone(form.get("phone")):
             flash("That phone number doesn't look right. Please enter a 10-digit mobile number, or a foreign number starting with + and country code.")
-            return redirect(url_for("admin.manual_donation"))
+            return _back()
         if not is_valid_phone(form.get("whatsapp_number")):
             flash("That WhatsApp number doesn't look right. Please enter a 10-digit mobile number, or a foreign number starting with + and country code.")
-            return redirect(url_for("admin.manual_donation"))
+            return _back()
 
         high_value_error = high_value_pan_address_error(amount, pan, form.get("address"))
         if high_value_error:
             flash(high_value_error)
-            return redirect(url_for("admin.manual_donation"))
+            return _back()
 
         bace_property_id, error = _validated_id_from_form(form, "bace_property_id", BaceProperty, "BACE property")
         if error:
             flash(error)
-            return redirect(url_for("admin.manual_donation"))
+            return _back()
         festival_id, error = _validated_id_from_form(form, "festival_id", Festival, "festival")
         if error:
             flash(error)
-            return redirect(url_for("admin.manual_donation"))
+            return _back()
         seva_type_id, error = _validated_id_from_form(form, "seva_type_id", SevaType, "seva type")
         if error:
             flash(error)
-            return redirect(url_for("admin.manual_donation"))
+            return _back()
         live_to_give_purpose_id, error = _validated_id_from_form(
             form, "live_to_give_purpose_id", LiveToGivePurpose, "donation purpose"
         )
         if error:
             flash(error)
-            return redirect(url_for("admin.manual_donation"))
+            return _back()
         course_id, error = _validated_id_from_form(
             form, "course_id", Course, "course"
         )
         if error:
             flash(error)
-            return redirect(url_for("admin.manual_donation"))
+            return _back()
         associated_with_id, error = _validated_id_from_form(
             form, "associated_with_id", AssociatedWith, "associated-with option"
         )
         if error:
             flash(error)
-            return redirect(url_for("admin.manual_donation"))
+            return _back()
         preaching_center_id, error = _validated_id_from_form(
             form, "preaching_center_id", PreachingCenter, "preaching center"
         )
         if error:
             flash(error)
-            return redirect(url_for("admin.manual_donation"))
+            return _back()
+
+        if campaign.name == "Preaching Center" and not preaching_center_id:
+            flash("Please choose which preaching center this donation is for.")
+            return _back()
+
+        if preaching_center_id:
+            campaign = _preaching_center_campaign(create=True)
 
         receipt_type = form.get("receipt_type")
         if receipt_type == "80g":
@@ -3134,7 +3159,7 @@ def manual_donation():
             purpose = LiveToGivePurpose.query.get(live_to_give_purpose_id)
             if purpose and not purpose.is_80g:
                 flash(f"'{purpose.name}' isn't 80G-eligible -- select \"No\" for the 80G receipt question, or a different purpose.")
-                return redirect(url_for("admin.manual_donation"))
+                return _back()
 
         # Offline payment reference details. Still captured whichever mode
         # is selected -- a cheque number typed in and then the mode changed
@@ -3155,7 +3180,7 @@ def manual_donation():
             )
         except ValueError:
             flash("That donation date doesn't look right.")
-            return redirect(url_for("admin.manual_donation"))
+            return _back()
 
         result = _create_offline_donation(
             donor_data=form,
@@ -3179,7 +3204,7 @@ def manual_donation():
         )
         if not result["ok"]:
             flash(result["error"], "danger")
-            return redirect(url_for("admin.manual_donation"))
+            return _back()
 
         if result["receipt_number"] is None:
             # Defensive fallback only -- _create_offline_donation always

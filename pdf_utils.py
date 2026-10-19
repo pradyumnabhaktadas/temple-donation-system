@@ -591,10 +591,10 @@ def generate_receipt_pdf(donation, donor, campaign, org_cfg):
         # Course registrations / donations always print "Education and Training"
         # as the Purpose of Donation on the receipt.
         purpose_text = "Education and Training"
-    elif campaign.name == "Live To Give" and getattr(donation, "live_to_give_purpose", None):
-        # Live To Give receipts show the specific purpose the donor picked
-        # (e.g. "Cow Protection", "Temple Construction") in place of the
-        # campaign name.
+    elif campaign.name in ("Live To Give", "Preaching Center") and getattr(donation, "live_to_give_purpose", None):
+        # Live To Give and Preaching Center receipts show the specific purpose
+        # the donor picked (e.g. "Cow Protection", "Temple Construction") in
+        # place of the campaign name.
         purpose_text = donation.live_to_give_purpose.name
     else:
         # For Festival Seva, show which occasion (and seva tier) this

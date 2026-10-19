@@ -124,10 +124,11 @@
   function sync() {
     const selected = campaignSelect.options[campaignSelect.selectedIndex];
     const name = selected ? selected.dataset.name : '';
+    const hasPurposeAndReceiptType = name === 'Live To Give' || name === 'Preaching Center';
     baceField.style.display = name === 'BACE Contribution' ? '' : 'none';
     festivalFields.style.display = name === 'Festivals' ? '' : 'none';
-    liveToGivePurposeField.style.display = name === 'Live To Give' ? '' : 'none';
-    liveToGiveReceiptTypeField.style.display = name === 'Live To Give' ? '' : 'none';
+    liveToGivePurposeField.style.display = hasPurposeAndReceiptType ? '' : 'none';
+    liveToGiveReceiptTypeField.style.display = hasPurposeAndReceiptType ? '' : 'none';
     if (courseField) courseField.style.display = name === 'Course Fees' ? '' : 'none';
   }
 

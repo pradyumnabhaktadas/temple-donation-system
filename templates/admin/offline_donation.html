@@ -67,13 +67,13 @@
       <label class="form-label" for="campaign_id">Campaign / Purpose</label>
       <select class="form-select" name="campaign_id" id="campaign_id" required>
         {% for c in campaigns %}
-        <option value="{{ c.id }}" data-name="{{ c.name }}" {% if selected_preaching_center_id and c.name == 'Live To Give' %}selected{% endif %}>{{ c.name }} {% if not c.is_80g %}(Non-80G){% endif %}</option>
+        <option value="{{ c.id }}" data-name="{{ c.name }}" {% if selected_preaching_center_id and c.name == 'Preaching Center' %}selected{% endif %}>{{ c.name }} {% if not c.is_80g %}(Non-80G){% endif %}</option>
         {% endfor %}
       </select>
     </div>
 
-    <div class="mb-3">
-      <label class="form-label" for="preaching_center_id">Preaching Center <span class="text-muted">(optional)</span></label>
+    <div class="mb-3" id="preaching-center-field">
+      <label class="form-label" for="preaching_center_id">Preaching Center <span class="text-muted" id="preaching-center-optional-label">(optional)</span></label>
       <select class="form-select" name="preaching_center_id" id="preaching_center_id">
         <option value="">-- Main Temple / Not a Preaching Center --</option>
         {% for center in preaching_centers %}
@@ -389,6 +389,8 @@
   const liveToGiveReceiptTypeField = document.getElementById('live-to-give-receipt-type-field');
   const courseField = document.getElementById('course-field');
   const courseSelect = document.getElementById('course_id');
+  const preachingCenterSelect = document.getElementById('preaching_center_id');
+  const preachingCenterOptionalLabel = document.getElementById('preaching-center-optional-label');
   const paymentModeSelect = document.getElementById('payment_mode');
   const chequeFields = document.getElementById('cheque-fields');
   const chequeNumberInput = document.getElementById('cheque_number');
@@ -427,6 +429,14 @@
     const selected = campaignSelect.options[campaignSelect.selectedIndex];
     const name = selected ? selected.dataset.name : '';
 
+    const isPreachingCenter = name === 'Preaching Center';
+    if (preachingCenterSelect) {
+      preachingCenterSelect.required = isPreachingCenter;
+      if (preachingCenterOptionalLabel) {
+        preachingCenterOptionalLabel.style.display = isPreachingCenter ? 'none' : '';
+      }
+    }
+
     const isBaceContribution = name === 'BACE Contribution';
     baceField.style.display = isBaceContribution ? '' : 'none';
     baceSelect.required = isBaceContribution;
@@ -438,10 +448,11 @@
     if (!isFestival) festivalSelect.value = '';
 
     const isLiveToGive = name === 'Live To Give';
-    liveToGivePurposeField.style.display = isLiveToGive ? '' : 'none';
-    liveToGiveReceiptTypeField.style.display = isLiveToGive ? '' : 'none';
+    const hasPurposeAndReceiptType = isLiveToGive || isPreachingCenter;
+    liveToGivePurposeField.style.display = hasPurposeAndReceiptType ? '' : 'none';
+    liveToGiveReceiptTypeField.style.display = hasPurposeAndReceiptType ? '' : 'none';
     liveToGivePurposeSelect.required = isLiveToGive;
-    if (!isLiveToGive) liveToGivePurposeSelect.value = '';
+    if (!hasPurposeAndReceiptType) liveToGivePurposeSelect.value = '';
 
     const isCourseFees = name === 'Course Fees';
     if (courseField && courseSelect) {
@@ -449,6 +460,20 @@
       courseSelect.required = isCourseFees;
       if (!isCourseFees) courseSelect.value = '';
     }
+  }
+
+  if (preachingCenterSelect) {
+    preachingCenterSelect.addEventListener('change', function () {
+      if (preachingCenterSelect.value) {
+        for (let i = 0; i < campaignSelect.options.length; i++) {
+          if (campaignSelect.options[i].dataset.name === 'Preaching Center') {
+            campaignSelect.selectedIndex = i;
+            break;
+          }
+        }
+        syncConditionalFields();
+      }
+    });
   }
 
   campaignSelect.addEventListener('change', syncConditionalFields);

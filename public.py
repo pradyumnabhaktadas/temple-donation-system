@@ -340,13 +340,35 @@ def donate_form():
     )
 
 
+def _preaching_center_campaign(create=True):
+    """Returns the dedicated 'Preaching Center' campaign, creating it if
+    it does not yet exist on an existing database."""
+    campaign = Campaign.query.filter_by(name="Preaching Center").first()
+    if campaign is None and create:
+        campaign = Campaign(
+            name="Preaching Center",
+            is_80g=True,
+            min_amount=101,
+            suppress_receipt=False,
+            is_active=True,
+        )
+        db.session.add(campaign)
+        db.session.commit()
+    return campaign
+
+
 @bp.route("/pc/<slug>")
 def preaching_center_donate_form(slug):
     """Public, QR-safe collection link for one active preaching center."""
     center = PreachingCenter.query.filter_by(slug=(slug or "").lower(), is_active=True).first()
     if center is None:
         return render_template("preaching_center_unavailable.html"), 404
-    campaign = Campaign.query.filter_by(name="Live To Give", is_active=True).first()
+    pc_campaign = _preaching_center_campaign(create=True)
+    campaign = pc_campaign if (pc_campaign and pc_campaign.is_active) else None
+    if campaign is None:
+        ltg_campaign = Campaign.query.filter_by(name="Live To Give", is_active=True).first()
+        if ltg_campaign is None:
+            campaign = None
     purposes = (LiveToGivePurpose.query.join(
         PreachingCenterPurpose,
         PreachingCenterPurpose.live_to_give_purpose_id == LiveToGivePurpose.id,
@@ -642,16 +664,20 @@ def create_order():
             return jsonify({"error": "This preaching center collection link is no longer available."}), 400
         # Center links deliberately do not collect an Associated With value.
         associated_with_id = None
-        # A center link is a Live To Give form. Without this check a request
-        # could attach a center slug to any campaign (BACE rent, Annadan...)
-        # and inflate that center's totals with money meant for something else.
-        if campaign.name != "Live To Give":
-            return jsonify({"error": "This collection link only accepts Live To Give contributions."}), 400
+        # A center link records under the Preaching Center campaign (also
+        # accepting Live To Give as the submitted campaign_id for backwards
+        # compatibility with older pages/tests). Without this check a request
+        # could attach a center slug to an unrelated campaign (BACE rent,
+        # Annadan...) and inflate that center's totals with money meant for
+        # something else.
+        if campaign.name not in ("Preaching Center", "Live To Give"):
+            return jsonify({"error": "This collection link only accepts Preaching Center / Live To Give contributions."}), 400
         if not live_to_give_purpose_id or not PreachingCenterPurpose.query.filter_by(
             preaching_center_id=preaching_center.id,
             live_to_give_purpose_id=live_to_give_purpose_id,
         ).first():
             return jsonify({"error": "Please select a donation purpose available for this preaching center."}), 400
+        campaign = _preaching_center_campaign(create=True)
 
     bace_student_id = None
     if data.get("bace_student_token") or data.get("bace_student_id"):
@@ -924,13 +950,29 @@ def _send_receipt_notifications_background(app, donation_id, pdf_bytes):
     failing (or not being configured) never blocks the other."""
     with app.app_context():
         donation = Donation.query.get(donation_id)
-        if donation is not None:
+        donor = donation.donor if donation is not None else None
+        if donation is not None and donor is not None:
+            # Touch scalar attributes and release the DB connection before
+            # slow SMTP / WhatsApp HTTP calls so background threads never
+            # hold pool connections open during network I/O.
+            _ = (
+                donation.id,
+                donation.receipt_number,
+                donation.amount,
+                donor.email,
+                donor.full_name,
+                donor.whatsapp_number,
+                donor.phone,
+            )
+            org_cfg = _org_cfg()
+            db.session.expunge_all()
+            db.session.remove()
             try:
-                send_receipt_email(donation, donation.donor, _org_cfg(), pdf_bytes)
+                send_receipt_email(donation, donor, org_cfg, pdf_bytes)
             except Exception:
                 app.logger.exception("Background receipt email failed for donation %s", donation_id)
             try:
-                send_receipt_whatsapp(donation, donation.donor, _org_cfg(), pdf_bytes)
+                send_receipt_whatsapp(donation, donor, org_cfg, pdf_bytes)
             except Exception:
                 app.logger.exception("Background receipt WhatsApp send failed for donation %s", donation_id)
 
@@ -947,17 +989,31 @@ def _send_cancellation_notifications_background(app, donation_id):
     """
     with app.app_context():
         donation = Donation.query.get(donation_id)
-        if donation is not None and donation.status == "cancelled":
+        donor = donation.donor if donation is not None else None
+        if donation is not None and donor is not None and donation.status == "cancelled":
+            reason = donation.cancellation_reason or ""
+            _ = (
+                donation.id,
+                donation.receipt_number,
+                donation.amount,
+                donor.email,
+                donor.full_name,
+                donor.whatsapp_number,
+                donor.phone,
+            )
+            org_cfg = _org_cfg()
+            db.session.expunge_all()
+            db.session.remove()
             try:
                 send_cancellation_email(
-                    donation, donation.donor, _org_cfg(), donation.cancellation_reason or ""
+                    donation, donor, org_cfg, reason
                 )
             except Exception:
                 app.logger.exception(
                     "Background cancellation email failed for donation %s", donation_id
                 )
             try:
-                send_cancellation_whatsapp(donation, donation.donor, _org_cfg())
+                send_cancellation_whatsapp(donation, donor, org_cfg)
             except Exception:
                 app.logger.exception(
                     "Background cancellation WhatsApp send failed for donation %s", donation_id
