@@ -587,6 +587,10 @@ def generate_receipt_pdf(donation, donor, campaign, org_cfg):
         # regardless of which property the payment was for -- the property
         # itself isn't shown on the receipt's Purpose line.
         purpose_text = "BACE Contribution"
+    elif campaign.name == "Course Fees" or getattr(donation, "course_id", None) is not None:
+        # Course registrations / donations always print "Education and Training"
+        # as the Purpose of Donation on the receipt.
+        purpose_text = "Education and Training"
     elif campaign.name == "Live To Give" and getattr(donation, "live_to_give_purpose", None):
         # Live To Give receipts show the specific purpose the donor picked
         # (e.g. "Cow Protection", "Temple Construction") in place of the
