@@ -151,6 +151,111 @@ class TestPreachingCenterPublicCollection:
         assert b"collection link unavailable" in response.data.lower()
 
 
+class TestPreachingCenterOfflineCollection:
+    """The counter form must be as safe as the public center link."""
+
+    def test_offline_cash_donation_is_recorded_under_the_center_campaign(self, app, client):
+        from models import Campaign, Donation, LiveToGivePurpose, PreachingCenter
+        from public import _preaching_center_campaign
+
+        login(client)
+        _create_center(client)
+        center = PreachingCenter.query.one()
+        campaign = _preaching_center_campaign(create=True)
+        purpose = LiveToGivePurpose.query.filter_by(name="Deity Seva").one()
+
+        response = client.post("/admin/donations/manual", data={
+            "campaign_id": campaign.id,
+            "preaching_center_id": center.id,
+            "live_to_give_purpose_id": purpose.id,
+            "receipt_type": "non80g",
+            "amount": "501",
+            "payment_mode": "cash",
+            "donation_date": "2026-10-19",
+            "full_name": "Offline Center Donor",
+            "phone": "9876501144",
+        }, follow_redirects=False)
+
+        assert response.status_code == 302
+        donation = Donation.query.one()
+        assert donation.campaign_id == campaign.id
+        assert donation.preaching_center_id == center.id
+        assert donation.live_to_give_purpose_id == purpose.id
+        assert donation.effective_is_80g is False
+
+    def test_offline_form_groups_80g_and_non_80g_purposes(self, app, client):
+        from extensions import db
+        from models import LiveToGivePurpose
+
+        login(client)
+        db.session.add_all([
+            LiveToGivePurpose(name="Center 80G Seva", is_80g=True),
+            LiveToGivePurpose(name="Center Regular Seva", is_80g=False),
+        ])
+        db.session.commit()
+
+        response = client.get("/admin/donations/manual")
+        assert response.status_code == 200
+        assert b'<optgroup label="80G Eligible">' in response.data
+        assert b'<optgroup label="Non-80G">' in response.data
+        assert b"Center 80G Seva" in response.data
+        assert b"data-is80g=\"1\"" in response.data
+
+    def test_offline_center_donation_rejects_an_unassigned_purpose(self, app, client):
+        from extensions import db
+        from models import Campaign, Donation, LiveToGivePurpose, PreachingCenter
+        from public import _preaching_center_campaign
+
+        login(client)
+        _create_center(client)
+        center = PreachingCenter.query.one()
+        campaign = _preaching_center_campaign(create=True)
+        unrelated = LiveToGivePurpose(name="Not Available At This Center", is_80g=False)
+        db.session.add(unrelated)
+        db.session.commit()
+
+        response = client.post("/admin/donations/manual", data={
+            "campaign_id": campaign.id,
+            "preaching_center_id": center.id,
+            "live_to_give_purpose_id": unrelated.id,
+            "receipt_type": "non80g", "amount": "501", "payment_mode": "cash",
+            "donation_date": "2026-10-19", "full_name": "Center Donor", "phone": "9876501145",
+        }, follow_redirects=True)
+
+        assert response.status_code == 200
+        assert b"not available for the selected preaching center" in response.data
+        assert Donation.query.count() == 0
+
+    def test_offline_80g_center_donation_requires_pan(self, app, client):
+        from extensions import db
+        from models import Campaign, Donation, LiveToGivePurpose, PreachingCenter, PreachingCenterPurpose
+        from public import _preaching_center_campaign
+
+        login(client)
+        _create_center(client)
+        center = PreachingCenter.query.one()
+        campaign = _preaching_center_campaign(create=True)
+        eligible = LiveToGivePurpose(name="Eligible Center Seva", is_80g=True)
+        db.session.add(eligible)
+        db.session.flush()
+        db.session.add(PreachingCenterPurpose(
+            preaching_center_id=center.id, live_to_give_purpose_id=eligible.id,
+        ))
+        db.session.commit()
+
+        response = client.post("/admin/donations/manual", data={
+            "campaign_id": campaign.id,
+            "preaching_center_id": center.id,
+            "live_to_give_purpose_id": eligible.id,
+            "receipt_type": "80g", "amount": "501", "payment_mode": "cash",
+            "donation_date": "2026-10-19", "full_name": "80G Center Donor", "phone": "9876501146",
+        }, follow_redirects=True)
+
+        assert response.status_code == 200
+        assert b"PAN is required for an 80G receipt" in response.data
+        assert Donation.query.count() == 0
+
+
 class TestPreachingCenterReporting:
     def test_dashboard_shows_center_totals(self, app, client):
         from extensions import db

@@ -2386,6 +2386,9 @@ def _offline_donation_form_context():
     render the merged offline_donation.html page (Single Entry + Bulk
     Upload live on one page/one nav tab now)."""
     _preaching_center_campaign(create=True)
+    preaching_centers = PreachingCenter.query.order_by(
+        PreachingCenter.is_active.desc(), PreachingCenter.name
+    ).all()
     return {
         "campaigns": Campaign.query.filter_by(is_active=True).order_by(Campaign.name).all(),
         "bace_properties": BaceProperty.query.filter_by(is_active=True).order_by(BaceProperty.name).all(),
@@ -2395,7 +2398,14 @@ def _offline_donation_form_context():
         "courses": Course.query.filter_by(is_active=True).order_by(Course.name).all(),
         "associated_withs": AssociatedWith.query.filter_by(is_active=True)
             .order_by(AssociatedWith.display_order, AssociatedWith.name).all(),
-        "preaching_centers": PreachingCenter.query.order_by(PreachingCenter.is_active.desc(), PreachingCenter.name).all(),
+        "preaching_centers": preaching_centers,
+        # The counter form shares the global purpose catalogue, but a center
+        # may expose only a subset.  Send the mapping to the browser so an
+        # operator is never offered a purpose that the server must reject.
+        "preaching_center_purpose_ids": {
+            center.id: [link.live_to_give_purpose_id for link in center.purpose_links]
+            for center in preaching_centers
+        },
         "selected_preaching_center_id": request.args.get("preaching_center_id", type=int),
         # now_ist(), not datetime.date.today() -- see the same fix applied
         # throughout this file for "today"-as-server-clock bugs. This one
@@ -3135,11 +3145,29 @@ def manual_donation():
             flash(error)
             return _back()
 
+        center = PreachingCenter.query.get(preaching_center_id) if preaching_center_id else None
+        if center and not center.is_active:
+            flash("That preaching center is inactive and cannot receive a new donation.")
+            return _back()
+
         if campaign.name == "Preaching Center" and not preaching_center_id:
             flash("Please choose which preaching center this donation is for.")
             return _back()
 
-        if preaching_center_id:
+        if center and campaign.name not in ("Live To Give", "Preaching Center"):
+            flash("Preaching-center donations must use the Preaching Center campaign.")
+            return _back()
+
+        if center:
+            if not live_to_give_purpose_id:
+                flash("Please choose a donation purpose for this preaching center.")
+                return _back()
+            if not PreachingCenterPurpose.query.filter_by(
+                preaching_center_id=center.id,
+                live_to_give_purpose_id=live_to_give_purpose_id,
+            ).first():
+                flash("That purpose is not available for the selected preaching center.")
+                return _back()
             campaign = _preaching_center_campaign(create=True)
 
         receipt_type = form.get("receipt_type")
@@ -3150,6 +3178,12 @@ def manual_donation():
         else:
             is_80g_requested = None
 
+        # A center collection has a purpose with its own 80G eligibility.
+        # Do not fall back to the campaign default just because the counter
+        # operator leaves the radio buttons untouched.
+        if center and is_80g_requested is None:
+            is_80g_requested = False
+
         # Same hard rule as the public form -- a purpose's own 80G
         # eligibility (LiveToGivePurpose.is_80g) can't be overridden by
         # picking "80g" here. Donation.effective_is_80g would silently
@@ -3159,6 +3193,9 @@ def manual_donation():
             purpose = LiveToGivePurpose.query.get(live_to_give_purpose_id)
             if purpose and not purpose.is_80g:
                 flash(f"'{purpose.name}' isn't 80G-eligible -- select \"No\" for the 80G receipt question, or a different purpose.")
+                return _back()
+            if not pan:
+                flash("A PAN is required for an 80G receipt. Enter the donor's PAN, or select Non-80G.")
                 return _back()
 
         # Offline payment reference details. Still captured whichever mode
