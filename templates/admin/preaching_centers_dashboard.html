@@ -4,7 +4,12 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-2">
   <div><h3 class="mb-0">📊 Center Collection Dashboard</h3><p class="text-muted mb-0">Successful donations tagged to a preaching center. They are already included in overall temple totals.</p></div>
-  <a class="btn btn-outline-secondary" href="{{ url_for('admin.preaching_centers') }}">Manage centers</a>
+  <div class="d-flex gap-2">
+    {% if current_user.role != 'preaching_center_viewer' %}
+    <a class="btn btn-gold" href="{{ url_for('admin.manual_donation') }}">+ Log Offline Donation</a>
+    {% endif %}
+    <a class="btn btn-outline-secondary" href="{{ url_for('admin.preaching_centers') }}">Manage centers</a>
+  </div>
 </div>
 <div class="row g-3 my-2">
   <div class="col-6 col-md"><div class="card card-body shadow-sm"><small class="text-muted">Today</small><h4>{{ inr0(summary.today) }}</h4></div></div>
@@ -26,7 +31,7 @@
       <small class="text-muted">{{ inr0(p.pending) }} pending</small>{% else %}-{% endif %}</td>
     <td>{{ (s.last_donation | to_ist).strftime('%d %b %Y') if s.last_donation else '-' }}</td>
     <td>{% if row.center.is_active %}<span class="badge bg-success">Active</span>{% else %}<span class="badge bg-secondary">Inactive</span>{% endif %}</td>
-    <td><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.preaching_center_detail', center_id=row.center.id) }}">Details</a></td>
+    <td class="text-nowrap">{% if current_user.role != 'preaching_center_viewer' %}<a class="btn btn-sm btn-gold me-1" href="{{ url_for('admin.manual_donation', preaching_center_id=row.center.id) }}">+ Log Offline</a>{% endif %}<a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.preaching_center_detail', center_id=row.center.id) }}">Details</a></td>
   </tr>
   {% else %}<tr><td colspan="10" class="text-muted">No preaching centers have been created yet.</td></tr>{% endfor %}
   </tbody>

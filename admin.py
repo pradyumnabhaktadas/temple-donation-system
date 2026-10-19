@@ -2393,6 +2393,8 @@ def _offline_donation_form_context():
         "courses": Course.query.filter_by(is_active=True).order_by(Course.name).all(),
         "associated_withs": AssociatedWith.query.filter_by(is_active=True)
             .order_by(AssociatedWith.display_order, AssociatedWith.name).all(),
+        "preaching_centers": PreachingCenter.query.order_by(PreachingCenter.is_active.desc(), PreachingCenter.name).all(),
+        "selected_preaching_center_id": request.args.get("preaching_center_id", type=int),
         # now_ist(), not datetime.date.today() -- see the same fix applied
         # throughout this file for "today"-as-server-clock bugs. This one
         # only sets the Donation Date field's default value (staff can
@@ -2567,7 +2569,6 @@ def reassign_donation_campaign(donation_id):
 
     return render_template(
         "admin/reassign_campaign.html", donation=donation,
-        preaching_centers=PreachingCenter.query.order_by(PreachingCenter.name).all(),
         **_offline_donation_form_context(),
     )
 
@@ -2885,7 +2886,7 @@ def _payment_reference_error(payment_mode, cheque_number=None, bank_transaction_
 def _create_offline_donation(
     *, donor_data, campaign, amount, payment_mode, donation_date, recorded_by,
     bace_property_id=None, festival_id=None, seva_type_id=None, live_to_give_purpose_id=None,
-    course_id=None, associated_with_id=None,
+    course_id=None, associated_with_id=None, preaching_center_id=None,
     is_80g_requested=None, cheque_number=None, cheque_bank_name=None, bank_transaction_id=None,
     remarks=None, send_notifications=True, camp_name=None, batch_name=None,
 ):
@@ -2939,6 +2940,7 @@ def _create_offline_donation(
 
     try:
         donor = find_or_create_donor(_sanitize_donor_data(donor_data))
+        center = PreachingCenter.query.get(preaching_center_id) if preaching_center_id else None
 
         donation = Donation(
             donor_id=donor.id,
@@ -2953,6 +2955,8 @@ def _create_offline_donation(
             live_to_give_purpose_id=live_to_give_purpose_id,
             course_id=course_id,
             associated_with_id=associated_with_id,
+            preaching_center_id=center.id if center else None,
+            preaching_center_name=center.name if center else None,
             is_80g_requested=is_80g_requested,
             cheque_number=(cheque_number or "").strip()[:50] or None,
             cheque_bank_name=(cheque_bank_name or "").strip()[:150] or None,
@@ -3106,6 +3110,12 @@ def manual_donation():
         if error:
             flash(error)
             return redirect(url_for("admin.manual_donation"))
+        preaching_center_id, error = _validated_id_from_form(
+            form, "preaching_center_id", PreachingCenter, "preaching center"
+        )
+        if error:
+            flash(error)
+            return redirect(url_for("admin.manual_donation"))
 
         receipt_type = form.get("receipt_type")
         if receipt_type == "80g":
@@ -3160,6 +3170,7 @@ def manual_donation():
             live_to_give_purpose_id=live_to_give_purpose_id,
             course_id=course_id,
             associated_with_id=associated_with_id,
+            preaching_center_id=preaching_center_id,
             is_80g_requested=is_80g_requested,
             cheque_number=cheque_number,
             cheque_bank_name=cheque_bank_name,
@@ -3190,7 +3201,10 @@ def manual_donation():
                 f"Check the donor's record and regenerate the receipt if needed.", "warning",
             )
         if form.get("keep_open") == "1":
-            return redirect(url_for("admin.manual_donation", success_id=result["donation"].id))
+            redirect_kwargs = {"success_id": result["donation"].id}
+            if preaching_center_id:
+                redirect_kwargs["preaching_center_id"] = preaching_center_id
+            return redirect(url_for("admin.manual_donation", **redirect_kwargs))
         return redirect(url_for("admin.donor_detail", donor_id=result["donor"].id, just_recorded=result["donation"].id))
 
     active_tab = "bulk" if request.args.get("tab") == "bulk" else "single"
@@ -3215,7 +3229,7 @@ BULK_IMPORT_COLUMNS = [
     "campaign_name", "amount", "payment_mode", "donation_date",
     "cheque_number", "cheque_bank_name", "bank_transaction_id",
     "receipt_type", "bace_property_name", "festival_name", "seva_type_name", "live_to_give_purpose_name",
-    "associated_with_name",
+    "associated_with_name", "preaching_center_name",
     "remarks",
 ]
 BULK_IMPORT_DEMO_ROWS = [
@@ -3226,6 +3240,7 @@ BULK_IMPORT_DEMO_ROWS = [
         "donation_date": "2026-04-15", "cheque_number": "", "cheque_bank_name": "", "bank_transaction_id": "",
         "receipt_type": "", "bace_property_name": "", "festival_name": "", "seva_type_name": "",
         "live_to_give_purpose_name": "", "associated_with_name": "IYF Dwarka Temple Preaching",
+        "preaching_center_name": "",
         "remarks": "Monthly seva",
     },
     {
@@ -3235,6 +3250,7 @@ BULK_IMPORT_DEMO_ROWS = [
         "donation_date": "2026-04-20", "cheque_number": "123456", "cheque_bank_name": "HDFC Bank",
         "bank_transaction_id": "", "receipt_type": "", "bace_property_name": "", "festival_name": "",
         "seva_type_name": "", "live_to_give_purpose_name": "", "associated_with_name": "",
+        "preaching_center_name": "",
         "remarks": "",
     },
     {
@@ -3245,7 +3261,7 @@ BULK_IMPORT_DEMO_ROWS = [
         "bank_transaction_id": "UTR2026042212345", "receipt_type": "80g", "bace_property_name": "",
         "festival_name": "", "seva_type_name": "",
         "live_to_give_purpose_name": "Temple Construction (मंदिर निर्माण के लिए)",
-        "associated_with_name": "",
+        "associated_with_name": "", "preaching_center_name": "",
         "remarks": "",
     },
 ]
@@ -3683,6 +3699,7 @@ def bulk_import_donations():
     seva_by_name = {s.name.strip().lower(): s for s in SevaType.query.all()}
     purposes_by_name = {p.name.strip().lower(): p for p in LiveToGivePurpose.query.all()}
     associated_withs_by_name = {a.name.strip().lower(): a for a in AssociatedWith.query.all()}
+    preaching_centers_by_name = {c.name.strip().lower(): c for c in PreachingCenter.query.all()}
 
     results = []
     created = 0
@@ -3758,6 +3775,9 @@ def bulk_import_donations():
         associated_with_id = _lookup_by_name(
             associated_withs_by_name, row.get("associated_with_name"), "associated-with option", row_errors
         )
+        preaching_center_id = _lookup_by_name(
+            preaching_centers_by_name, row.get("preaching_center_name"), "preaching center", row_errors
+        )
 
         receipt_type = (row.get("receipt_type") or "").lower()
         if receipt_type == "80g":
@@ -3810,6 +3830,7 @@ def bulk_import_donations():
             seva_type_id=seva_type_id,
             live_to_give_purpose_id=live_to_give_purpose_id,
             associated_with_id=associated_with_id,
+            preaching_center_id=preaching_center_id,
             is_80g_requested=is_80g_requested,
             cheque_number=row.get("cheque_number"),
             cheque_bank_name=row.get("cheque_bank_name"),

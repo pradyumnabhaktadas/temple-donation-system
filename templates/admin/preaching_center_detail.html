@@ -10,6 +10,9 @@
     <p class="text-muted mb-0">Collection link: <a target="_blank" href="{{ center_public_url(center.slug) }}">{{ center_public_url(center.slug) }}</a></p>
   </div>
   <div class="d-flex gap-2 flex-wrap">
+    {% if current_user.role != 'preaching_center_viewer' %}
+    <a class="btn btn-sm btn-gold" href="{{ url_for('admin.manual_donation', preaching_center_id=center.id) }}">+ Log Offline Donation</a>
+    {% endif %}
     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.export_preaching_center', center_id=center.id, **request.args) }}">Download CSV</a>
     <a class="btn btn-sm btn-outline-secondary" target="_blank" href="{{ url_for('admin.preaching_center_qr', center_id=center.id) }}">QR image</a>
     <a class="btn btn-sm btn-outline-secondary" target="_blank" href="{{ url_for('admin.preaching_center_share_card', center_id=center.id) }}">Printable share card</a>

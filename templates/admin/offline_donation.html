@@ -67,9 +67,20 @@
       <label class="form-label" for="campaign_id">Campaign / Purpose</label>
       <select class="form-select" name="campaign_id" id="campaign_id" required>
         {% for c in campaigns %}
-        <option value="{{ c.id }}" data-name="{{ c.name }}">{{ c.name }} {% if not c.is_80g %}(Non-80G){% endif %}</option>
+        <option value="{{ c.id }}" data-name="{{ c.name }}" {% if selected_preaching_center_id and c.name == 'Live To Give' %}selected{% endif %}>{{ c.name }} {% if not c.is_80g %}(Non-80G){% endif %}</option>
         {% endfor %}
       </select>
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label" for="preaching_center_id">Preaching Center <span class="text-muted">(optional)</span></label>
+      <select class="form-select" name="preaching_center_id" id="preaching_center_id">
+        <option value="">-- Main Temple / Not a Preaching Center --</option>
+        {% for center in preaching_centers %}
+        <option value="{{ center.id }}" {% if selected_preaching_center_id == center.id %}selected{% endif %}>{{ center.name }}{% if center.city %} ({{ center.city }}){% endif %}{% if not center.is_active %} [Inactive]{% endif %}</option>
+        {% endfor %}
+      </select>
+      <div class="form-text">Select a preaching center to attribute this offline donation to that center's collection report.</div>
     </div>
 
     <div class="mb-3">
