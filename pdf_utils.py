@@ -570,15 +570,12 @@ def generate_receipt_pdf(donation, donor, campaign, org_cfg):
 
     _box(c, payment_box, fill=LAVENDER, stroke=PINK)
     _box_label_above(c, payment_box, "Payment Details (Cheque / Transaction Details)", size=9.5)
-    # reference_display already picks the right field for whichever
-    # payment_mode this donation actually used -- razorpay_payment_id for
-    # online, "Cheque #.../ (Bank)" for cheque, the UTR/transaction ID for
-    # bank transfer. This used to check razorpay_payment_id directly and
-    # nothing else, so cheque and bank-transfer donations always fell
-    # through to remarks (usually blank) and printed "-" here instead of
-    # the reference the donor/office actually needs to reconcile a
-    # cheque or bank transfer against.
-    _value_in_box(c, payment_box, donation.reference_display or donation.remarks or "-")
+    # `remarks` are internal office notes: they may contain follow-up or
+    # reconciliation details that must never be printed on a donor's
+    # receipt.  reference_display already picks the actual payment proof
+    # for the mode used (gateway ID, cheque number, or bank UTR).  Cash
+    # legitimately has no payment reference, so it prints "-".
+    _value_in_box(c, payment_box, donation.reference_display or "-")
 
     _box(c, purpose_box, fill=LAVENDER, stroke=PINK)
     _box_label_above(c, purpose_box, "Purpose of Donation (Corpus / General / Others)", size=9.5)

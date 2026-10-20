@@ -171,14 +171,18 @@ class TestTheOtherPaymentModesStillBehave:
         with app.app_context():
             assert Donation.query.one().reference_display == "Cheque #123456 (HDFC Bank)"
 
-    def test_cash_has_no_reference(self, app, client, campaign_id, monkeypatch):
+    def test_cash_has_no_reference_or_internal_remarks_on_the_receipt(self, app, client, campaign_id, monkeypatch):
         from models import Donation
         drawn = _receipt_field_values(monkeypatch)
         login(client)
-        _log_donation(client, campaign_id, payment_mode="cash", bank_transaction_id="")
+        _log_donation(
+            client, campaign_id, payment_mode="cash", bank_transaction_id="",
+            remarks="Internal follow-up: call after the festival",
+        )
         with app.app_context():
             assert Donation.query.one().reference_display is None
         assert drawn.get(PAYMENT_DETAILS_LABEL) == "-"
+        assert "Internal follow-up" not in drawn.values()
 
     def test_a_real_gateway_payment_id_wins(self, app, campaign_id):
         """An online donation paid through the site has the gateway's own
