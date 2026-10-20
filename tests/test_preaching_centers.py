@@ -201,6 +201,18 @@ class TestPreachingCenterOfflineCollection:
         assert b"Center 80G Seva" in response.data
         assert b"data-is80g=\"1\"" in response.data
 
+    def test_offline_form_render_is_read_only_for_preaching_center_campaign(self, app, client):
+        """Simply opening the counter form must not create or commit data."""
+        from models import Campaign
+
+        login(client)
+        assert Campaign.query.filter_by(name="Preaching Center").first() is None
+
+        response = client.get("/admin/donations/manual")
+
+        assert response.status_code == 200
+        assert Campaign.query.filter_by(name="Preaching Center").first() is None
+
     def test_offline_center_donation_rejects_an_unassigned_purpose(self, app, client):
         from extensions import db
         from models import Campaign, Donation, LiveToGivePurpose, PreachingCenter

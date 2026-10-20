@@ -32,7 +32,11 @@ bind = f"0.0.0.0:{os.environ.get('PORT', 8000)}"
 # such as receipt generation should not multiply their peak memory use.
 worker_class = "gthread"
 workers = int(os.environ.get("WEB_CONCURRENCY", 1))
-threads = int(os.environ.get("GUNICORN_THREADS", 2))
+# On the 512 MB production instance two simultaneous form/report/PDF
+# requests can double the peak RSS and make Render terminate the only worker,
+# which browsers surface as an intermittent dropped connection.  One request
+# is queued briefly instead of taking the whole service down.
+threads = int(os.environ.get("GUNICORN_THREADS", 1))
 timeout = int(os.environ.get("GUNICORN_TIMEOUT", 90))
 
 # Recycle workers periodically -- cheap insurance against slow memory growth

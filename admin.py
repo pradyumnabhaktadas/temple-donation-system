@@ -2385,10 +2385,23 @@ def _offline_donation_form_context():
     manual_donation() and bulk_import_donations() since both routes can
     render the merged offline_donation.html page (Single Entry + Bulk
     Upload live on one page/one nav tab now)."""
-    _preaching_center_campaign(create=True)
     preaching_centers = PreachingCenter.query.order_by(
         PreachingCenter.is_active.desc(), PreachingCenter.name
     ).all()
+    # Do not create/commit a campaign while rendering a GET request.  A
+    # normal form view must stay read-only: an avoidable database write here
+    # can block behind a receipt-counter transaction and leave the sole web
+    # worker unavailable.  Fetch every center-purpose link in one query as
+    # well, instead of asking the dynamic relationship once per center.
+    purpose_ids_by_center = defaultdict(list)
+    for center_id, purpose_id in db.session.query(
+        PreachingCenterPurpose.preaching_center_id,
+        PreachingCenterPurpose.live_to_give_purpose_id,
+    ).filter(
+        PreachingCenterPurpose.preaching_center_id.in_([center.id for center in preaching_centers])
+        if preaching_centers else False
+    ):
+        purpose_ids_by_center[center_id].append(purpose_id)
     return {
         "campaigns": Campaign.query.filter_by(is_active=True).order_by(Campaign.name).all(),
         "bace_properties": BaceProperty.query.filter_by(is_active=True).order_by(BaceProperty.name).all(),
@@ -2402,10 +2415,7 @@ def _offline_donation_form_context():
         # The counter form shares the global purpose catalogue, but a center
         # may expose only a subset.  Send the mapping to the browser so an
         # operator is never offered a purpose that the server must reject.
-        "preaching_center_purpose_ids": {
-            center.id: [link.live_to_give_purpose_id for link in center.purpose_links]
-            for center in preaching_centers
-        },
+        "preaching_center_purpose_ids": dict(purpose_ids_by_center),
         "selected_preaching_center_id": request.args.get("preaching_center_id", type=int),
         # now_ist(), not datetime.date.today() -- see the same fix applied
         # throughout this file for "today"-as-server-clock bugs. This one
@@ -2601,6 +2611,29 @@ def reassign_donation_campaign(donation_id):
 # client-side maxlength, and CSV import rows are entirely unvalidated
 # free text, so this is the actual line of defence, not a formality.
 _DONOR_FIELD_LIMITS = {"full_name": 200, "email": 200, "pan": 10, "address": 400, "city": 100, "state": 100, "pincode": 10}
+_MAX_DONATION_AMOUNT = Decimal("9999999999.99")  # Donation.amount is numeric(12,2)
+
+
+def _parse_donation_amount(raw, label="Amount"):
+    """Parse a monetary amount safely for every offline-entry path.
+
+    ``float`` accepts values such as ``NaN`` and ``Infinity``.  Those are
+    not amounts, but otherwise make it as far as receipt generation or a
+    PostgreSQL numeric conversion, where they can leave an operator with a
+    dropped request.  Use Decimal and enforce the actual database range
+    before any donor/receipt work begins.
+    """
+    try:
+        amount = Decimal(str(raw).strip())
+    except (InvalidOperation, ValueError):
+        return None, f"{label} must be a valid number."
+    if not amount.is_finite():
+        return None, f"{label} must be a valid number."
+    if amount <= 0:
+        return None, f"{label} must be greater than zero."
+    if amount > _MAX_DONATION_AMOUNT:
+        return None, f"{label} is too large."
+    return amount.quantize(Decimal("0.01")), None
 
 
 def _sanitize_donor_data(data):
@@ -2938,6 +2971,10 @@ def _create_offline_donation(
        "receipt_number": str, "pdf_ok": bool} -- stage 1 always
       succeeded if "ok" is True; "pdf_ok" says whether stages 2/3 did too.
     """
+    amount, amount_error = _parse_donation_amount(amount)
+    if amount_error:
+        return {"ok": False, "error": amount_error}
+
     reference_error = _payment_reference_error(payment_mode, cheque_number, bank_transaction_id)
     if reference_error:
         # Checked before find_or_create_donor, so a rejected row doesn't
@@ -3085,11 +3122,17 @@ def manual_donation():
 
         try:
             campaign_id = int(form["campaign_id"])
-            amount = float(form["amount"])
         except (KeyError, TypeError, ValueError):
             flash("Please choose a campaign and enter a valid amount.")
             return _back()
-        campaign = Campaign.query.get_or_404(campaign_id)
+        campaign = Campaign.query.get(campaign_id)
+        if campaign is None:
+            flash("That campaign no longer exists -- please choose another.")
+            return _back()
+        amount, amount_error = _parse_donation_amount(form.get("amount"))
+        if amount_error:
+            flash(amount_error)
+            return _back()
 
         pan = (form.get("pan") or "").strip()
         if pan and not is_valid_pan(pan):
