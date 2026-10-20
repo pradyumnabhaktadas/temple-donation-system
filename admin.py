@@ -7290,7 +7290,7 @@ def export_dhoti_kurta_contributions():
     )
 
 
-@bp.route("/festivals", methods=["GET", "POST"])
+@bp.route("/festivals", methods=["GET", "POST"], strict_slashes=False)
 @login_required
 def festivals():
     if request.method == "POST":
