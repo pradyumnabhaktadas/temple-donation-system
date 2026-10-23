@@ -77,14 +77,8 @@
 
       <div class="form-section">
         <div class="d-flex justify-content-between align-items-center"><label class="form-label amount-label mb-0" for="amount">Contribution Amount</label>{% if campaign and campaign.min_amount %}<span class="field-note">Minimum Rs. {{ campaign.min_amount | int }}</span>{% endif %}</div>
-        <div class="currency-input"><span>₹</span><input type="number" min="{{ campaign.min_amount | int if campaign and campaign.min_amount else 1 }}" step="1" class="form-control" name="amount" id="amount" placeholder="Or enter a custom amount" required></div>
+        <div class="currency-input"><span>₹</span><input type="number" min="{{ campaign.min_amount | int if campaign and campaign.min_amount else 1 }}" step="1" class="form-control" name="amount" id="amount" placeholder="Enter donation amount" required></div>
         <div id="amount-in-words" class="field-note text-muted mt-1" style="display:none; font-style: italic;"></div>
-        <div class="amount-picker" id="amount-picker" role="group" aria-label="Preset donation amounts">
-          <button type="button" class="amount-option" data-amount="501">₹501</button>
-          <button type="button" class="amount-option" data-amount="1001">₹1,001</button>
-          <button type="button" class="amount-option" data-amount="2501">₹2,501</button>
-          <button type="button" class="amount-option" data-amount="5001">₹5,001</button>
-        </div>
       </div>
 
       <div class="form-section">
@@ -331,12 +325,8 @@
   firstNameInput.addEventListener('input', syncFullName);
   lastNameInput.addEventListener('input', syncFullName);
 
-  // Preset amount chips fill the amount field and show which one is
-  // selected; typing a custom amount that doesn't match any chip just
-  // clears the highlight rather than fighting the donor's input.
   const amountInput = document.getElementById('amount');
   const amountWordsEl = document.getElementById('amount-in-words');
-  const amountOptions = document.querySelectorAll('#amount-picker .amount-option');
 
   function inrToWords(num) {
     let n = Math.floor(Number(num) || 0);
@@ -364,17 +354,7 @@
     amountWordsEl.style.display = words ? 'block' : 'none';
   }
 
-  amountOptions.forEach((btn) => {
-    btn.addEventListener('click', () => {
-      amountInput.value = btn.dataset.amount;
-      amountOptions.forEach((b) => b.classList.toggle('active', b === btn));
-      updateAmountWords();
-      updatePanAddressRequirement();
-      amountInput.focus();
-    });
-  });
   amountInput.addEventListener('input', () => {
-    amountOptions.forEach((b) => b.classList.toggle('active', b.dataset.amount === amountInput.value));
     updateAmountWords();
   });
 
